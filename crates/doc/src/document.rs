@@ -2477,6 +2477,10 @@ pub struct Document {
     pub name: String,
     #[serde(default = "default_units")]
     pub units: String,
+    /// What this design is: a part, an assembly, or a drawing. A design saved before kinds
+    /// existed has none and reads as an assembly (`DocumentKind::default`).
+    #[serde(default)]
+    pub kind: crate::DocumentKind,
     /// Design properties (project, author…) and other tools' data, kept as they are (#1015).
     #[serde(default, skip_serializing_if = "crate::Metadata::is_empty")]
     pub metadata: crate::Metadata,
@@ -2745,13 +2749,20 @@ impl Document {
         Ok(id)
     }
 
+    /// An empty design of the default kind (an assembly).
     pub fn new(name: &str) -> Self {
+        Self::new_with_kind(name, crate::DocumentKind::default())
+    }
+
+    /// An empty design of kind `kind`.
+    pub fn new_with_kind(name: &str, kind: crate::DocumentKind) -> Self {
         Document {
             render: Default::default(),
             format: default_format(),
             format_pending: crate::format::pending_names(),
             name: name.into(),
             units: default_units(),
+            kind,
             metadata: Default::default(),
             params: Vec::new(),
             features: Vec::new(),

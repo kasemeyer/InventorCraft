@@ -35,6 +35,8 @@ mod history_names;
 pub mod hole_reference;
 pub use format_offsets::whole_profile_selection_from_value;
 pub mod joints;
+pub mod kind;
+pub use kind::DocumentKind;
 mod lineage;
 pub mod metadata;
 pub use metadata::Metadata;
