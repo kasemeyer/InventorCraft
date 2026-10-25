@@ -62,7 +62,7 @@ pub static COMMANDS: &[CommandSpec] = &[
 fn new_doc(s: &mut Session, p: &Value) -> Result<Value> {
     // Parsed first, so a refused call leaves the design as it is.
     let kind = kind_param(p, "file.new")?;
-    Ok(start_design(s, str_(p, "name").unwrap_or("Untitled"), kind))
+    Ok(start_design(s, str_(p, "name").unwrap_or(DEFAULT_NAME), kind))
 }
 
 /// Replace the design with a new, empty one of `kind`. The kind goes into construction, so the
@@ -334,7 +334,7 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// The name a design never given one by its user is shown under.
-const DEFAULT_NAME: &str = "Untitled";
+pub(super) const DEFAULT_NAME: &str = "Untitled";
 
 /// A design still under the default name takes its file's name (`bracket.solidcraft` →
 /// "bracket"); a name the user chose is kept. `None` when nothing changes.

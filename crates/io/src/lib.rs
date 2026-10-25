@@ -53,7 +53,9 @@ use solidcraft_geom::{Mesh, Vec3};
 /// `file.save_as` give a path without an extension the document kind's own instead.
 pub const DESIGN_EXT: &str = "solidcraft";
 /// The design extension of earlier releases. Compatibility shim (docs/compatibility.md): such
-/// files still open everywhere a design opens; new designs are saved as [`DESIGN_EXT`].
+/// files still open everywhere a design opens. A new design is not given it: the engine saves a
+/// path without an extension under the document kind's own, and the UI's Save As still writes
+/// [`DESIGN_EXT`].
 pub const LEGACY_DESIGN_EXT: &str = "solvecraft";
 /// Every extension a design file may have: each kind's own, then the kind-less ones.
 pub const DESIGN_EXTS: [&str; 5] = {
@@ -67,7 +69,8 @@ pub fn kind_for_path(path: &str) -> Option<solidcraft_doc::DocumentKind> {
     solidcraft_doc::DocumentKind::from_extension(std::path::Path::new(path).extension()?.to_str()?)
 }
 
-/// Is this a design file name (`.solidcraft`, or the legacy extension), any case?
+/// Is this a design file name, any case: a document kind's extension (`.tcipart`, `.tciasm`,
+/// `.tcidrw`), the kind-less [`DESIGN_EXT`], the legacy [`LEGACY_DESIGN_EXT`], or `.json`?
 pub fn is_design_path(path: &str) -> bool {
     std::path::Path::new(path)
         .extension()

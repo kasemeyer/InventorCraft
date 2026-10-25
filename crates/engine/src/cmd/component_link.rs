@@ -42,7 +42,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("break")
         .params("component: id or name of a linked component — keeps its bodies as they are and forgets the design file"),
     CommandSpec::new("component.extract", "Extract to File", extract::extract).icon("export").enabled(super::document_kind::needs_assembly).params(
-        "component: id or name of a component that is not linked; path: the design file to write (.tcipart, .tciasm, .tcidrw or .solidcraft), whose kind its extension names → its history, subcomponents and their joints \
+        "component: id or name of a component that is not linked; path: the design file to write (.tcipart or .tciasm, or .solidcraft; not .tcidrw), whose kind its extension names (a component holding linked components needs .tciasm) → its history, subcomponents and their joints \
          move to that design, and the component becomes linked to it (as component.insert_design makes it); returns path, file, feature, bodies, \
          notices (what stays behind), warnings and copies (components that build the same bodies: see component.replace_with_link)",
     ),

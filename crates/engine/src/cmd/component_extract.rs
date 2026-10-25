@@ -561,6 +561,12 @@ pub(super) fn extract(s: &mut Session, p: &Value) -> Result<Value> {
     if solidcraft_io::kind_for_path(&file.to_string_lossy()) == Some(DocumentKind::Drawing) {
         return Err(bad(CMD, "a drawing cannot hold a solid design: extract to a part or an assembly"));
     }
+    if solidcraft_io::kind_for_path(&file.to_string_lossy()) == Some(DocumentKind::Part) && s.doc.links.keys().any(|c| sc.children.contains(c)) {
+        return Err(bad(
+            CMD,
+            format!("{} holds linked components, which a part cannot: extract a sub-assembly to a .{}", sc.name, DocumentKind::Assembly.extension()),
+        ));
+    }
     if s.path.as_deref().is_some_and(|own| absolute(Path::new(own)) == file) {
         return Err(bad(CMD, "choose another file than this design's own"));
     }

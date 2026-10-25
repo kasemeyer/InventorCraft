@@ -113,7 +113,7 @@ fn legacy_extension_is_written_as_given() {
     let mut s = Session::default();
     run(&mut s, "document.new_part", json!({"name": "old"}));
     run(&mut s, "file.save_as", json!({"path": dir.join("old.solidcraft")}));
-    assert!(dir.join("old.solidcraft").exists(), "pending ruling on S4's legacy clause");
+    assert!(dir.join("old.solidcraft").exists(), "a legacy extension is never rewritten");
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -226,6 +226,58 @@ fn extract_refuses_a_drawing_target() {
     assert!(err.to_string().contains("drawing cannot hold a solid design"), "{err}");
     assert!(!file.exists(), "nothing is written for a drawing target");
     assert!(s.doc.links.is_empty());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn extract_refuses_a_part_target_for_a_component_holding_links() {
+    let dir = folder("extract-links");
+    let leg = saved_leg(&dir);
+    let mut s = Session::default();
+    run(&mut s, "file.save", json!({"path": dir.join("porch")}));
+    let sub = run(&mut s, "component.create", json!({"name": "Frame"}))["component"].clone();
+    run(&mut s, "component.insert_design", json!({"path": leg, "parent": sub}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let links = s.doc.links.clone();
+    let file = dir.join("frame.tcipart");
+    let err = s.execute("component.extract", &json!({"component": "Frame", "path": file})).unwrap_err();
+    assert!(matches!(err, EngineError::BadParams { .. }), "{err}");
+    assert!(err.to_string().contains(".tciasm"), "{err}");
+    assert!(!file.exists(), "nothing is written for a part target");
+    assert_eq!(s.doc.links, links, "the design is unchanged");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_new_part_takes_its_file_name_on_save_as() {
+    let dir = folder("stem-name");
+    let path = dir.join("leg.tcipart");
+    let mut s = Session::default();
+    run(&mut s, "document.new_part", json!({}));
+    run(&mut s, "file.save_as", json!({"path": path}));
+    assert_eq!(s.doc.name, "leg");
+    let mut t = Session::default();
+    run(&mut t, "doc.open", json!({"path": path}));
+    assert_eq!(t.doc.name, "leg", "after reopen");
+    let mut a = Session::default();
+    run(&mut a, "document.new_assembly", json!({}));
+    run(&mut a, "file.save_as", json!({"path": dir.join("porch")}));
+    assert_eq!(a.doc.name, "porch");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn file_save_without_a_path_keeps_a_solidcraft_extension() {
+    let dir = folder("ctrl-s-legacy");
+    let path = dir.join("old.solidcraft");
+    saved_box_part(&path, 30);
+    let mut s = Session::default();
+    run(&mut s, "doc.open", json!({"path": path}));
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5}));
+    let out = run(&mut s, "file.save", json!({}));
+    assert_eq!(out["path"], &*path.to_string_lossy());
+    assert_eq!(s.path.as_deref(), Some(&*path.to_string_lossy()));
+    assert!(!dir.join("old.tcipart").exists(), "Ctrl+S on an old file does not rename it");
     let _ = std::fs::remove_dir_all(dir);
 }
 
