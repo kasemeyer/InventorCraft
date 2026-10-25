@@ -24,3 +24,13 @@ fn writing_a_project_file_asks_like_save_as() {
         assert!(matches!(exec("project.new", p), Verdict::Ask(_)), "project.new {path}");
     }
 }
+
+#[test]
+fn a_bare_typed_design_name_is_a_file_for_link_commands() {
+    for id in ["component.extract", "component.relink", "component.replace_with_link"] {
+        for path in ["x.tcipart", "x.TCIASM", "x.tcidrw", "job.tciproj"] {
+            assert!(matches!(exec(id, json!({"component": "Plate", "path": path})), Verdict::Ask(_)), "{id} {path}");
+        }
+    }
+    assert!(!matches!(exec("component.extract", json!({"component": "Plate", "path": "c1"})), Verdict::Ask(_)), "a curve id is not a file");
+}

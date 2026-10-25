@@ -35,28 +35,10 @@ const FILE_KEYS: &[&str] = &["file", "files", "dir", "folder", "out", "output", 
 /// when the value reads like one, or the command is by its nature about files.
 const AMBIGUOUS_KEYS: &[&str] = &["path", "paths", "source"];
 
-/// File extensions that make a bare word a file name.
-const FILE_EXTENSIONS: &[&str] = &[
-    "solidcraft",
-    "json",
-    "csv",
-    "step",
-    "stp",
-    "iges",
-    "igs",
-    "stl",
-    "3mf",
-    "obj",
-    "dxf",
-    "svg",
-    "png",
-    "jpg",
-    "jpeg",
-    "urdf",
-    "txt",
-    "py",
-    "toml",
-];
+/// File extensions, besides a design's and a project's (see [`is_file_extension`]), that make a
+/// bare word a file name.
+const FILE_EXTENSIONS: &[&str] =
+    &["csv", "step", "stp", "iges", "igs", "stl", "3mf", "obj", "dxf", "svg", "png", "jpg", "jpeg", "urdf", "txt", "py", "toml"];
 
 /// Commands that only read (not counted as changes).
 fn reads_only(id: &str) -> bool {
@@ -82,7 +64,15 @@ fn looks_like_file(s: &str) -> bool {
     if s.contains('/') || s.contains('\\') || s.starts_with('~') || s.starts_with('.') {
         return true;
     }
-    s.rsplit_once('.').is_some_and(|(stem, ext)| !stem.is_empty() && FILE_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str()))
+    s.rsplit_once('.').is_some_and(|(stem, ext)| !stem.is_empty() && is_file_extension(ext))
+}
+
+/// Whether `ext` (any case) names a file: every design extension the engine opens (each kind's,
+/// the kind-less and legacy ones, and `json`), the project file's, and [`FILE_EXTENSIONS`].
+fn is_file_extension(ext: &str) -> bool {
+    let ext = ext.to_ascii_lowercase();
+    let project = solidcraft_engine::doc::ProjectFile::EXTENSION;
+    solidcraft_engine::io::DESIGN_EXTS.iter().chain(&["json", project]).chain(FILE_EXTENSIONS).any(|x| *x == ext)
 }
 
 /// The first file or folder a request's parameters name, for the question and the decision.

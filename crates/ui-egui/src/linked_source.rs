@@ -36,7 +36,7 @@ pub(crate) fn start(app: &mut SolveApp, component: u64) {
         return;
     }
     let document = app.session.doc.clone();
-    app.pick_open_for(&["solidcraft"], move |app, path| {
+    app.pick_open_for(&solidcraft_engine::io::DESIGN_EXTS, move |app, path| {
         let Some(path) = path else { return };
         // A host or programmatic caller can replace/edit a design while a native picker is
         // pending. Never apply that old component id to a different design or newer revision.
@@ -64,7 +64,15 @@ pub(crate) fn extract(app: &mut SolveApp, component: u64) {
     }
     let Some(name) = app.session.doc.components.iter().find(|c| c.id == component).map(|c| c.name.clone()) else { return };
     let document = app.session.doc.clone();
-    app.pick_save(&format!("{name}.solidcraft"), &["solidcraft"], move |app, path| {
+    // The design extensions a component is extracted to: not a drawing's, nor the legacy one.
+    let extensions: Vec<&str> = solidcraft_engine::io::DESIGN_EXTS
+        .into_iter()
+        .filter(|e| {
+            *e != solidcraft_engine::io::LEGACY_DESIGN_EXT
+                && solidcraft_engine::doc::DocumentKind::from_extension(e) != Some(solidcraft_engine::doc::DocumentKind::Drawing)
+        })
+        .collect();
+    app.pick_save(&format!("{name}.solidcraft"), &extensions, move |app, path| {
         let Some(mut path) = path else { return };
         if !Arc::ptr_eq(&document, &app.session.doc) {
             app.set_status(app.tr_label("ui.extract_design_changed").to_string(), true);
