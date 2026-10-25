@@ -1448,6 +1448,7 @@
   "prefs.wheel_trackpad": "ホイールとトラックパッド",
   "prefs.workspace": "ワークスペース",
   "prefs.zoom_toward_cursor": "カーソルに向かってズーム",
+  "profile.solidcraft": "SolidCraft",
   "properties.title": "プロパティ: {name}",
   "recovery.days_ago": "{count}日前",
   "recovery.detail": "{file} · {features}フィーチャー · 自動保存: {when}",

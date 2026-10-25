@@ -184,6 +184,7 @@ mod preselect_tests;
 pub mod preview;
 #[cfg(test)]
 mod primitive_units_tests;
+pub mod profile;
 pub mod recovery_ui;
 pub mod ref_images;
 pub mod render_workspace;

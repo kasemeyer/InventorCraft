@@ -1448,6 +1448,7 @@
   "prefs.wheel_trackpad": "滚轮与触控板",
   "prefs.workspace": "工作区",
   "prefs.zoom_toward_cursor": "朝光标缩放",
+  "profile.solidcraft": "SolidCraft",
   "properties.title": "属性：{name}",
   "recovery.days_ago": "{count} 天前",
   "recovery.detail": "{file} · {features} 个特征 · 自动保存于 {when}",

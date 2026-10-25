@@ -1448,6 +1448,7 @@
   "prefs.wheel_trackpad": "Wheel and trackpad",
   "prefs.workspace": "Workspace",
   "prefs.zoom_toward_cursor": "Zoom, toward the cursor",
+  "profile.solidcraft": "SolidCraft",
   "properties.title": "Properties: {name}",
   "recovery.days_ago": "{count} days ago",
   "recovery.detail": "{file} · {features} features · autosaved {when}",
