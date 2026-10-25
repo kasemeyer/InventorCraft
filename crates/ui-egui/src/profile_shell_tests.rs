@@ -71,7 +71,7 @@ fn switching_document_kind_resets_the_ribbon_to_its_home_tab() {
     h.app.session.doc_mut().kind = Assembly;
     h.frame();
     assert_eq!(h.app.ui.tab, ribbon(&h.app).home());
-    assert_eq!(h.app.ui.tab, "TOOLS");
+    assert_eq!(h.app.ui.tab, "ASSEMBLE");
 }
 
 #[test]
@@ -151,6 +151,38 @@ fn render_workspace_keeps_its_ribbon_under_inventor() {
     let lists = panel_lists(&h.app, "RENDER");
     assert!(!lists.is_empty());
     assert_eq!(command_ids(&lists), expected);
+}
+
+/// Carried from Task 4's review: an Inventor assembly or drawing entering Render shows
+/// SolidCraft's Render panels, never an empty ribbon.
+#[test]
+fn render_workspace_keeps_its_ribbon_in_an_inventor_assembly_and_drawing() {
+    for kind in [Assembly, Drawing] {
+        let mut h = inventor(kind);
+        crate::render_workspace::enter(&mut h.app, true).unwrap();
+        h.frame();
+        assert_eq!(visible_tabs(&h.app), ["RENDER"], "{kind:?}");
+        let upstream = get(SOLIDCRAFT).unwrap().ribbon(kind).tab("RENDER").unwrap();
+        let expected: Vec<&str> = upstream.panels.iter().filter(|p| !p.commands.is_empty() || p.id == "SELECT").map(|p| p.id.as_str()).collect();
+        let lists = panel_lists(&h.app, "RENDER");
+        assert!(!lists.is_empty(), "{kind:?}");
+        assert_eq!(panel_ids(&lists), expected, "{kind:?}");
+    }
+}
+
+#[test]
+fn inventor_assembly_document_opens_on_the_assemble_tab() {
+    let h = inventor(Assembly);
+    assert_eq!(visible_tabs(&h.app), ["ASSEMBLE", "DESIGN", "MODEL", "SKETCH", "INSPECT", "TOOLS", "MANAGE", "VIEW", "ENVIRONMENTS"]);
+    assert_eq!(h.app.ui.tab, "ASSEMBLE");
+}
+
+#[test]
+fn shortcut_box_places_commands_by_the_active_profile() {
+    let h = inventor(Assembly);
+    let rows = crate::shortcut_box::search(&h.app, "frame member");
+    let row = rows.iter().find(|r| r.0 == "frame.member").expect("frame.member is found");
+    assert_eq!(row.3, Some(("Design", "Frame")));
 }
 
 #[test]
@@ -310,7 +342,7 @@ fn switching_kinds_keeps_the_tab_when_the_ribbon_is_the_same() {
     h.frame();
     h.app.session.doc_mut().kind = Assembly;
     h.frame();
-    assert_eq!(h.app.ui.tab, "TOOLS", "Inventor's assembly ribbon is another ribbon: its home tab");
+    assert_eq!(h.app.ui.tab, "ASSEMBLE", "Inventor's assembly ribbon is another ribbon: its home tab");
 }
 
 /// Review fix: a collapsed panel's tooltip and the Customize Toolbar note use the profile's labels.

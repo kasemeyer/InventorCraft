@@ -5,7 +5,7 @@
   "defaults": {"nav": "inventor", "navigator": "cube", "history": "under_browser"},
   "home": {"part": "MODEL"},
   "quick_access": true,
-  "button_labels": {"construct.plane.offset": "Plane", "construct.axis.edge": "Axis", "construct.point.vertex": "Point"},
+  "button_labels": {"construct.plane.offset": "Plane", "construct.axis.edge": "Axis", "construct.point.vertex": "Point", "component.insert_design": "Place", "component.create": "Create"},
   "omitted": {
     "timeline.delete": "the Delete key and the browser and history menus delete; Inventor has no Delete button",
     "view.list": "agents list named views; people use the Named Views browser folder",
@@ -48,7 +48,18 @@
     "visibility": {"id": "VISIBILITY", "label": "profile.inventor.panel.visibility", "promoted": 1, "commands": ["inspect.section"], "small": ["inspect.section"]},
     "appearance": {"id": "APPEARANCE", "label": "profile.inventor.panel.appearance", "promoted": 2, "commands": ["view.graphics_preset", "view.ambient_occlusion"], "small": ["view.graphics_preset", "view.ambient_occlusion"]},
     "windows": {"id": "WINDOWS", "label": "profile.inventor.panel.windows", "promoted": 2, "commands": ["view.layout", "view.history_layout"], "small": ["view.layout", "view.history_layout"]},
-    "navigate": {"id": "NAVIGATE", "label": "profile.inventor.panel.navigate", "promoted": 2, "commands": ["view.normal_to", "view.isometric", "view.front", "view.top", "view.right", "view.save", "view.apply", "view.rename", "view.delete"], "small": ["view.normal_to", "view.isometric"]}
+    "navigate": {"id": "NAVIGATE", "label": "profile.inventor.panel.navigate", "promoted": 2, "commands": ["view.normal_to", "view.isometric", "view.front", "view.top", "view.right", "view.save", "view.apply", "view.rename", "view.delete"], "small": ["view.normal_to", "view.isometric"]},
+    "update_assembly": {"id": "UPDATE", "label": "profile.inventor.panel.update", "promoted": 1, "commands": ["timeline.compute_all", "component.update_links", "component.break_link", "edit.checkpoint", "edit.restore_checkpoint"]},
+    "asm_manage": {"id": "MANAGE", "label": "profile.inventor.panel.manage", "promoted": 2, "commands": ["assembly.bom", "parameters.change", "parameters.graph", "parameters.import", "parameters.export", "parameters.move"]},
+    "begin": {"id": "BEGIN", "label": "profile.inventor.panel.begin", "promoted": 1, "commands": ["motion.study", "explode.create", "joint.drive", "joint.motion_link", "motion.trace"]},
+    "component": {"id": "COMPONENT", "label": "profile.inventor.panel.component", "promoted": 2, "commands": ["component.insert_design", "component.create", "parts.library", "parts.insert", "parts.resize", "file.insert_step", "component.from_bodies"]},
+    "position": {"id": "POSITION", "label": "profile.inventor.panel.position", "promoted": 1, "commands": ["solid.move", "occurrence.ground", "component.capture_position", "component.revert_position"]},
+    "relationships": {"id": "RELATIONSHIPS", "label": "profile.inventor.panel.relationships", "promoted": 2, "commands": ["joint.create", "joint.as_built", "joint.rigid_group", "joint.gear", "joint.rack_pinion", "joint.screw", "joint.cam", "joint.limits", "joint.reach"], "small": ["joint.as_built"]},
+    "fasten": {"id": "FASTEN", "label": "profile.inventor.panel.fasten", "promoted": 1, "commands": ["parts.fastener"]},
+    "frame": {"id": "FRAME", "label": "profile.inventor.panel.frame", "promoted": 1, "commands": ["frame.member"]},
+    "modify_assembly": {"id": "MODIFY ASSEMBLY", "label": "profile.inventor.panel.modify_assembly", "promoted": 8, "commands": ["solid.extrude", "solid.revolve", "solid.hole", "solid.fillet", "solid.chamfer", "solid.sweep", "solid.press_pull", "solid.thread"], "small": ["solid.chamfer", "solid.sweep", "solid.press_pull", "solid.thread"]},
+    "interference": {"id": "INTERFERENCE", "label": "profile.inventor.panel.interference", "promoted": 2, "commands": ["inspect.interference", "contact.enable_sets", "contact.check", "contact.enable_all", "contact.disable_all", "contact.create", "contact.edit", "contact.list"]},
+    "print_3d": {"id": "3D PRINT", "label": "profile.inventor.panel.print_3d", "promoted": 1, "commands": ["file.save_mesh"]}
   },
   "tabs": {
     "sheet_metal": {"id": "SHEET METAL", "label": "profile.inventor.tab.sheet_metal", "panels": ["sketch_start", "sheet_create", "sheet_modify", "work_features", "pattern", "sheet_setup", "flat_pattern", {"panel": "parameters", "hidden": true}, {"panel": "measure", "hidden": true}]},
@@ -59,11 +70,18 @@
     "manage_part": {"id": "MANAGE", "label": "profile.inventor.tab.manage", "panels": ["update_part", "manage_parameters", "styles", "insert", "author"]},
     "view": {"id": "VIEW", "label": "profile.inventor.tab.view", "panels": ["visibility", "appearance", "windows", "navigate"]},
     "env_part": {"id": "ENVIRONMENTS", "label": "profile.inventor.tab.environments", "panels": ["convert"]},
+    "assemble": {"id": "ASSEMBLE", "label": "profile.inventor.tab.assemble", "panels": ["component", "position", "relationships", "asm_manage", "work_features", {"panel": "measure", "hidden": true}]},
+    "design": {"id": "DESIGN", "label": "profile.inventor.tab.design", "panels": ["fasten", "frame", {"panel": "measure", "hidden": true}]},
+    "model_assembly": {"id": "MODEL", "label": "profile.inventor.tab.model", "panels": ["sketch_start", "modify_assembly", "work_features", "pattern", "parameters", {"panel": "measure", "hidden": true}]},
+    "sketch_assembly": {"id": "SKETCH", "label": "profile.inventor.tab.sketch", "panels": ["sketch_start", "sketch_create", "sketch_modify", "sketch_pattern", "constrain", "sketch_insert", "format", "measure", "exit"]},
+    "inspect_assembly": {"id": "INSPECT", "label": "profile.inventor.tab.inspect", "panels": ["interference", "analyze", "inspect_measure"]},
+    "manage_assembly": {"id": "MANAGE", "label": "profile.inventor.tab.manage", "panels": ["update_assembly", "asm_manage", "styles", "author"]},
+    "env_assembly": {"id": "ENVIRONMENTS", "label": "profile.inventor.tab.environments", "panels": ["begin", "print_3d"]},
     "render": {"id": "RENDER", "shown": "render", "inherit": "solidcraft"}
   },
   "ribbons": {
     "part": ["sheet_metal", "model_part", "sketch", "inspect_part", "tools", "manage_part", "view", "env_part", "render"],
-    "assembly": ["tools", "view"],
-    "drawing": ["tools", "view"]
+    "assembly": ["assemble", "design", "model_assembly", "sketch_assembly", "inspect_assembly", "tools", "manage_assembly", "view", "env_assembly", "render"],
+    "drawing": ["tools", "view", "render"]
   }
 }

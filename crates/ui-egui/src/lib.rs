@@ -288,8 +288,9 @@ pub struct UiState {
     /// Last contextual body/sketch, only used to select on entry.
     #[serde(skip)]
     pub ribbon_context: Option<String>,
-    /// The profile and document kind the ribbon was last set up for (`"<profile>/<kind>"`);
-    /// when either changes the ribbon goes to its home tab.
+    /// The ribbon the tab was last set up for (`"<profile>/<ribbon identity>"`). A profile change,
+    /// or a document kind change that brings another ribbon, goes to its home tab; a kind
+    /// change that keeps the same ribbon keeps the tab.
     #[serde(skip)]
     pub ribbon_key: Option<String>,
     pub show_browser: bool,

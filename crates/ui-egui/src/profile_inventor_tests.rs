@@ -318,7 +318,7 @@ fn inventor_keeps_the_shell_conventions() {
 
 #[test]
 fn a_drawing_shows_the_placeholder_ribbon_data() {
-    assert_eq!(tabs(Drawing), [("TOOLS", Shown::Always), ("VIEW", Shown::Always)]);
+    assert_eq!(tabs(Drawing), [("TOOLS", Shown::Always), ("VIEW", Shown::Always), ("RENDER", Shown::Render)]);
 }
 
 #[test]
@@ -398,4 +398,168 @@ fn clipboard_buttons_use_the_edit_clipboard() {
     assert!(h.app.session.sketch_clipboard.is_some());
     h.app.start("timeline.paste");
     assert_eq!(count(&h), 8);
+}
+
+/// `(tab, panel, face)` of the Assembly ribbon; `S` marks a small button.
+const ASSEMBLY_FACES: &[(&str, &str, &[(&str, bool)])] = &[
+    ("ASSEMBLE", "COMPONENT", &[("component.insert_design", L), ("component.create", L)]),
+    ("ASSEMBLE", "POSITION", &[("solid.move", L)]),
+    ("ASSEMBLE", "RELATIONSHIPS", &[("joint.create", L), ("joint.as_built", S)]),
+    ("ASSEMBLE", "MANAGE", &[("assembly.bom", L), ("parameters.change", L)]),
+    ("DESIGN", "FASTEN", &[("parts.fastener", L)]),
+    ("DESIGN", "FRAME", &[("frame.member", L)]),
+    // The capture's Slot has no command; its Move Face is `solid.press_pull`.
+    (
+        "MODEL",
+        "MODIFY ASSEMBLY",
+        &[
+            ("solid.extrude", L),
+            ("solid.revolve", L),
+            ("solid.hole", L),
+            ("solid.fillet", L),
+            ("solid.chamfer", S),
+            ("solid.sweep", S),
+            ("solid.press_pull", S),
+            ("solid.thread", S),
+        ],
+    ),
+    ("SKETCH", "MEASURE", &[("inspect.measure", L)]),
+    ("INSPECT", "INTERFERENCE", &[("inspect.interference", L), ("contact.enable_sets", L)]),
+    ("INSPECT", "MEASURE", &[("inspect.measure", L), ("inspect.center_of_mass", L)]),
+    ("MANAGE", "UPDATE", &[("timeline.compute_all", L)]),
+    ("ENVIRONMENTS", "BEGIN", &[("motion.study", L)]),
+    ("ENVIRONMENTS", "3D PRINT", &[("file.save_mesh", L)]),
+];
+
+/// Every command the Inventor Part and Assembly ribbons place.
+fn inventor_commands() -> BTreeSet<&'static str> {
+    let mut inv = inventor().ribbon(Part).commands();
+    inv.extend(inventor().ribbon(Assembly).commands());
+    inv
+}
+
+/// Registry commands neither Inventor modelling ribbon places, from `docs/features.md` at
+/// 9bb4d408 (466 commands, 305 placed). The count may only fall.
+const INVENTOR_UNPLACED: usize = 161;
+
+#[test]
+fn inventor_assembly_ribbon_follows_the_capture() {
+    use Shown::*;
+    assert_eq!(
+        tabs(Assembly),
+        [
+            ("ASSEMBLE", Always),
+            ("DESIGN", Always),
+            ("MODEL", Always),
+            ("SKETCH", Always),
+            ("INSPECT", Always),
+            ("TOOLS", Always),
+            ("MANAGE", Always),
+            ("VIEW", Always),
+            ("ENVIRONMENTS", Always),
+            ("RENDER", Render),
+        ]
+    );
+    assert_eq!(inventor().ribbon(Assembly).home(), "ASSEMBLE");
+    assert!(inventor().ribbon(Assembly).tab("SHEET METAL").is_none());
+}
+
+#[test]
+fn inventor_assembly_panels_follow_the_capture() {
+    let want: &[(&str, &[&str])] = &[
+        ("ASSEMBLE", &["COMPONENT", "POSITION", "RELATIONSHIPS", "MANAGE", "WORK FEATURES", "MEASURE"]),
+        ("DESIGN", &["FASTEN", "FRAME", "MEASURE"]),
+        ("MODEL", &["SKETCH", "MODIFY ASSEMBLY", "WORK FEATURES", "PATTERN", "PARAMETERS", "MEASURE"]),
+        ("SKETCH", &["SKETCH", "CREATE", "MODIFY", "PATTERN", "CONSTRAIN", "INSERT", "FORMAT", "MEASURE", "FINISH SKETCH"]),
+        ("INSPECT", &["INTERFERENCE", "ANALYZE", "MEASURE"]),
+        ("TOOLS", &["MEASURE", "MATERIAL AND APPEARANCE", "OPTIONS", "CLIPBOARD", "FIND"]),
+        ("MANAGE", &["UPDATE", "MANAGE", "STYLES AND STANDARDS", "AUTHOR"]),
+        ("VIEW", &["VISIBILITY", "APPEARANCE", "WINDOWS", "NAVIGATE"]),
+        ("ENVIRONMENTS", &["BEGIN", "3D PRINT"]),
+    ];
+    for (tab, ids) in want {
+        assert_eq!(panels(Assembly, tab), *ids, "{tab}");
+    }
+}
+
+#[test]
+fn inventor_assembly_faces_follow_the_capture() {
+    for (tab, panel, want) in ASSEMBLY_FACES {
+        assert_eq!(face(Assembly, tab, panel), *want, "{tab}/{panel}");
+    }
+    // Joint is the only large button on RELATIONSHIPS, and no stand-in Constrain is placed.
+    assert_eq!(large(Assembly, "ASSEMBLE", "RELATIONSHIPS"), ["joint.create"]);
+    let relationships = commands(Assembly, "ASSEMBLE", "RELATIONSHIPS");
+    assert!(relationships.iter().all(|c| !c.contains("constrain")), "{relationships:?}");
+    assert_eq!(large(Assembly, "MODEL", "MODIFY ASSEMBLY"), ["solid.extrude", "solid.revolve", "solid.hole", "solid.fillet"]);
+    // Every Assembly panel outside the inherited RENDER tab has a row here, or shares the face
+    // of a panel with the same id pinned by either table.
+    for tab in inventor().ribbon(Assembly).tabs.iter().filter(|t| t.id != "RENDER") {
+        for p in &tab.panels {
+            let got = face(Assembly, &tab.id, &p.id);
+            let listed = PART_FACES.iter().chain(ASSEMBLY_FACES).any(|(_, q, f)| *q == p.id && got == *f);
+            assert!(listed, "Assembly {}/{} has no face row", tab.id, p.id);
+        }
+    }
+    // C3: hidden by default where the capture hides them.
+    assert_eq!(hidden(Assembly, "ASSEMBLE"), ["MEASURE"]);
+    assert_eq!(hidden(Assembly, "DESIGN"), ["MEASURE"]);
+    assert_eq!(hidden(Assembly, "MODEL"), ["MEASURE"]);
+    assert!(hidden(Assembly, "SKETCH").is_empty());
+    for tab in ["INSPECT", "TOOLS", "MANAGE", "VIEW", "ENVIRONMENTS"] {
+        assert!(hidden(Assembly, tab).is_empty(), "{tab}");
+    }
+}
+
+#[test]
+fn frame_member_lives_on_design_frame() {
+    assert_eq!(inventor().ribbon(Assembly).destination("frame.member"), Some(("DESIGN", "FRAME")));
+    assert!(!inventor().ribbon(Part).commands().contains("frame.member"));
+}
+
+#[test]
+fn link_commands_live_only_on_the_assembly_ribbon() {
+    let update = commands(Assembly, "MANAGE", "UPDATE");
+    let part = inventor().ribbon(Part).commands();
+    for id in ["component.update_links", "component.break_link"] {
+        assert!(update.contains(&id), "{id}: {update:?}");
+        assert!(!part.contains(id), "{id} is on a Part tab");
+    }
+}
+
+#[test]
+fn inventor_reaches_everything_the_solidcraft_ribbon_reached() {
+    let sc = get(SOLIDCRAFT).unwrap().ribbon(Assembly).commands();
+    let inv = inventor_commands();
+    let lost: BTreeSet<&str> = sc.difference(&inv).copied().collect();
+    let omitted: BTreeSet<&str> = inventor().omitted.keys().map(String::as_str).collect();
+    assert_eq!(lost, omitted);
+    assert_eq!(omitted, BTreeSet::from(["timeline.delete", "view.list", "view.navigate"]));
+}
+
+#[test]
+fn inventor_unplaced_commands_do_not_grow() {
+    let inv = inventor_commands();
+    let unplaced = command_specs().iter().filter(|c| !inv.contains(c.id)).count();
+    println!("Inventor leaves {unplaced} registry commands unplaced (ratchet {INVENTOR_UNPLACED})");
+    assert!(unplaced <= INVENTOR_UNPLACED, "{unplaced} unplaced commands; the ratchet is {INVENTOR_UNPLACED}");
+}
+
+#[test]
+fn only_the_assembly_offers_component_placement() {
+    assert!(commands(Assembly, "ASSEMBLE", "COMPONENT").contains(&"component.insert_design"));
+    assert!(!inventor().ribbon(Part).commands().contains("component.insert_design"));
+}
+
+/// Carried from Task 4's review: every Inventor ribbon carries SolidCraft's contextual RENDER
+/// tab, so activating Render in any document never finds an empty panel list.
+#[test]
+fn every_inventor_ribbon_carries_the_render_tab() {
+    for kind in [Part, Assembly, Drawing] {
+        let render = inventor().ribbon(kind).tab("RENDER").unwrap_or_else(|| panic!("{kind:?} has no RENDER tab"));
+        assert_eq!(render.shown, Shown::Render, "{kind:?}");
+        let upstream = get(SOLIDCRAFT).unwrap().ribbon(kind).tab("RENDER").unwrap();
+        assert_eq!(render.panels, upstream.panels, "{kind:?} inherits SolidCraft's RENDER");
+        assert!(render.panels.iter().any(|p| !p.commands.is_empty()), "{kind:?}");
+    }
 }
