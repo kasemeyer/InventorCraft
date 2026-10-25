@@ -36,7 +36,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          → updated, unchanged, warnings (also joints whose faces are gone or that no longer solve)",
     ),
     CommandSpec::new("component.relink", "Relink Source", relink).icon("update").params(
-        "component: id or name of a linked component; path: a saved .solidcraft design — replaces the source and linked bodies for all its occurrences, preserving identities and placements; returns path, previous_path, warnings, joint_errors and joint_conflicts",
+        "component: id or name of a linked component; path: a saved design — replaces the source and linked bodies for all its occurrences, preserving identities and placements; returns path, previous_path, warnings, joint_errors and joint_conflicts",
     ),
     CommandSpec::new("component.break_link", "Break Link", break_link)
         .icon("break")
@@ -314,8 +314,8 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let given = str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(cmd, "`path` is required"))?;
     let file = absolute(Path::new(given));
-    if !file.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("solidcraft")) {
-        return Err(bad(cmd, "choose a saved .solidcraft design"));
+    if !solidcraft_io::is_design_path(&file.to_string_lossy()) {
+        return Err(bad(cmd, "choose a saved design (.tcipart, .tciasm, .tcidrw or .solidcraft)"));
     }
     // The ordinary lexical check in linked_bodies also works in the browser VFS. On native
     // hosts, reject an alias of this assembly too (a symlink or a path with different case).

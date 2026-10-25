@@ -119,7 +119,9 @@ pub fn command(id: &str, params: &Value, undo_left: usize) -> Verdict {
         return Verdict::Refuse(format!("`{id}` is not available in the agent chat"));
     }
     // Files, and commands that replace or reload the whole design.
-    let file_command = id.starts_with("file.") || id.starts_with("doc.") || matches!(id, "render.export" | "render.start");
+    let file_command = id.starts_with("file.")
+        || id.starts_with("doc.")
+        || matches!(id, "render.export" | "render.start" | "document.new_part" | "document.new_assembly");
     if let Some(p) = names_a_file(id, params) {
         return Verdict::Ask(format!("{id}: {p}"));
     }
@@ -219,6 +221,10 @@ fn is_scratch(params: &Value) -> bool {
             .any(|r| r.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("solidcraft-mcp-")) && path.starts_with(r))
     })
 }
+
+#[cfg(test)]
+#[path = "gate_kind_tests.rs"]
+mod kind_tests;
 
 #[cfg(test)]
 mod tests {

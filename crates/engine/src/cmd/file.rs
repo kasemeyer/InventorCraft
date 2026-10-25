@@ -7,7 +7,7 @@ mod thumbnail;
 pub(crate) mod import;
 
 use serde_json::{Value, json};
-use solidcraft_doc::Document;
+use solidcraft_doc::{Document, DocumentKind};
 use solidcraft_io::Format;
 
 use super::CommandSpec;
@@ -15,7 +15,7 @@ use crate::params::{bad, bool_, num, str_, string_list};
 use crate::{EngineError, Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("file.new", "New Design", new_doc).icon("new").key("Ctrl+N").noundo().params("name?"),
+    CommandSpec::new("file.new", "New Design", new_doc).icon("new").key("Ctrl+N").noundo().params("name?; kind?: part|assembly (default: part)"),
     CommandSpec::new("doc.open", "Open", open)
         .icon("open")
         .key("Ctrl+O")
@@ -33,11 +33,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("save")
         .key("Ctrl+S")
         .noundo()
-        .params("path? (default: current file); format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false)"),
+        .params("path? (default: current file); format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false); a path without an extension takes this design's kind's (.tcipart/.tciasm/.tcidrw); another kind's extension is refused"),
     CommandSpec::new("file.save_as", "Save As", save_as)
         .icon("save")
         .noundo()
-        .params("path; format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false)"),
+        .params("path; format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false); a path without an extension takes this design's kind's (.tcipart/.tciasm/.tcidrw); another kind's extension is refused"),
     CommandSpec::new("doc.recovery_list", "Recoverable Designs", recovery_list).icon("restore")
         .noundo()
         .params("dir? (default: the recovery folder) → designs autosaved by apps that crashed or closed with unsaved changes"),
@@ -60,9 +60,40 @@ pub static COMMANDS: &[CommandSpec] = &[
 ];
 
 fn new_doc(s: &mut Session, p: &Value) -> Result<Value> {
-    let name = str_(p, "name").unwrap_or("Untitled");
-    s.replace_design(Session::new(Document::new(name)));
-    Ok(json!({"name": name}))
+    // Parsed first, so a refused call leaves the design as it is.
+    let kind = kind_param(p, "file.new")?;
+    Ok(start_design(s, str_(p, "name").unwrap_or("Untitled"), kind))
+}
+
+/// Replace the design with a new, empty one of `kind`. The kind goes into construction, so the
+/// new design is clean, not an unsaved change.
+pub(super) fn start_design(s: &mut Session, name: &str, kind: DocumentKind) -> Value {
+    s.replace_design(Session::new(Document::new_with_kind(name, kind)));
+    json!({"name": name, "kind": kind})
+}
+
+/// `kind`: the kind of a new design, part (the default) or assembly.
+fn kind_param(p: &Value, cmd: &str) -> Result<DocumentKind> {
+    match p.get("kind") {
+        None | Some(Value::Null) => Ok(DocumentKind::Part),
+        Some(v) => match serde_json::from_value::<DocumentKind>(v.clone()) {
+            Ok(k @ (DocumentKind::Part | DocumentKind::Assembly)) => Ok(k),
+            _ => Err(bad(cmd, "`kind` must be \"part\" or \"assembly\"")),
+        },
+    }
+}
+
+/// The path a design is saved under: with no extension, its kind's own is added; another kind's
+/// extension is refused; any other extension (`.solidcraft`, `.json`, ...) is kept as given.
+fn typed_path(s: &Session, path: &str, cmd: &str) -> Result<String> {
+    let Some(ext) = std::path::Path::new(path).extension() else {
+        return Ok(format!("{path}.{}", s.doc.kind.extension()));
+    };
+    let ext = ext.to_string_lossy();
+    match DocumentKind::from_extension(&ext) {
+        Some(named) if named != s.doc.kind => Err(bad(cmd, format!("this design is {:?}, but .{ext} is the {named:?} extension", s.doc.kind))),
+        _ => Ok(path.to_string()),
+    }
 }
 
 fn path_arg<'a>(p: &'a Value, cmd: &str) -> Result<&'a str> {
@@ -289,6 +320,10 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(stem) = default_name_for(&doc.name, path) {
         doc.name = stem;
     }
+    // The extension names the kind; a kind-less one keeps the kind the file stored.
+    if let Some(kind) = solidcraft_io::kind_for_path(path) {
+        doc.kind = kind;
+    }
     s.replace_design(Session::opened(doc, saved.as_ref()));
     s.path = Some(path.to_string());
     let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
@@ -471,6 +506,7 @@ fn save(s: &mut Session, p: &Value) -> Result<Value> {
         Some(x) if !x.trim().is_empty() => x.to_string(),
         _ => s.path.clone().ok_or_else(|| bad("file.save", "the design has no file yet: give a `path`"))?,
     };
+    let path = typed_path(s, &path, "file.save")?;
     write(
         s,
         &path,
@@ -486,7 +522,7 @@ fn default_design_format(path: &str) -> &'static str {
 }
 
 fn save_as(s: &mut Session, p: &Value) -> Result<Value> {
-    let path = path_arg(p, "file.save_as")?.to_string();
+    let path = typed_path(s, path_arg(p, "file.save_as")?, "file.save_as")?;
     write(
         s,
         &path,

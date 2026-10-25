@@ -31,6 +31,7 @@ mod component_clone_assembly;
 mod construct;
 mod delete;
 mod diagnostics;
+mod document_kind;
 mod edit;
 mod face;
 mod features;
@@ -298,6 +299,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(parameters::COMMANDS.iter());
     v.extend(parameter_sweep::COMMANDS.iter());
     v.extend(file::COMMANDS.iter());
+    v.extend(document_kind::COMMANDS.iter());
     v.extend(metadata::COMMANDS.iter());
     v.extend(inspect::COMMANDS.iter());
     v.extend(compare::COMMANDS.iter());

@@ -555,8 +555,8 @@ pub(super) fn extract(s: &mut Session, p: &Value) -> Result<Value> {
     let sc = scope(s, comp, CMD)?;
     let given = str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(CMD, "`path` is required"))?;
     let file = absolute(Path::new(given));
-    if !file.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("solidcraft")) {
-        return Err(bad(CMD, "the new design must be a .solidcraft file"));
+    if !solidcraft_io::is_design_path(&file.to_string_lossy()) {
+        return Err(bad(CMD, "the new design must be a design file (.tcipart, .tciasm, .tcidrw or .solidcraft)"));
     }
     if s.path.as_deref().is_some_and(|own| absolute(Path::new(own)) == file) {
         return Err(bad(CMD, "choose another file than this design's own"));
@@ -603,6 +603,10 @@ pub(super) fn extract(s: &mut Session, p: &Value) -> Result<Value> {
     let copies = copies_of(s, comp)?;
 
     part.path = s.path.clone();
+    // The new design is a copy of this one; its file's extension names what it is.
+    if let Some(kind) = solidcraft_io::kind_for_path(&shown) {
+        part.doc_mut().kind = kind;
+    }
     part.execute("file.save", &json!({"path": shown}))?;
     Ok(json!({"component": comp, "feature": id, "path": path, "file": shown, "bodies": sc.bodies, "notices": notices, "warnings": warnings,
         "copies": named(s, &copies)}))
