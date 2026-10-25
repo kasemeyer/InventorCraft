@@ -14,7 +14,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use serde_json::{Value, json};
-use solidcraft_doc::{DesignLink, Document, FeatureKind, ModelBody, ModelState};
+use solidcraft_doc::{DesignLink, Document, DocumentKind, FeatureKind, ModelBody, ModelState};
 use solidcraft_geom::Vec3;
 
 use super::{absolute, component_key, resolve, session_bodies, stored};
@@ -557,6 +557,9 @@ pub(super) fn extract(s: &mut Session, p: &Value) -> Result<Value> {
     let file = absolute(Path::new(given));
     if !solidcraft_io::is_design_path(&file.to_string_lossy()) {
         return Err(bad(CMD, format!("the new design must be a design file ({})", super::design_extensions())));
+    }
+    if solidcraft_io::kind_for_path(&file.to_string_lossy()) == Some(DocumentKind::Drawing) {
+        return Err(bad(CMD, "a drawing cannot hold a solid design: extract to a part or an assembly"));
     }
     if s.path.as_deref().is_some_and(|own| absolute(Path::new(own)) == file) {
         return Err(bad(CMD, "choose another file than this design's own"));

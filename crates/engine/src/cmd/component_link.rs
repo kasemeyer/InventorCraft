@@ -26,7 +26,7 @@ mod extract;
 mod relink_tests;
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("component.insert_design", "Insert Design", insert_design).at("SOLID", "ASSEMBLE").icon("component").params(
+    CommandSpec::new("component.insert_design", "Insert Design", insert_design).at("SOLID", "ASSEMBLE").icon("component").enabled(super::document_kind::needs_assembly).params(
         "path: a design (.tcipart, .tciasm, .tcidrw or .solidcraft) → a new component linked to it, holding its solid bodies as placed in that design; \
          name? (default: the design's name); parent?: component id or name (default: the active one); translate?: [x,y,z]; \
          reuse?: bool (default false): insert a free occurrence, reusing an existing link to the same file when available",
@@ -41,7 +41,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("component.break_link", "Break Link", break_link)
         .icon("break")
         .params("component: id or name of a linked component — keeps its bodies as they are and forgets the design file"),
-    CommandSpec::new("component.extract", "Extract to File", extract::extract).icon("export").params(
+    CommandSpec::new("component.extract", "Extract to File", extract::extract).icon("export").enabled(super::document_kind::needs_assembly).params(
         "component: id or name of a component that is not linked; path: the design file to write (.tcipart, .tciasm, .tcidrw or .solidcraft), whose kind its extension names → its history, subcomponents and their joints \
          move to that design, and the component becomes linked to it (as component.insert_design makes it); returns path, file, feature, bodies, \
          notices (what stays behind), warnings and copies (components that build the same bodies: see component.replace_with_link)",
@@ -49,8 +49,8 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("component.copies", "Find Identical Copies", extract::copies).icon("inspect").noundo().params(
         "component: id or name of a linked component → copies: [{component, name}], the components not linked whose own history builds the same bodies",
     ),
-    CommandSpec::new("component.replace_with_link", "Replace with Link", extract::replace_with_link).icon("chain").params(
-        "component or components: [ids or names] of components that are not linked; with: a linked component, or path: a .solidcraft design \
+    CommandSpec::new("component.replace_with_link", "Replace with Link", extract::replace_with_link).icon("chain").enabled(super::document_kind::needs_assembly).params(
+        "component or components: [ids or names] of components that are not linked; with: a linked component, or path: a design (.tcipart, .tciasm, .tcidrw or .solidcraft) \
          (its link here, else a new linked component) → each component's history goes and its placements become placements of the linked \
          component; refused when its bodies are not the same as the link's; returns component, name, replaced and warnings",
     ),

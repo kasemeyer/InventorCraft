@@ -24,6 +24,16 @@ fn new_assembly(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(super::file::start_design(s, str_(p, "name").unwrap_or("Assembly"), DocumentKind::Assembly))
 }
 
+/// Whether this design may hold linked components: only an assembly may (a part holds bodies and
+/// no component links). The commands that create a link are enabled by it.
+pub(super) fn needs_assembly(s: &Session) -> std::result::Result<(), String> {
+    if s.doc.kind == DocumentKind::Assembly {
+        Ok(())
+    } else {
+        Err("only an assembly can hold linked components: make a new assembly (document.new_assembly) and insert this design into it".into())
+    }
+}
+
 fn kind(s: &mut Session, _: &Value) -> Result<Value> {
     Ok(json!({"kind": s.doc.kind, "extension": s.doc.kind.extension()}))
 }
