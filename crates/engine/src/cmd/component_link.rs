@@ -27,7 +27,7 @@ mod relink_tests;
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("component.insert_design", "Insert Design", insert_design).at("SOLID", "ASSEMBLE").icon("component").params(
-        "path: a .solidcraft design → a new component linked to it, holding its solid bodies as placed in that design; \
+        "path: a design (.tcipart, .tciasm, .tcidrw or .solidcraft) → a new component linked to it, holding its solid bodies as placed in that design; \
          name? (default: the design's name); parent?: component id or name (default: the active one); translate?: [x,y,z]; \
          reuse?: bool (default false): insert a free occurrence, reusing an existing link to the same file when available",
     ),
@@ -42,7 +42,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("break")
         .params("component: id or name of a linked component — keeps its bodies as they are and forgets the design file"),
     CommandSpec::new("component.extract", "Extract to File", extract::extract).icon("export").params(
-        "component: id or name of a component that is not linked; path: the .solidcraft design to write → its history, subcomponents and their joints \
+        "component: id or name of a component that is not linked; path: the design file to write (.tcipart, .tciasm, .tcidrw or .solidcraft), whose kind its extension names → its history, subcomponents and their joints \
          move to that design, and the component becomes linked to it (as component.insert_design makes it); returns path, file, feature, bodies, \
          notices (what stays behind), warnings and copies (components that build the same bodies: see component.replace_with_link)",
     ),
@@ -305,6 +305,12 @@ fn numbered_references(s: &Session, comp: u64, feature: u64) -> Vec<String> {
     joints.chain(origins).collect()
 }
 
+/// The design extensions a link or an extracted design may have, for messages: every kind's, then
+/// the kind-less one.
+pub(super) fn design_extensions() -> String {
+    format!("{} or .{}", solidcraft_doc::DocumentKind::extension_list(), solidcraft_io::DESIGN_EXT)
+}
+
 fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.relink";
     let comp = component_key(s, p, "component", cmd)?;
@@ -315,7 +321,7 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     let given = str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(cmd, "`path` is required"))?;
     let file = absolute(Path::new(given));
     if !solidcraft_io::is_design_path(&file.to_string_lossy()) {
-        return Err(bad(cmd, "choose a saved design (.tcipart, .tciasm, .tcidrw or .solidcraft)"));
+        return Err(bad(cmd, format!("choose a saved design ({})", design_extensions())));
     }
     // The ordinary lexical check in linked_bodies also works in the browser VFS. On native
     // hosts, reject an alias of this assembly too (a symlink or a path with different case).

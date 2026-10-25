@@ -46,6 +46,12 @@ impl DocumentKind {
         let ext = ext.trim_start_matches('.');
         Self::ALL.into_iter().find(|k| k.extension().eq_ignore_ascii_case(ext))
     }
+
+    /// Every kind's extension with its dot, in the order of `ALL`, for messages:
+    /// `".tcipart, .tciasm, .tcidrw"`.
+    pub fn extension_list() -> String {
+        Self::ALL.iter().map(|k| format!(".{}", k.extension())).collect::<Vec<_>>().join(", ")
+    }
 }
 
 #[cfg(test)]

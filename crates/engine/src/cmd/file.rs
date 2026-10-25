@@ -20,7 +20,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("open")
         .key("Ctrl+O")
         .noundo()
-        .params("path: .solidcraft design, or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ or glTF; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step)"),
+        .params("path: a design (.tcipart, .tciasm, .tcidrw or .solidcraft), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ or glTF; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step)"),
     CommandSpec::new("file.insert_step", "Insert STEP", insert_step)
         .at("SOLID", "INSERT")
         .icon("import")
@@ -91,7 +91,10 @@ fn typed_path(s: &Session, path: &str, cmd: &str) -> Result<String> {
     };
     let ext = ext.to_string_lossy();
     match DocumentKind::from_extension(&ext) {
-        Some(named) if named != s.doc.kind => Err(bad(cmd, format!("this design is {:?}, but .{ext} is the {named:?} extension", s.doc.kind))),
+        Some(named) if named != s.doc.kind => Err(bad(
+            cmd,
+            format!("this design is {:?}, but .{ext} is the {named:?} extension (one per kind: {})", s.doc.kind, DocumentKind::extension_list()),
+        )),
         _ => Ok(path.to_string()),
     }
 }

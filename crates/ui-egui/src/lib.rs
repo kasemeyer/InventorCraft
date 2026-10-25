@@ -890,11 +890,11 @@ impl SolveApp {
                 if v.get("continuous").and_then(Value::as_bool) != Some(true) {
                     self.session.echo(language.format("ui.command_done", &[("command", label)]));
                 }
-                if id == "file.new" {
-                    // `file.new` starts from millimetres. Units of new designs still apply (#1205).
+                if starts_new_design(id) {
+                    // A new design starts from millimetres. Units of new designs still apply (#1205).
                     prefs::apply_new_design(self);
                 }
-                if matches!(id, "file.new" | "doc.open" | "doc.recover") {
+                if starts_new_design(id) || matches!(id, "doc.open" | "doc.recover") {
                     render_workspace::reset_document(self);
                     dim_view::cancel();
                     self.menu.props = None;
@@ -2032,6 +2032,12 @@ fn window_hidden(ctx: &egui::Context) -> bool {
     ctx.input(|i| i.viewport().visible()) == Some(false)
 }
 
+/// Does command `id` replace the design with a new, empty one (`file.new`, `document.new_part`,
+/// `document.new_assembly`)?
+fn starts_new_design(id: &str) -> bool {
+    matches!(id, "file.new" | "document.new_part" | "document.new_assembly")
+}
+
 /// A command's name as people see it (its label), for the status bar.
 pub fn command_label(id: &str) -> &str {
     solidcraft_engine::find_command(id).map_or(id, |c| c.label)
@@ -2053,5 +2059,8 @@ pub fn now_ms() -> f64 {
 
 #[cfg(test)]
 mod picker_test_support;
+#[cfg(test)]
+#[path = "starts_new_design_tests.rs"]
+mod starts_new_design_tests;
 #[cfg(test)]
 mod test_support;

@@ -201,3 +201,13 @@ fn extract_writes_a_part_under_a_tcipart_name() {
     assert_eq!(t.doc.kind, DocumentKind::Part);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn design_path_descriptions_name_every_kind_extension() {
+    for id in ["file.save", "file.save_as", "doc.open", "component.insert_design", "component.extract"] {
+        let params = crate::find_command(id).unwrap_or_else(|| panic!("{id} is registered")).params;
+        for ext in DocumentKind::EXTENSIONS {
+            assert!(params.contains(&format!(".{ext}")), "{id} names .{ext}: {params}");
+        }
+    }
+}

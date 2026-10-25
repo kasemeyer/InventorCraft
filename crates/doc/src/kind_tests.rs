@@ -87,3 +87,8 @@ fn an_assembly_is_saved_with_its_kind_too() {
     let file: Value = serde_json::from_str(&Document::new("a").to_json()).unwrap();
     assert_eq!(file["kind"], "assembly", "the kind is always written, never left to the default");
 }
+
+#[test]
+fn the_extension_list_names_every_kind_in_order() {
+    assert_eq!(DocumentKind::extension_list(), ".tcipart, .tciasm, .tcidrw");
+}

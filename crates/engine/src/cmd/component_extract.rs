@@ -556,7 +556,7 @@ pub(super) fn extract(s: &mut Session, p: &Value) -> Result<Value> {
     let given = str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(CMD, "`path` is required"))?;
     let file = absolute(Path::new(given));
     if !solidcraft_io::is_design_path(&file.to_string_lossy()) {
-        return Err(bad(CMD, "the new design must be a design file (.tcipart, .tciasm, .tcidrw or .solidcraft)"));
+        return Err(bad(CMD, format!("the new design must be a design file ({})", super::design_extensions())));
     }
     if s.path.as_deref().is_some_and(|own| absolute(Path::new(own)) == file) {
         return Err(bad(CMD, "choose another file than this design's own"));
