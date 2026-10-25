@@ -12,6 +12,7 @@ use crate::ui_kit::{Container, Surface};
 pub mod access;
 pub mod agent_chat;
 pub mod agent_cursor;
+pub mod alias_keys;
 pub mod bom_panel;
 pub mod browser;
 pub mod browser_canvas;
@@ -412,6 +413,8 @@ pub struct SolveApp {
     pub menu: context_menu::MenuState,
     /// Mouse gestures: the ring of tools and its customization window.
     pub gesture: mouse_gesture::State,
+    /// Typed command aliases under a profile whose `letter_keys` is `Aliases` (Task 6).
+    pub alias: alias_keys::AliasBuffer,
     /// Browser tree state (reveal, groups being edited, occurrence moves).
     pub tree: browser::TreeState,
     /// A saved design copied for insertion into another open document.
@@ -576,6 +579,7 @@ impl SolveApp {
             material_card_review: None,
             menu: context_menu::MenuState::default(),
             gesture: mouse_gesture::State::default(),
+            alias: Default::default(),
             tree: browser::TreeState::default(),
             linked_design_clipboard: None,
             sbox: shortcut_box::ShortcutBox::default(),

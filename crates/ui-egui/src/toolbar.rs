@@ -2094,6 +2094,10 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
     if app.file_load.busy() {
         return;
     }
+    let now = ctx.input(|i| i.time);
+    if design_shown(app) {
+        crate::alias_keys::tick(app, now);
+    }
     // File and the Quick Access Select drop-down are custom Areas, so they must claim Escape
     // before the underlying editors and sketch shortcuts. Clear raw events too: egui may replay
     // them on a layout pass.
@@ -2175,6 +2179,12 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
         if !shown {
             continue;
         }
+        // Under a profile whose letters type aliases, they are the alias buffer's; a held
+        // letter's repeats are swallowed, so none reaches the palette, V or `keymap::press`.
+        let alias = if repeat { crate::alias_keys::owns(app, k, mods) } else { crate::alias_keys::feed(app, k, mods, now) };
+        if alias {
+            continue;
+        }
         match k {
             Key::Escape => {
                 app.esc_handled = true;
@@ -2243,6 +2253,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
             _ => crate::keymap::press(app, &crate::keymap::key_name(k, mods), repeat),
         }
     }
+    crate::alias_keys::show(app, ctx);
 }
 
 #[cfg(test)]

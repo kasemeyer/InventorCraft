@@ -2528,6 +2528,7 @@
   "ui.ai_toolbar_button_note": "工具栏右端的 AI 按钮。Ctrl+Shift+A 和视图菜单仍可打开面板。",
   "ui.ai_undo_tip": "将智能体为此消息所做的全部更改一步撤销",
   "ui.ai_url_hint": "https://example.com/v1",
+  "ui.alias_hint": "{keys}: {command}",
   "ui.all": "全部",
   "ui.ambient_occlusion": "环境光遮蔽",
   "ui.ambient_occlusion_help": "在不透明表面相接处添加柔和阴影。需要 GPU 视口。",

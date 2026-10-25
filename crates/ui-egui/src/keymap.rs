@@ -284,13 +284,25 @@ pub fn effective(app: &SolveApp, id: &str) -> Option<String> {
     match app.keymap.custom.get(id) {
         Some(k) if k.is_empty() => None,
         Some(k) => Some(k.clone()),
-        None => solidcraft_engine::find_command(id).and_then(|c| c.shortcut).map(str::to_string),
+        None => solidcraft_engine::find_command(id).and_then(|c| default_key(app, c)).map(str::to_string),
     }
 }
 
 /// Use the spec already available when walking the command list.
 fn effective_for_spec<'a>(app: &'a SolveApp, command: &CommandSpec) -> Option<&'a str> {
-    app.keymap.custom.get(command.id).map(String::as_str).or(command.shortcut).filter(|key| !key.is_empty())
+    app.keymap.custom.get(command.id).map(String::as_str).or_else(|| default_key(app, command)).filter(|key| !key.is_empty())
+}
+
+/// A command's key before the user changes it. Under a profile whose letters type aliases
+/// (`LetterKeys::Aliases`, Task 6) that is the profile's first alias for the command, else the
+/// registry key unless it is one plain letter or digit: such keys type aliases there instead.
+fn default_key(app: &SolveApp, command: &CommandSpec) -> Option<&'static str> {
+    let profile = crate::profile::active(app);
+    if profile.letter_keys != crate::profile::LetterKeys::Aliases {
+        return command.shortcut;
+    }
+    let plain = |key: &&str| key.len() == 1 && key.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit());
+    profile.aliases.iter().find(|a| a.command == command.id).map(|a| a.keys.as_str()).or_else(|| command.shortcut.filter(|key| !plain(key)))
 }
 
 /// Presentation only: stored Ctrl bindings retain their historical primary-modifier alias.
@@ -323,13 +335,13 @@ pub fn commands_for(app: &SolveApp, key: &str) -> Vec<&'static str> {
 /// Where a command's shortcut works: in a sketch (the SKETCH tab's tools), in the model (the
 /// other tabs), or everywhere (commands on no tab: undo, views, files).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Scope {
+pub(crate) enum Scope {
     Sketch,
     Model,
     Everywhere,
 }
 
-fn scope(id: &str) -> Scope {
+pub(crate) fn scope(id: &str) -> Scope {
     match solidcraft_engine::find_command(id).map(|c| c.tab) {
         Some("SKETCH") => Scope::Sketch,
         Some("") | None => Scope::Everywhere,

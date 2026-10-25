@@ -2528,6 +2528,7 @@
   "ui.ai_toolbar_button_note": "アプリケーションバーのアシスタントボタン。Ctrl+Shift+A と表示メニューからもパネルを開けます。",
   "ui.ai_undo_tip": "このメッセージでエージェントが行った変更を、1回でまとめて元に戻します",
   "ui.ai_url_hint": "https://example.com/v1",
+  "ui.alias_hint": "{keys}: {command}",
   "ui.all": "すべて",
   "ui.ambient_occlusion": "アンビエントオクルージョン",
   "ui.ambient_occlusion_help": "不透明な面が接する部分に柔らかい陰影を加えます。GPUビューポートが必要です。",

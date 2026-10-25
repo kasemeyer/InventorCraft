@@ -2528,6 +2528,7 @@
   "ui.ai_toolbar_button_note": "The Assistant button in the application bar. Ctrl+Shift+A and the View menu still open the panel.",
   "ui.ai_undo_tip": "Undo everything the agent changed for this message, as one step",
   "ui.ai_url_hint": "https://example.com/v1",
+  "ui.alias_hint": "{keys}: {command}",
   "ui.all": "All",
   "ui.ambient_occlusion": "Ambient occlusion",
   "ui.ambient_occlusion_help": "Soft shading where opaque surfaces meet. Requires the GPU viewport.",

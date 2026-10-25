@@ -563,3 +563,12 @@ fn every_inventor_ribbon_carries_the_render_tab() {
         assert!(render.panels.iter().any(|p| !p.commands.is_empty()), "{kind:?}");
     }
 }
+
+/// Task 6 (D5): the 46 Inventor aliases with a SolidCraft target, as data, with the one-key wait.
+#[test]
+fn inventor_maps_46_aliases_without_conflicts() {
+    assert_eq!(inventor().letter_keys, LetterKeys::Aliases);
+    assert_eq!(inventor().aliases.len(), 46);
+    assert_eq!(inventor().alias_wait_ms, 750);
+    assert_eq!(validate(inventor()), Vec::<String>::new());
+}
