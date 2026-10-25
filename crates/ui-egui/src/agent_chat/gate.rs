@@ -121,7 +121,7 @@ pub fn command(id: &str, params: &Value, undo_left: usize) -> Verdict {
     // Files, and commands that replace or reload the whole design.
     let file_command = id.starts_with("file.")
         || id.starts_with("doc.")
-        || matches!(id, "render.export" | "render.start" | "document.new_part" | "document.new_assembly");
+        || matches!(id, "render.export" | "render.start" | "document.new_part" | "document.new_assembly" | "project.new");
     if let Some(p) = names_a_file(id, params) {
         return Verdict::Ask(format!("{id}: {p}"));
     }

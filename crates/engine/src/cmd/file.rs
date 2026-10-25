@@ -99,7 +99,7 @@ fn typed_path(s: &Session, path: &str, cmd: &str) -> Result<String> {
     }
 }
 
-fn path_arg<'a>(p: &'a Value, cmd: &str) -> Result<&'a str> {
+pub(super) fn path_arg<'a>(p: &'a Value, cmd: &str) -> Result<&'a str> {
     str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(cmd, "`path` is required"))
 }
 

@@ -57,6 +57,8 @@ mod walk;
 pub use profile_refs::{capture_profile_selection, profile_fallback_notes, profile_selection_indices, profile_selection_indices_lenient};
 pub mod plastic;
 pub mod project;
+pub mod project_file;
+pub use project_file::ProjectFile;
 mod project3d;
 pub mod render_aging;
 pub mod render_job;

@@ -275,6 +275,9 @@ pub struct Session {
     pub revision: u64,
     /// Project a face's edges into a sketch created on it (the default; `sketch.auto_project`).
     pub auto_project: bool,
+    /// The open project file (`.tciproj`), already rooted at its folder. It belongs to the user's
+    /// session, not the design: replacing the design keeps it.
+    pub project_file: Option<std::sync::Arc<solidcraft_doc::ProjectFile>>,
     /// How calls that break a command's parameter contract are treated (off by default). It
     /// belongs to the session, not the design, so it survives opening and starting designs.
     pub param_check: schema::ParamCheck,
@@ -453,6 +456,7 @@ impl Session {
             log: Vec::new(),
             revision: 1,
             auto_project: true,
+            project_file: None,
             param_check: schema::ParamCheck::Off,
             live_links: None,
             active_component: 0,
@@ -486,13 +490,15 @@ impl Session {
     }
 
     /// Become `fresh` (another design opened, recovered or started), keeping the settings that
-    /// are the user's rather than the design's: `auto_project` is a preference (#680).
+    /// are the user's rather than the design's: `auto_project` is a preference (#680), and the
+    /// open project belongs to the user's session.
     /// Checkpoints survive too: a batch that failed after `file.new` or `doc.open` goes back
     /// from the checkpoint it took before its first step, and that checkpoint belongs to the
     /// design before the batch, which is what the batch promised (#3242). The design is what a
     /// checkpoint keeps, not the replaced session's file path (docs/mcp.md).
     pub fn replace_design(&mut self, fresh: Session) {
         let auto_project = self.auto_project;
+        let project_file = self.project_file.take();
         let param_check = self.param_check;
         let render_viewport = self.render_viewport.clone();
         let render_jobs = self.render_jobs.scratch();
@@ -500,6 +506,7 @@ impl Session {
         let next_checkpoint = self.next_checkpoint;
         *self = fresh;
         self.auto_project = auto_project;
+        self.project_file = project_file;
         self.param_check = param_check;
         self.render_viewport = render_viewport;
         self.render_jobs = render_jobs;
@@ -1093,6 +1100,7 @@ impl Session {
             log: Vec::new(),
             revision: self.revision,
             auto_project: self.auto_project,
+            project_file: self.project_file.clone(),
             param_check: self.param_check,
             live_links: None,
             active_component: self.active_component,
