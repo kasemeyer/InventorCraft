@@ -274,3 +274,54 @@ fn destination_prefers_a_visible_panel() {
     // PRIMITIVES is hidden and Box is placed nowhere else: it still has a home.
     assert_eq!(ribbon.destination("solid.box"), Some(("MODEL", "PRIMITIVES")));
 }
+
+/// Review fix: `ui.set` round-trips `UiState` through serde; the ribbon key must survive it, or
+/// the next frame takes the ribbon for a new one and goes to its home tab.
+#[test]
+fn ui_set_keeps_the_tab_it_sets() {
+    let mut h = Harness::new();
+    assert_eq!(h.call("ui.set", json!({"tab": "INSPECT"}))["ok"], json!(true));
+    h.frames(2);
+    assert_eq!(h.app.ui.tab, "INSPECT");
+    assert_eq!(h.call("ui.set", json!({"showGrid": false}))["ok"], json!(true));
+    h.frames(2);
+    assert_eq!(h.app.ui.tab, "INSPECT", "an unrelated ui.set keeps the tab");
+
+    let mut h = inventor(Part);
+    assert_eq!(h.call("ui.set", json!({"tab": "SHEET METAL"}))["ok"], json!(true));
+    h.frames(2);
+    assert_eq!(h.app.ui.tab, "SHEET METAL");
+}
+
+/// Review fix: the tab resets when the ribbon changes, not whenever the document kind does.
+#[test]
+fn switching_kinds_keeps_the_tab_when_the_ribbon_is_the_same() {
+    let mut h = Harness::new();
+    h.app.ui.tab = "INSPECT".into();
+    h.frame();
+    for kind in [Part, Drawing, Assembly] {
+        h.app.session.doc_mut().kind = kind;
+        h.frame();
+        assert_eq!(h.app.ui.tab, "INSPECT", "{kind:?}: SolidCraft has one ribbon for every kind");
+    }
+
+    let mut h = inventor(Part);
+    h.app.ui.tab = "INSPECT".into();
+    h.frame();
+    h.app.session.doc_mut().kind = Assembly;
+    h.frame();
+    assert_eq!(h.app.ui.tab, "TOOLS", "Inventor's assembly ribbon is another ribbon: its home tab");
+}
+
+/// Review fix: a collapsed panel's tooltip and the Customize Toolbar note use the profile's labels.
+#[test]
+fn collapsed_panels_and_the_customize_note_use_profile_labels() {
+    let mut h = inventor(Part);
+    assert_eq!(crate::toolbar::collapsed_tip(&h.app, "TOOLS", "MATERIAL AND APPEARANCE", 3), "Material and Appearance (3)");
+    assert_eq!(crate::toolbar::collapsed_tip(&h.app, "MODEL", "WORK FEATURES", 2), "Work Features (2)");
+    h.app.ui.tab = "MODEL".into();
+    h.app.toolbar_custom.customizing = true;
+    h.frames(3);
+    let note = crate::i18n::format("toolbar.customize_note", &[("tab", "3D Model")]);
+    assert!(h.widget(&note).is_some(), "{note}");
+}

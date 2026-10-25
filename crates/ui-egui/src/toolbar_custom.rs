@@ -360,7 +360,11 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
         .cards(2.0)
         .actions("", "Close", None)
         .show(ctx, true, |ui| {
-            ui_kit::text(ui, &crate::i18n::format("toolbar.customize_note", &[("tab", app.tr_label(&tab))]), ui_kit::Text::Note("customize"));
+            ui_kit::text(
+                ui,
+                &crate::i18n::format("toolbar.customize_note", &[("tab", crate::profile::tab_label(app, &tab).as_str())]),
+                ui_kit::Text::Note("customize"),
+            );
             egui::ScrollArea::vertical()
                 .max_height(
                     (ctx.content_rect().height() - crate::theme::Tokens::get().control_height * 8.0)

@@ -546,8 +546,9 @@ pub fn sync_context(app: &mut crate::SolveApp) {
         return;
     }
     let ribbon = crate::profile::ribbon(app);
-    // Another profile or document kind starts over on its ribbon's home tab.
-    let key = format!("{}/{:?}", crate::profile::active(app).id, app.session.doc.kind);
+    // Another profile, or a document kind with another ribbon, starts over on its home tab.
+    let profile = crate::profile::active(app);
+    let key = format!("{}/{}", profile.id, profile.ribbon_identity(app.session.doc.kind));
     if app.ui.ribbon_key.as_deref() != Some(key.as_str()) {
         app.ui.tab = ribbon.home().into();
         app.ui.ribbon_context = None;

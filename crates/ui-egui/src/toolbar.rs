@@ -900,6 +900,11 @@ pub(crate) fn contextual_tab(app: &SolveApp, tab: &str) -> bool {
     tab == "SKETCH" || (tab == "SHEET METAL" && crate::workspace::sheet_body(app).is_some())
 }
 
+/// The tooltip of a panel collapsed into one button: its caption and how many commands it holds.
+pub(crate) fn collapsed_tip(app: &SolveApp, tab: &str, panel: &str, count: usize) -> String {
+    format!("{} ({count})", crate::profile::panel_label(app, tab, panel))
+}
+
 fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) {
     let t = Tokens::get();
     let tabs = crate::workspace::visible_tabs(app);
@@ -1235,7 +1240,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     );
                 }
                 dropdown_arrow(&painter, pos2(br.center().x, br.bottom() - 3.0), t.text_dim);
-                let tip = format!("{} ({})", app.tr_label(panel), shown.len().max(cmds.len()));
+                let tip = collapsed_tip(app, &tab, panel, shown.len().max(cmds.len()));
                 if fresp.on_hover_text(tip).clicked() && enabled_panel {
                     ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("sc_panel_open"), popup_id));
                     opened = true;

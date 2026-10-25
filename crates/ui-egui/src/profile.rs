@@ -45,6 +45,17 @@ pub struct Profile {
     /// Commands the SolidCraft ribbon places that this profile deliberately leaves off, and why.
     pub omitted: BTreeMap<String, String>,
     ribbons: [Ribbon; 3], // in `DocumentKind::ALL` order
+    /// Per kind, the index of the first kind with the same ribbon (`ribbon_identity`).
+    shared: [usize; 3],
+}
+
+/// Per kind, the index of the first kind whose ribbon is the same.
+fn shared(ribbons: &[Ribbon; 3]) -> [usize; 3] {
+    let mut out = [0, 1, 2];
+    for (slot, ribbon) in out.iter_mut().zip(ribbons) {
+        *slot = ribbons.iter().position(|r| r == ribbon).unwrap_or(*slot);
+    }
+    out
 }
 
 fn kind_index(kind: DocumentKind) -> usize {
@@ -68,6 +79,12 @@ impl Profile {
         &self.ribbons[kind_index(kind)]
     }
 
+    /// Which of the profile's ribbons a kind shows: kinds with the same ribbon (every kind under
+    /// SolidCraft) answer the same, so moving between them keeps the ribbon's tab.
+    pub fn ribbon_identity(&self, kind: DocumentKind) -> usize {
+        self.shared[kind_index(kind)]
+    }
+
     pub fn ribbons(&self) -> impl Iterator<Item = (DocumentKind, &Ribbon)> {
         DocumentKind::ALL.into_iter().zip(self.ribbons.iter())
     }
@@ -78,7 +95,7 @@ impl Profile {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Ribbon {
     pub tabs: Vec<RibbonTab>,
     home: Option<String>,
@@ -139,7 +156,7 @@ impl Ribbon {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct RibbonTab {
     pub id: String,
     pub label: Option<String>,
@@ -153,7 +170,7 @@ impl RibbonTab {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct RibbonPanel {
     pub id: String,
     pub label: Option<String>,
@@ -174,7 +191,7 @@ impl RibbonPanel {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Group {
     pub label: String,
@@ -351,6 +368,7 @@ pub fn solidcraft() -> Profile {
         browser: BrowserLayout::default(),
         omitted: BTreeMap::new(),
         ribbons: [ribbon.clone(), ribbon.clone(), ribbon],
+        shared: [0, 0, 0],
     }
 }
 
@@ -520,6 +538,7 @@ pub fn parse(text: &str, base: &Profile) -> Result<Profile, String> {
         button_labels: json.button_labels,
         browser: json.browser,
         omitted: json.omitted,
+        shared: shared(&ribbons),
         ribbons,
     })
 }
