@@ -167,8 +167,8 @@ Editable drawing code, native projects and shipped exports are collected under `
 | assets/locales/uk.json | Igor Bronovskyi (BrunIF) | Ukrainian translation of the English catalog, contributed upstream | MIT OR Apache-2.0 |
 | assets/locales/vi.json | vandang890615 | Vietnamese translation of the English catalog, contributed upstream | MIT OR Apache-2.0 |
 | assets/locales/zh.json | SolidCraft contributors | Original SolidCraft resource data or drawing code, collected without redesign | MIT OR Apache-2.0 |
-| assets/profiles/inventor.json | TCI-CAD contributors | Original UI profile data: the ribbon organisation of each document kind, written from the planning repository's structure-only capture; no Autodesk icons, bitmaps, strings or code | MIT OR Apache-2.0 |
 | assets/locales/zh-TW.json | SolidCraft contributors | Original Traditional Chinese (Taiwan) translation of SolidCraft's English catalog; no commercial CAD text used | MIT OR Apache-2.0 |
+| assets/profiles/inventor.json | TCI-CAD contributors | Original UI profile data: the ribbon organisation of each document kind, written from the planning repository's structure-only capture; no Autodesk icons, bitmaps, strings or code | MIT OR Apache-2.0 |
 | assets/materials/library.rs | SolidCraft contributors | Original SolidCraft resource data or drawing code, collected without redesign | MIT OR Apache-2.0 |
 | assets/platforms/linux/ai.storyteller.solidcraft.desktop | PhotoCraft / SolidCraft contributors | PhotoCraft packaging templates (https://github.com/storytold/photocraft), adapted for SolidCraft | Apache-2.0 |
 | assets/platforms/linux/ai.storyteller.solidcraft.metainfo.xml.in | PhotoCraft / SolidCraft contributors | PhotoCraft packaging templates (https://github.com/storytold/photocraft), adapted for SolidCraft | Apache-2.0 |

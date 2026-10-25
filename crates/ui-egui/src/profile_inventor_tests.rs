@@ -41,7 +41,7 @@ fn commands(kind: DocumentKind, tab: &str, panel: &str) -> Vec<&'static str> {
 const L: bool = false;
 const S: bool = true;
 
-/// `(tab, panel, face)` of the Part ribbon; `S` marks a small button. CONSTRAIN is built in code.
+/// `(tab, panel, face)` of the Part ribbon; `S` marks a small button.
 const PART_FACES: &[(&str, &str, &[(&str, bool)])] = &[
     ("MODEL", "SKETCH", &[("sketch.create", L)]),
     ("MODEL", "PRIMITIVES", &[("solid.box", L)]),
@@ -126,6 +126,28 @@ const PART_FACES: &[(&str, &str, &[(&str, bool)])] = &[
         ],
     ),
     ("SKETCH", "PATTERN", &[("sketch.pattern.rectangular", S), ("sketch.pattern.circular", S), ("sketch.mirror", S)]),
+    // The capture's order. `horizontal_vertical` stands in for both Horizontal and Vertical, at
+    // Horizontal's place; midpoint and polygon have no capture slot and close the grid.
+    (
+        "SKETCH",
+        "CONSTRAIN",
+        &[
+            ("sketch.dimension", L),
+            ("sketch.constraint.coincident", S),
+            ("sketch.constraint.parallel", S),
+            ("sketch.constraint.tangent", S),
+            ("sketch.constraint.collinear", S),
+            ("sketch.constraint.perpendicular", S),
+            ("sketch.constraint.curvature", S),
+            ("sketch.constraint.concentric", S),
+            ("sketch.constraint.horizontal_vertical", S),
+            ("sketch.constraint.symmetry", S),
+            ("sketch.constraint.fix", S),
+            ("sketch.constraint.equal", S),
+            ("sketch.constraint.midpoint", S),
+            ("sketch.constraint.polygon", S),
+        ],
+    ),
     ("SKETCH", "INSERT", &[("canvas.insert", S), ("sketch.insert_dxf", S)]),
     ("SKETCH", "FORMAT", &[("sketch.construction", S), ("sketch.centerline", S)]),
     ("SKETCH", "FINISH SKETCH", &[("sketch.finish", L)]),
@@ -214,9 +236,11 @@ fn inventor_part_faces_follow_the_capture() {
     for (tab, panel, want) in PART_FACES {
         assert_eq!(face(Part, tab, panel), *want, "{tab}/{panel}");
     }
-    let constrain: Vec<(&str, bool)> = std::iter::once("sketch.dimension").chain(CONSTRAINT_GALLERY.iter().copied()).map(|c| (c, false)).collect();
-    assert_eq!(face(Part, "SKETCH", "CONSTRAIN"), constrain);
-    assert!(inventor().ribbon(Part).tab("SKETCH").unwrap().panel("CONSTRAIN").unwrap().small.is_empty());
+    // Every constraint command the registry has is on the CONSTRAIN face; none waits in overflow.
+    let constrain = face(Part, "SKETCH", "CONSTRAIN");
+    for c in command_specs().iter().map(|c| c.id).filter(|id| id.starts_with("sketch.constraint.")) {
+        assert!(constrain.contains(&(c, S)), "{c} is not a small button on SKETCH/CONSTRAIN");
+    }
     assert_eq!(large(Part, "MODEL", "MODIFY"), ["solid.hole", "solid.fillet"]);
     // No panel of any Inventor ribbon draws a blank face, and every Part panel outside the
     // inherited RENDER tab is pinned by the table.
@@ -232,7 +256,7 @@ fn inventor_part_faces_follow_the_capture() {
             // A panel shared between tabs (WORK FEATURES on SHEET METAL, PARAMETERS on INSPECT…)
             // has a row under another tab with the same face.
             let got = face(Part, &tab.id, &p.id);
-            let listed = PART_FACES.iter().any(|(t, q, f)| *q == p.id && (*t == tab.id || got == *f)) || (tab.id == "SKETCH" && p.id == "CONSTRAIN");
+            let listed = PART_FACES.iter().any(|(t, q, f)| *q == p.id && (*t == tab.id || got == *f));
             assert!(listed, "Part {}/{} has no face row", tab.id, p.id);
         }
     }
