@@ -22,7 +22,7 @@ pub const UI_ACTIONS: &[&str] = &["ui.preferences", "ui.view_cube"];
 pub const DEFAULT_ALIAS_WAIT_MS: u32 = 750;
 
 /// Built-in data profiles: `(id, JSON text)`.
-const BUILTIN: [(&str, &str); 0] = [];
+const BUILTIN: [(&str, &str); 1] = [(INVENTOR, include_str!("../../../assets/profiles/inventor.json"))];
 
 #[derive(Clone, Debug)]
 pub struct Profile {
@@ -572,6 +572,15 @@ pub fn validate(profile: &Profile) -> Vec<String> {
                         }
                     }
                 }
+                for g in &panel.groups {
+                    for c in &g.commands {
+                        if find_command(c).is_none() {
+                            out.push(format!("{k} {t}/{p}: group {}: {c} is not a registry command", g.label));
+                        } else if !panel.commands.contains(c) {
+                            out.push(format!("{k} {t}/{p}: group {}: {c} is not in the panel", g.label));
+                        }
+                    }
+                }
                 let face = panel.commands.get(..panel.promoted).unwrap_or(&panel.commands);
                 for c in panel.small.iter().filter(|c| !face.contains(c)) {
                     out.push(format!("{k} {t}/{p}: small {c} is not among the first {} commands", panel.promoted));
@@ -631,3 +640,7 @@ pub fn get(id: &str) -> Option<&'static Profile> {
 #[cfg(test)]
 #[path = "profile_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "profile_inventor_tests.rs"]
+mod inventor_tests;

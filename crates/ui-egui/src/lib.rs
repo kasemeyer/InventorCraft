@@ -975,6 +975,17 @@ impl SolveApp {
             }
             return;
         }
+        // Inventor's Clipboard buttons copy and paste exactly as Ctrl+C / Ctrl+V do: sketch
+        // geometry in a sketch, timeline features outside one. They come before the disabled
+        // check so an empty selection still gets the clipboard's own status message.
+        if id == "timeline.copy" {
+            edit_clipboard::copy(self);
+            return;
+        }
+        if id == "timeline.paste" {
+            edit_clipboard::paste(self, None);
+            return;
+        }
         // A disabled command starts nothing, however it was reached. The toolbar greys its
         // button, but a shortcut, the command palette and the control channel all land here.
         // Its reason goes to the status line, so the refusal is never silent.

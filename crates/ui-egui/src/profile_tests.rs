@@ -277,3 +277,21 @@ fn every_built_in_profile_parses_and_validates() {
         assert!(get(&p.id).is_some_and(|g| g.id == p.id));
     }
 }
+
+#[test]
+fn validate_checks_group_commands() {
+    let grouped = |groups: serde_json::Value| {
+        with(|v| {
+            v["panels"]["make"]["groups"] = groups;
+        })
+    };
+    let clean = parse(&grouped(json!([{"label": "Solids", "commands": ["solid.extrude", "solid.revolve"]}])), &solidcraft()).unwrap();
+    assert_eq!(validate(&clean), Vec::<String>::new());
+
+    let problems = validate(&parse(&grouped(json!([{"label": "Solids", "commands": ["no.such.command"]}])), &solidcraft()).unwrap());
+    assert!(has(&problems, "group Solids: no.such.command is not a registry command"), "{problems:?}");
+
+    let problems = validate(&parse(&grouped(json!([{"label": "Solids", "commands": ["solid.chamfer"]}])), &solidcraft()).unwrap());
+    assert!(has(&problems, "group Solids: solid.chamfer is not in the panel"), "{problems:?}");
+    assert!(!has(&problems, "registry"), "{problems:?}");
+}
