@@ -106,3 +106,59 @@ fn an_open_project_survives_new_and_open() {
     assert_eq!(s.scratch().project_file, s.project_file, "a scratch copy sees the same project");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn project_new_refuses_a_design_file_and_leaves_it_as_it_was() {
+    let dir = folder("design-target");
+    let design = dir.join("bracket.tcipart");
+    let mut s = Session::default();
+    run(&mut s, "document.new_part", json!({"name": "bracket"}));
+    run(&mut s, "file.save_as", json!({"path": design}));
+    let before = std::fs::read(&design).unwrap();
+    for overwrite in [json!(null), json!(true)] {
+        let err = s.execute("project.new", &json!({"name": "job", "workspace": ".", "path": design, "overwrite": overwrite})).unwrap_err();
+        assert!(matches!(err, crate::EngineError::BadParams { .. }), "{err}");
+        assert!(err.to_string().contains(".tciproj"), "{err}");
+    }
+    assert_eq!(std::fs::read(&design).unwrap(), before, "the design's bytes are untouched");
+    assert!(s.project_file.is_none());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn project_new_replaces_an_existing_project_only_when_told_to() {
+    let dir = folder("overwrite");
+    let path = dir.join("job.tciproj");
+    let mut s = Session::default();
+    run(&mut s, "project.new", json!({"name": "first", "workspace": ".", "path": path}));
+    let err = s.execute("project.new", &json!({"name": "second", "workspace": ".", "path": path})).unwrap_err();
+    assert!(matches!(err, crate::EngineError::BadParams { .. }), "{err}");
+    assert!(err.to_string().contains("overwrite"), "{err}");
+    assert!(std::fs::read_to_string(&path).unwrap().contains("first"));
+    let upper = dir.join("JOB2.TCIPROJ");
+    run(&mut s, "project.new", json!({"name": "upper", "workspace": ".", "path": upper}));
+    assert!(upper.exists(), "the extension is matched in any case");
+    run(&mut s, "project.new", json!({"name": "second", "workspace": ".", "path": path, "overwrite": true}));
+    assert!(std::fs::read_to_string(&path).unwrap().contains("second"));
+    assert_eq!(s.project_file.as_ref().map(|p| p.name.as_str()), Some("second"));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[cfg(windows)]
+#[test]
+fn project_new_writes_relative_folders_with_forward_slashes() {
+    let dir = folder("slashes");
+    let path = dir.join("job.tciproj");
+    let mut s = Session::default();
+    let abs = dir.join("abs").to_string_lossy().into_owned();
+    run(
+        &mut s,
+        "project.new",
+        json!({"name": "job", "workspace": r"parts\frames", "path": path, "libraries": [r"..\lib", abs, r"\shared"], "frequently_used": [r"a\b"]}),
+    );
+    let written = solidcraft_doc::ProjectFile::from_json(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(written.workspace, "parts/frames");
+    assert_eq!(written.libraries, vec!["../lib".to_string(), abs, r"\shared".to_string()], "a rooted folder is kept as given");
+    assert_eq!(written.frequently_used, vec!["a/b".to_string()]);
+    let _ = std::fs::remove_dir_all(dir);
+}
