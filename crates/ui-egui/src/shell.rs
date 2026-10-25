@@ -70,21 +70,26 @@ pub(crate) struct Cards {
 }
 
 impl Cards {
-    pub fn new(available: Rect, mode: LayoutMode, ribbon_height: f32) -> Self {
+    /// The cards for `available`. Without the workspace switcher (`switcher` false) its card is
+    /// zero-wide and the ribbon card starts at the left margin.
+    pub fn new(available: Rect, mode: LayoutMode, ribbon_height: f32, switcher: bool) -> Self {
         let margin = Container::for_layout(mode, Surface::Chrome).gap();
-        let gap = margin;
+        let gap = if switcher { margin } else { 0.0 };
         let left = available.left() + margin;
         let top = available.top() + margin;
         let right = (available.right() - margin).max(left);
+        let width = if switcher { toolbar::WORKSPACE_WIDTH.min((right - left).max(0.0)) } else { 0.0 };
         let workspace = Rect::from_min_size(
             pos2(left, top),
-            vec2(
-                toolbar::WORKSPACE_WIDTH.min((right - left).max(0.0)),
-                ribbon_height - if !Container::for_layout(mode, Surface::Chrome).floating() { 1.0 } else { 0.0 },
-            ),
+            vec2(width, ribbon_height - if !Container::for_layout(mode, Surface::Chrome).floating() { 1.0 } else { 0.0 }),
         );
         let ribbon = Rect::from_min_max(pos2((workspace.right() + gap).min(right), top), pos2(right, top + ribbon_height));
         Self { workspace, ribbon, bottom: ribbon.bottom() + margin }
+    }
+
+    /// The cards drawn: the workspace switcher's only when it has width.
+    pub fn shown(&self) -> Vec<Rect> {
+        if self.workspace.width() > 0.0 { vec![self.workspace, self.ribbon] } else { vec![self.ribbon] }
     }
 }
 

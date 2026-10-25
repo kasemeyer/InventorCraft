@@ -345,43 +345,85 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("sc_file_menu_x"), br.left()));
             idle && resp.clicked()
         };
-        // A disabled button is dimmed and ignores clicks (its tooltip still shows).
-        let click = |ui: &mut egui::Ui, at: f32, icon: &str, tip: &str, enabled: bool| -> bool {
-            let width = if compact_actions && matches!(icon, "save" | "undo" | "redo") { 22.0 } else { 32.0 };
-            let br = Rect::from_center_size(pos2(at, r.center().y), vec2(width, 32.0));
-            let resp = ui.interact(br, ui.id().with(("ab", icon)), if enabled { Sense::click() } else { Sense::hover() });
+        // A disabled button is dimmed and ignores clicks (its tooltip still shows). `handle` names
+        // it for scripts (`appbar:<handle>`); a drop-down button is `arrow` wider, its icon
+        // centred at `at` and the arrow after it. Returns the click and the button's rect.
+        let click = |ui: &mut egui::Ui, at: f32, handle: &str, icon: &str, tip: &str, enabled: bool, arrow: f32| -> (bool, Rect) {
+            let width = if compact_actions && matches!(handle, "new" | "save" | "undo" | "redo" | "select") { 22.0 } else { 32.0 };
+            let icon_at = pos2(at, r.center().y);
+            let br = Rect::from_min_size(pos2(at - width / 2.0, r.center().y - 16.0), vec2(width + arrow, 32.0));
+            let resp = ui.interact(br, ui.id().with(("ab", handle)), if enabled { Sense::click() } else { Sense::hover() });
             resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, tip));
-            crate::scenario::publish_target(&format!("appbar:{icon}"), br);
-            crate::scenario::publish_target(&format!("titlebar:{icon}"), br);
+            crate::scenario::publish_target(&format!("appbar:{handle}"), br);
+            // `titlebar:update` is the release Update pill's; the QAT's own names stay on `appbar:`.
+            if handle == icon {
+                crate::scenario::publish_target(&format!("titlebar:{handle}"), br);
+            }
             if enabled && (resp.hovered() || resp.has_focus()) {
                 ui.painter().rect_filled(br.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
             }
-            icons::paint_app_bar(ui.painter(), Rect::from_center_size(br.center(), vec2(18.0, 18.0)), icon, if enabled { 1.0 } else { 0.35 });
+            let opacity = if enabled { 1.0 } else { 0.35 };
+            icons::paint_app_bar(ui.painter(), Rect::from_center_size(icon_at, vec2(18.0, 18.0)), icon, opacity);
+            if arrow > 0.0 {
+                dropdown_arrow(ui.painter(), pos2(br.right() - arrow / 2.0 - 2.0, icon_at.y), t.app_bar_text.gamma_multiply(opacity));
+            }
             let clicked = resp.on_hover_text(tip).clicked();
-            enabled && clicked
+            (enabled && clicked, br)
         };
         let step = if compact_actions { 22.0 } else { 34.0 };
-        // Save, Undo and Redo use the same actions as the File menu and shortcuts.
-        let shown = design_shown(app) && idle;
-        let tip = |id: &str, key: &str| {
-            let label = app.tr(id);
-            if shown { format!("{label} ({key})") } else { crate::i18n::format("ui.needs_design", &[("command", label)]) }
-        };
-        let (save_tip, undo_tip, redo_tip) = (tip("ui.save", "Ctrl+S"), tip("ui.undo", "Ctrl+Z"), tip("ui.redo", "Ctrl+Y"));
-        if click(ui, x, "save", &save_tip, shown) {
-            save(app);
-        }
-        x += step;
-        // Narrow windows retain Save; Undo and Redo remain available from their shortcuts and menus.
-        if !compact_actions && !app.native_file_menu {
-            if click(ui, x, "undo", &undo_tip, shown) {
-                FileAction::Undo.run(app);
+        // The right edge of the last file action: the documents' separator follows it.
+        let mut last_right = x;
+        if crate::profile::active(app).quick_access {
+            // Inventor's Quick Access Toolbar. Narrow windows keep New, Save and Select; Undo and
+            // Redo stay on their shortcuts and menus, as for SolidCraft's bar.
+            let arrow = if compact_actions { 8.0 } else { 12.0 };
+            for (id, icon, enabled) in crate::quick_access::entries(app) {
+                let kept =
+                    if compact_actions { matches!(id, "new" | "save" | "select") } else { !(app.native_file_menu && matches!(id, "undo" | "redo")) };
+                if !kept {
+                    continue;
+                }
+                let extra = if id == "select" { arrow } else { 0.0 };
+                let tip = crate::quick_access::tip(app, id);
+                let (clicked, rect) = click(ui, x, id, icon, &tip, enabled && idle, extra);
+                if id == "select" {
+                    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(crate::quick_access::SELECT_X), rect.left()));
+                }
+                if clicked {
+                    let ctx = ui.ctx().clone();
+                    crate::quick_access::run(app, &ctx, id);
+                }
+                last_right = rect.right();
+                x += step + extra;
             }
-            x += step;
-            if click(ui, x, "redo", &redo_tip, shown) {
-                FileAction::Redo.run(app);
+        } else {
+            // Save, Undo and Redo use the same actions as the File menu and shortcuts.
+            let shown = design_shown(app) && idle;
+            let tip = |id: &str, key: &str| {
+                let label = app.tr(id);
+                if shown { format!("{label} ({key})") } else { crate::i18n::format("ui.needs_design", &[("command", label)]) }
+            };
+            let (save_tip, undo_tip, redo_tip) = (tip("ui.save", "Ctrl+S"), tip("ui.undo", "Ctrl+Z"), tip("ui.redo", "Ctrl+Y"));
+            let (clicked, rect) = click(ui, x, "save", "save", &save_tip, shown, 0.0);
+            if clicked {
+                save(app);
             }
+            last_right = rect.right();
             x += step;
+            // Narrow windows retain Save; Undo and Redo remain available from their shortcuts and menus.
+            if !compact_actions && !app.native_file_menu {
+                let (clicked, _) = click(ui, x, "undo", "undo", &undo_tip, shown, 0.0);
+                if clicked {
+                    FileAction::Undo.run(app);
+                }
+                x += step;
+                let (clicked, rect) = click(ui, x, "redo", "redo", &redo_tip, shown, 0.0);
+                if clicked {
+                    FileAction::Redo.run(app);
+                }
+                last_right = rect.right();
+                x += step;
+            }
         }
         if file {
             app.ui.palette_open = false;
@@ -397,7 +439,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         // Document tabs follow the file actions; the house opens the start page.
         let captions = if app.custom_titlebar { crate::titlebar::WIDTH } else { 0.0 };
-        let separator_x = x - step + if compact_actions { 19.0 } else { 24.0 };
+        let separator_x = last_right + 8.0;
         app_bar_separator(ui, r, separator_x, "documents");
         let tabs_start = separator_x + 10.0;
         let report_text = crate::i18n::tr("ui.report_a_bug");
@@ -405,7 +447,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         let label_width = ui.painter().layout_no_wrap(report_text.to_string(), report_font.clone(), t.app_bar_text).size().x;
         let (report, report_label) = report_rect(r, captions, tabs_start, label_width);
         // Assistant, Settings, Help and Report a bug form the right-hand cluster.
-        if !app.native_file_menu && click(ui, help_x(report), "help", app.tr("ui.help"), true) {
+        if !app.native_file_menu && click(ui, help_x(report), "help", "help", app.tr("ui.help"), true, 0.0).0 {
             app.help.menu = !app.help.menu;
             let at = help_x(report);
             ui.ctx().data_mut(|d| {
@@ -497,6 +539,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     });
     file_menu(app, ui.ctx());
+    crate::quick_access::show_select(app, ui.ctx());
     let help_x = ui.ctx().data(|d| d.get_temp::<f32>(egui::Id::new("sc_help_anchor")).unwrap_or(300.0));
     crate::help::show(app, &ui.ctx().clone(), pos2(help_x - 14.0, APP_BAR_HEIGHT));
 }
@@ -1026,6 +1069,13 @@ fn dropdown_arrow(painter: &egui::Painter, at: egui::Pos2, ink: Color32) {
     crate::ui_kit::dropdown_indicator(painter, Rect::from_center_size(at, vec2(10.0, 10.0)), ink);
 }
 
+/// Whether the ribbon starts with SolidCraft's Design / Workspace switcher. Inventor, whose
+/// profile carries the Quick Access Toolbar, has no workspace switcher: its ribbon starts at the
+/// left edge.
+pub(crate) fn workspace_switcher_shown(app: &SolveApp) -> bool {
+    !crate::profile::active(app).quick_access
+}
+
 pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     crate::workspace::sync_context(app);
@@ -1034,17 +1084,19 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
     let button_height = if labels { BUTTON_HEIGHT } else { ICON_BUTTON_HEIGHT };
     let group_height = if labels { GROUP_HEIGHT } else { ICON_GROUP_HEIGHT };
     let ribbon_height = ribbon_height(labels);
-    let cards = crate::shell::Cards::new(ui.available_rect_before_wrap(), app.ui.layout, ribbon_height);
+    let switcher = workspace_switcher_shown(app);
+    let cards = crate::shell::Cards::new(ui.available_rect_before_wrap(), app.ui.layout, ribbon_height, switcher);
     let height = if floating { cards.bottom - ui.available_rect_before_wrap().top() } else { ribbon_height };
     let fill = if floating { Color32::TRANSPARENT } else { t.toolbar };
     let ribbon = Container::new(ui.ctx(), Surface::Chrome).edge("sc_toolbar", Edge::Top);
     let frame = Container::new(ui.ctx(), Surface::Chrome).edge_frame(fill);
     let chrome = ribbon.exact_size(height).show_separator_line(false).frame(frame).show(ui, |ui| {
         let r = if floating { Rect::from_min_max(cards.workspace.min, cards.ribbon.max) } else { frame.outer_rect(ui.max_rect()) };
-        let ws = if floating { cards.workspace } else { Rect::from_min_size(r.left_top(), vec2(WORKSPACE_WIDTH, ribbon_height - 1.0)) };
+        let ws_width = if switcher { WORKSPACE_WIDTH } else { 0.0 };
+        let ws = if floating { cards.workspace } else { Rect::from_min_size(r.left_top(), vec2(ws_width, ribbon_height - 1.0)) };
         let ribbon_left = if floating { cards.ribbon.left() } else { ws.right() };
         if floating {
-            for card in [ws, cards.ribbon] {
+            for card in cards.shown() {
                 let frame = Container::new(ui.ctx(), Surface::Chrome).frame(ui.ctx(), t.toolbar, crate::frame::Side::Left);
                 ui.painter().add(frame.paint(card));
                 // Blank card space owns clicks as well as its buttons.
@@ -1052,54 +1104,58 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             crate::scenario::publish_rect("ribbon:card", cards.ribbon);
         }
-        app.shell.cards = vec![ws, Rect::from_min_max(pos2(ribbon_left, r.top()), r.max)];
+        let ribbon_card = Rect::from_min_max(pos2(ribbon_left, r.top()), r.max);
+        app.shell.cards = if switcher { vec![ws, ribbon_card] } else { vec![ribbon_card] };
         let painter = ui.painter().clone();
         let bg = ui.interact(if floating { cards.ribbon } else { r }, ui.id().with("toolbar_bg"), Sense::click());
         if bg.secondary_clicked() {
             crate::context_menu::open_for(app, bg.interact_pointer_pos().unwrap_or(r.left_bottom()), crate::context_menu::Target::Toolbar);
         }
-        let wresp = ui.interact(ws, ui.id().with("workspace_switcher"), Sense::click());
-        let open = app.viewport.context_menu.is_some() && app.menu.target == crate::context_menu::Target::Workspace;
-        if wresp.hovered() || open {
-            painter.rect_filled(ws, if floating { t.radius_lg } else { 0 }, t.hover);
-        }
-        // Keep the accent straight while leaving the floating card's top corners round.
-        let accent_inset = if floating { f32::from(t.radius_lg) } else { 0.0 };
-        painter.rect_filled(
-            Rect::from_min_size(ws.left_top() + vec2(accent_inset, 0.0), vec2((ws.width() - 2.0 * accent_inset).max(0.0), t.space_3)),
-            egui::CornerRadius { nw: 0, ne: 0, sw: if floating { t.radius_sm / 2 } else { 0 }, se: if floating { t.radius_sm / 2 } else { 0 } },
-            t.accent,
-        );
-        if !floating {
-            t.secondary_line(&painter, [ws.right_top(), ws.right_bottom()], t.border);
-        }
-        let render = crate::render_workspace::active(app);
-        let workspace_icon = if render { "ws_render" } else { "ws_design" };
-        icons::paint_icon(
-            &painter,
-            Rect::from_center_size(pos2(ws.center().x, ws.top() + if labels { 39.0 } else { 25.0 }), vec2(30.0, 30.0)),
-            workspace_icon,
-            1.0,
-        );
-        ribbon_text(
-            ui,
-            pos2(ws.center().x, ws.top() + if labels { 69.0 } else { 50.0 }),
-            app.tr(if render { "ui.render" } else { "ui.design" }),
-            t.font_button,
-            t.text,
-            true,
-        );
-        let label = app.tr("ui.ribbon_workspace");
-        let label_width =
-            painter.layout_no_wrap(label.to_string(), FontId::proportional(crate::theme::Tokens::get().font_small), t.text_dim).size().x;
-        ribbon_text(ui, pos2(ws.center().x - 6.0, ws.top() + if labels { 89.0 } else { 70.0 }), label, t.font_small, t.text_dim, false);
-        dropdown_arrow(&painter, pos2(ws.center().x - 6.0 + label_width / 2.0 + 7.0, ws.top() + if labels { 89.5 } else { 70.5 }), t.text_dim);
-        if wresp.on_hover_text(app.tr("ui.change_workspace")).clicked() {
-            crate::context_menu::toggle_for(app, ws, ws.left_bottom(), crate::context_menu::Target::Workspace);
+        // SolidCraft's Design / Workspace switcher; Inventor has none.
+        if switcher {
+            let wresp = ui.interact(ws, ui.id().with("workspace_switcher"), Sense::click());
+            let open = app.viewport.context_menu.is_some() && app.menu.target == crate::context_menu::Target::Workspace;
+            if wresp.hovered() || open {
+                painter.rect_filled(ws, if floating { t.radius_lg } else { 0 }, t.hover);
+            }
+            // Keep the accent straight while leaving the floating card's top corners round.
+            let accent_inset = if floating { f32::from(t.radius_lg) } else { 0.0 };
+            painter.rect_filled(
+                Rect::from_min_size(ws.left_top() + vec2(accent_inset, 0.0), vec2((ws.width() - 2.0 * accent_inset).max(0.0), t.space_3)),
+                egui::CornerRadius { nw: 0, ne: 0, sw: if floating { t.radius_sm / 2 } else { 0 }, se: if floating { t.radius_sm / 2 } else { 0 } },
+                t.accent,
+            );
+            if !floating {
+                t.secondary_line(&painter, [ws.right_top(), ws.right_bottom()], t.border);
+            }
+            let render = crate::render_workspace::active(app);
+            let workspace_icon = if render { "ws_render" } else { "ws_design" };
+            icons::paint_icon(
+                &painter,
+                Rect::from_center_size(pos2(ws.center().x, ws.top() + if labels { 39.0 } else { 25.0 }), vec2(30.0, 30.0)),
+                workspace_icon,
+                1.0,
+            );
+            ribbon_text(
+                ui,
+                pos2(ws.center().x, ws.top() + if labels { 69.0 } else { 50.0 }),
+                app.tr(if render { "ui.render" } else { "ui.design" }),
+                t.font_button,
+                t.text,
+                true,
+            );
+            let label = app.tr("ui.ribbon_workspace");
+            let label_width =
+                painter.layout_no_wrap(label.to_string(), FontId::proportional(crate::theme::Tokens::get().font_small), t.text_dim).size().x;
+            ribbon_text(ui, pos2(ws.center().x - 6.0, ws.top() + if labels { 89.0 } else { 70.0 }), label, t.font_small, t.text_dim, false);
+            dropdown_arrow(&painter, pos2(ws.center().x - 6.0 + label_width / 2.0 + 7.0, ws.top() + if labels { 89.5 } else { 70.5 }), t.text_dim);
+            if wresp.on_hover_text(app.tr("ui.change_workspace")).clicked() {
+                crate::context_menu::toggle_for(app, ws, ws.left_bottom(), crate::context_menu::Target::Workspace);
+            }
+            crate::scenario::publish_rect("workspace_switcher", ws);
+            crate::scenario::publish_target("ribbon:workspace", ws);
         }
         crate::scenario::publish_rect("toolbar", r);
-        crate::scenario::publish_rect("workspace_switcher", ws);
-        crate::scenario::publish_target("ribbon:workspace", ws);
         ribbon_tabs(app, ui, Rect::from_min_max(pos2(ribbon_left, r.top()), pos2(r.right(), r.top() + TAB_ROW_HEIGHT)));
         // Panels.
         let tab = app.ui.tab.clone();
@@ -1632,7 +1688,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
     });
     if floating {
         let frame = Container::new(ui.ctx(), Surface::Chrome).frame(ui.ctx(), t.toolbar, crate::frame::Side::Left);
-        for card in [cards.workspace, cards.ribbon] {
+        for card in cards.shown() {
             Container::paint_inset(ui.painter(), frame.widget_rect(card), frame);
         }
     } else {
@@ -2038,14 +2094,14 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
     if app.file_load.busy() {
         return;
     }
-    // File is a custom Area, so it must claim Escape before the underlying editors and
-    // sketch shortcuts. Clear raw events too: egui may replay them on a layout pass.
+    // File and the Quick Access Select drop-down are custom Areas, so they must claim Escape
+    // before the underlying editors and sketch shortcuts. Clear raw events too: egui may replay
+    // them on a layout pass.
     let file_menu_id = egui::Id::new("sc_file_menu");
-    if !app.native_file_menu
-        && ctx.data(|d| d.get_temp::<bool>(file_menu_id).unwrap_or(false))
-        && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
-    {
+    let file_open = !app.native_file_menu && ctx.data(|d| d.get_temp::<bool>(file_menu_id).unwrap_or(false));
+    if (file_open || crate::quick_access::select_open(ctx)) && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
         ctx.data_mut(|d| d.insert_temp(file_menu_id, false));
+        crate::quick_access::close_select(ctx);
         egui::Popup::close_all(ctx);
         ctx.input_mut(|i| {
             i.raw.events.retain(|event| !matches!(event, egui::Event::Key { key: egui::Key::Escape, modifiers, .. } if modifiers.matches_logically(egui::Modifiers::NONE)));

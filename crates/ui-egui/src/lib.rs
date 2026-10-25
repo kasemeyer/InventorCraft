@@ -185,6 +185,7 @@ pub mod preview;
 #[cfg(test)]
 mod primitive_units_tests;
 pub mod profile;
+mod quick_access;
 pub mod recovery_ui;
 pub mod ref_images;
 pub mod render_workspace;
@@ -1812,8 +1813,9 @@ impl SolveApp {
         }
         let full = ui.available_rect_before_wrap();
         if floating {
-            let cards = shell::Cards::new(full, self.ui.layout, toolbar::ribbon_height(self.preferences.ribbon_labels));
-            self.shell.cards = vec![cards.workspace, cards.ribbon];
+            let switcher = toolbar::workspace_switcher_shown(self);
+            let cards = shell::Cards::new(full, self.ui.layout, toolbar::ribbon_height(self.preferences.ribbon_labels), switcher);
+            self.shell.cards = cards.shown();
             self.shell.history = if left_timeline {
                 let below_ribbon = egui::Rect::from_min_max(egui::pos2(full.left(), cards.bottom), full.max);
                 Some(timeline_left::floating_rect(self, below_ribbon))
