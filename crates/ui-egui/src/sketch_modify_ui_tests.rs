@@ -580,7 +580,7 @@ fn two_picked_lines_are_sent_as_live_references_and_restored_in_the_editor() {
 fn sketch_pattern_tools_are_promoted_together_and_open_from_the_toolbar() {
     let mut h = Harness::new();
     h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
-    let panels = crate::toolbar_custom::panel_lists("SKETCH");
+    let panels = crate::toolbar_custom::panel_lists(&h.app, "SKETCH");
     let (_, cmds, promoted) = panels.iter().find(|(panel, ..)| *panel == "PATTERN").unwrap();
     let ids: Vec<_> = cmds.iter().take(*promoted).map(|c| c.id).collect();
     assert_eq!(ids, ["sketch.mirror", "sketch.pattern.circular", "sketch.pattern.rectangular"]);

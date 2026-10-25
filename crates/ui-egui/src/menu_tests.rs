@@ -833,14 +833,14 @@ fn toolbar_pins_removes_reorders_and_keeps_its_layout() {
     let mut app = sample_app();
     app.ui.tab = "MODEL".into();
     let ids = |app: &SolveApp, panel: &str| -> Vec<&'static str> {
-        let lists = tc::panel_lists("MODEL");
+        let lists = tc::panel_lists(app, "MODEL");
         let (_, cmds, n) = lists.iter().find(|(p, ..)| *p == panel).unwrap();
         tc::buttons(app, "MODEL", panel, cmds, *n).iter().map(|c| c.id).collect()
     };
     let create = ids(&app, "CREATE");
     // Pin a command that isn't a button yet: it lands at the end of its panel.
     let extra =
-        tc::panel_lists("MODEL").iter().find(|(p, ..)| *p == "CREATE").unwrap().1.iter().map(|c| c.id).find(|id| !create.contains(id)).unwrap();
+        tc::panel_lists(&app, "MODEL").iter().find(|(p, ..)| *p == "CREATE").unwrap().1.iter().map(|c| c.id).find(|id| !create.contains(id)).unwrap();
     act(&mut app, &Target::ToolbarCommand { id: extra.into() }, "Pin to Toolbar");
     assert_eq!(ids(&app, "CREATE").last(), Some(&extra));
     // Remove a default button.

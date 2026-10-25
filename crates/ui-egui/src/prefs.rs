@@ -543,6 +543,9 @@ preference_settings! {
     theme: String = "dark".into(), PAGE_INTERFACE;
     /// Imported theme files (`theme_files`), kept here so they also work in the browser.
     custom_themes: Vec<crate::theme_files::ThemeFile> = Vec::new();
+    /// The interface profile (`profile.rs`): empty until the app's first run picks
+    /// `profile::SHIPPED`; tests and headless use leave it empty, which reads as SolidCraft.
+    ui_profile: String = String::new();
     /// Interface language (a registered locale ID).
     language: String = "en".into(), 0;
     /// Shared workspace composition; system windows and popups retain their purpose.
@@ -1931,6 +1934,9 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
     }
     let export = rest.remove("theme_export").and_then(|v| v.as_bool()).unwrap_or(false);
     let button = rest.remove("button");
+    if let Some(id) = rest.remove("ui_profile") {
+        crate::profile::choose(app, id.as_str().unwrap_or_default())?;
+    }
     let mut out = set(app, &serde_json::Value::Object(rest))?;
     match button.as_ref().and_then(|b| b.as_str()) {
         Some("ok") => close(app, false),
@@ -2022,7 +2028,7 @@ fn theme_choices(app: &SolveApp) -> Vec<(String, String)> {
 }
 
 /// Turn a theme on (a mode or a theme file's id); dark follows it.
-fn select_theme(app: &mut SolveApp, id: &str) {
+pub(crate) fn select_theme(app: &mut SolveApp, id: &str) {
     app.preferences.theme = id.to_string();
     match crate::theme_files::find(id, &app.preferences.custom_themes) {
         Some(f) => app.ui.dark = f.base.is_dark(),

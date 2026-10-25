@@ -139,8 +139,9 @@ pub fn search(app: &SolveApp, q: &str) -> Vec<Row> {
         .into_iter()
         .filter(|c| !crate::workspace::AGENT_ONLY.contains(&c.id))
         .filter_map(|c| {
-            let (home_tab, home_panel) = crate::workspace::destination(c).unwrap_or(("", ""));
-            let (label, tab, panel) = (crate::i18n::tr_label(c.label), crate::i18n::tr_label(home_tab), crate::i18n::tr_label(home_panel));
+            let (home_tab, home_panel) = crate::profile::ribbon(app).destination(c.id).unwrap_or(("", ""));
+            let (tab, panel) = (crate::profile::caption(app, home_tab, None), crate::profile::caption(app, home_tab, Some(home_panel)));
+            let label = crate::i18n::tr_label(c.label);
             let place = (!home_tab.is_empty()).then_some((tab, panel));
             let s = score(&q, label)
                 .max(score(&q, c.label))

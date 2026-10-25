@@ -31,12 +31,13 @@ pub struct ToolbarCustom {
 }
 
 impl ToolbarCustom {
-    /// Whether a command still uses a compact gallery cell in this panel.
-    pub fn in_gallery(&self, tab: &str, panel: &str, id: &str) -> bool {
+    /// Whether a command still uses a compact gallery cell in this panel (`scope`:
+    /// [`crate::profile::custom_scope`]).
+    pub fn in_gallery(&self, scope: &str, tab: &str, panel: &str, id: &str) -> bool {
         tab == "SKETCH"
             && panel == "CONSTRAIN"
             && crate::workspace::CONSTRAINT_GALLERY.contains(&id)
-            && !self.gallery_buttons.get(&format!("{WORKSPACE}/{tab}")).is_some_and(|ids| ids.iter().any(|c| c == id))
+            && !self.gallery_buttons.get(&format!("{scope}/{tab}")).is_some_and(|ids| ids.iter().any(|c| c == id))
     }
 
     pub fn prefs(&self) -> Value {
@@ -91,18 +92,18 @@ impl ToolbarCustom {
                 continue;
             }
             if let Some((t, p)) = crate::workspace::legacy_panel(tab, panel) {
-                pins.entry(key(t, p)).or_default();
+                pins.entry(key(WORKSPACE, t, p)).or_default();
             }
             for id in crate::workspace::legacy_buttons(tab, panel) {
                 if !ids.iter().any(|x| x == id)
                     && let Some((t, p)) = crate::workspace::legacy_destination(tab, panel, id)
                 {
-                    removals.entry(key(t, p)).or_default().insert(id.into());
+                    removals.entry(key(WORKSPACE, t, p)).or_default().insert(id.into());
                 }
             }
             for id in ids {
                 if let Some((t, p)) = crate::workspace::legacy_destination(tab, panel, &id) {
-                    let list = pins.entry(key(t, p)).or_default();
+                    let list = pins.entry(key(WORKSPACE, t, p)).or_default();
                     if !list.contains(&id) {
                         list.push(id);
                     }
@@ -130,13 +131,16 @@ impl ToolbarCustom {
     }
 }
 
-fn key(tab: &str, panel: &str) -> String {
-    format!("{WORKSPACE}/{tab}/{panel}")
+/// A panel's key: `"<scope>/<tab>/<panel>"` (`scope`: [`crate::profile::custom_scope`]; version-1
+/// keys are SolidCraft's, [`WORKSPACE`]).
+fn key(scope: &str, tab: &str, panel: &str) -> String {
+    format!("{scope}/{tab}/{panel}")
 }
 
 /// The buttons a panel shows: the user's list, or the first `promoted` commands of the panel.
 pub fn buttons(app: &SolveApp, tab: &str, panel: &str, cmds: &[&'static CommandSpec], promoted: usize) -> Vec<&'static CommandSpec> {
-    match app.toolbar_custom.panels.get(&key(tab, panel)) {
+    let scope = crate::profile::custom_scope(app);
+    match app.toolbar_custom.panels.get(&key(&scope, tab, panel)) {
         Some(ids) => ids.iter().filter_map(|id| solidcraft_engine::find_command(id)).collect(),
         None => cmds.iter().take(promoted).copied().collect(),
     }
@@ -145,35 +149,49 @@ pub fn buttons(app: &SolveApp, tab: &str, panel: &str, cmds: &[&'static CommandS
 /// A tab's panels with their commands and default button counts.
 pub type PanelLists = Vec<(&'static str, Vec<&'static CommandSpec>, usize)>;
 
-/// The panels of a tab with their commands and default button counts (what the toolbar draws).
-/// Made from the command registry and the ribbon's layout, which never change while the app
-/// runs, so each tab's lists are worked out once: the toolbar asks for them every frame, and
-/// working them out matches every command against every section (about a millisecond a frame).
-pub fn panel_lists(tab: &str) -> PanelLists {
+/// The panels of a tab of the active profile's ribbon for the active document, with their
+/// commands and default button counts (what the toolbar draws), less the panels the ribbon
+/// hides (C3). Made from the command registry and the profiles, which never change while the
+/// app runs, so each tab's lists are worked out once per profile, kind and sketching state: the
+/// toolbar asks for them every frame.
+pub fn panel_lists(app: &SolveApp, tab: &str) -> PanelLists {
     static LISTS: std::sync::Mutex<BTreeMap<String, PanelLists>> = std::sync::Mutex::new(BTreeMap::new());
-    let Ok(mut lists) = LISTS.lock() else { return panel_lists_of(tab) };
-    lists.entry(tab.to_string()).or_insert_with(|| panel_lists_of(tab)).clone()
+    let ribbon = crate::profile::ribbon(app);
+    let sketching = app.session.active_sketch.is_some();
+    let cache = format!("{}/{:?}/{tab}/{sketching}", crate::profile::active(app).id, app.session.doc.kind);
+    let mut lists = match LISTS.lock() {
+        Ok(mut lists) => lists.entry(cache).or_insert_with(|| panel_lists_of(ribbon, tab, sketching)).clone(),
+        Err(_) => panel_lists_of(ribbon, tab, sketching),
+    };
+    let hidden = |panel: &str| ribbon.tab(tab).and_then(|t| t.panel(panel)).is_some_and(|p| p.hidden);
+    lists.retain(|(panel, ..)| !hidden(panel));
+    lists
 }
 
-/// [`panel_lists`] worked out from the registry.
-fn panel_lists_of(tab: &str) -> PanelLists {
-    let specs = command_specs();
-    crate::toolbar::panels(tab)
+/// [`panel_lists`] worked out from a ribbon: the tab's panels shown always (and those shown
+/// while sketching, when `sketching`), with their registry commands, keeping a panel only when
+/// it lists some command (or is SELECT, which holds the selection filter).
+fn panel_lists_of(ribbon: &'static crate::profile::Ribbon, tab: &str, sketching: bool) -> PanelLists {
+    use crate::profile::Shown;
+    let Some(tab) = ribbon.tab(tab) else { return Vec::new() };
+    tab.panels
         .iter()
-        .filter_map(|panel| {
-            let (cmds, n) = crate::workspace::layout(tab, panel, &specs)?;
-            (!cmds.is_empty() || *panel == "SELECT").then_some((*panel, cmds, n))
+        .filter(|p| p.shown == Shown::Always || (sketching && p.shown == Shown::Sketch))
+        .filter_map(|p| {
+            let cmds: Vec<&'static CommandSpec> = p.commands.iter().filter_map(|id| solidcraft_engine::find_command(id)).collect();
+            (!cmds.is_empty() || p.id == "SELECT").then_some((p.id.as_str(), cmds, p.promoted))
         })
         .collect()
 }
 
 /// The buttons of a panel as ids, made the user's own list (so it can change).
 fn own(app: &mut SolveApp, tab: &str, panel: &str) -> Vec<String> {
-    let k = key(tab, panel);
+    let scope = crate::profile::custom_scope(app);
+    let k = key(&scope, tab, panel);
     if let Some(v) = app.toolbar_custom.panels.get(&k) {
         return v.clone();
     }
-    let lists = panel_lists(tab);
+    let lists = panel_lists(app, tab);
     let ids: Vec<String> =
         lists.iter().find(|(p, ..)| *p == panel).map(|(_, cmds, n)| cmds.iter().take(*n).map(|c| c.id.to_string()).collect()).unwrap_or_default();
     ids
@@ -181,12 +199,12 @@ fn own(app: &mut SolveApp, tab: &str, panel: &str) -> Vec<String> {
 
 /// Where a command is a button on a tab now: its panel.
 pub fn pinned_on(app: &SolveApp, tab: &str, id: &str) -> Option<&'static str> {
-    panel_lists(tab).into_iter().find(|(panel, cmds, n)| buttons(app, tab, panel, cmds, *n).iter().any(|c| c.id == id)).map(|(p, ..)| p)
+    panel_lists(app, tab).into_iter().find(|(panel, cmds, n)| buttons(app, tab, panel, cmds, *n).iter().any(|c| c.id == id)).map(|(p, ..)| p)
 }
 
 /// The panel a command belongs to on a tab (its drop-down), or the tab's first panel.
-fn home_panel(tab: &str, id: &str) -> Option<&'static str> {
-    let lists = panel_lists(tab);
+fn home_panel(app: &SolveApp, tab: &str, id: &str) -> Option<&'static str> {
+    let lists = panel_lists(app, tab);
     lists.iter().find(|(_, cmds, _)| cmds.iter().any(|c| c.id == id)).or(lists.first()).map(|(p, ..)| *p)
 }
 
@@ -198,10 +216,11 @@ pub fn pin(app: &mut SolveApp, tab: &str, id: &str) -> Result<(), String> {
     if pinned_on(app, tab, id).is_some() {
         return Ok(());
     }
-    let panel = home_panel(tab, id).ok_or_else(|| format!("the {tab} tab has no panels"))?;
+    let panel = home_panel(app, tab, id).ok_or_else(|| format!("the {tab} tab has no panels"))?;
     let mut ids = own(app, tab, panel);
     ids.push(id.to_string());
-    app.toolbar_custom.panels.insert(key(tab, panel), ids);
+    let scope = crate::profile::custom_scope(app);
+    app.toolbar_custom.panels.insert(key(&scope, tab, panel), ids);
     Ok(())
 }
 
@@ -210,16 +229,18 @@ pub fn remove(app: &mut SolveApp, tab: &str, id: &str) {
     let Some(panel) = pinned_on(app, tab, id) else { return };
     let mut ids = own(app, tab, panel);
     ids.retain(|x| x != id);
-    app.toolbar_custom.panels.insert(key(tab, panel), ids);
+    let scope = crate::profile::custom_scope(app);
+    app.toolbar_custom.panels.insert(key(&scope, tab, panel), ids);
 }
 
 /// Move a button before another one (`before`: None puts it at the end of `panel`).
 pub fn reorder(app: &mut SolveApp, tab: &str, id: &str, panel: &str, before: Option<&str>) {
+    let scope = crate::profile::custom_scope(app);
     // A gallery command dropped on a gallery cell goes (back) into the gallery; dropped anywhere
     // else it becomes a full-size button.
     if tab == "SKETCH" && crate::workspace::CONSTRAINT_GALLERY.contains(&id) {
-        let into_gallery = before.is_some_and(|b| app.toolbar_custom.in_gallery(tab, panel, b));
-        let ids = app.toolbar_custom.gallery_buttons.entry(format!("{WORKSPACE}/{tab}")).or_default();
+        let into_gallery = before.is_some_and(|b| app.toolbar_custom.in_gallery(&scope, tab, panel, b));
+        let ids = app.toolbar_custom.gallery_buttons.entry(format!("{scope}/{tab}")).or_default();
         ids.retain(|c| c != id);
         if !into_gallery {
             ids.push(id.to_string());
@@ -228,13 +249,13 @@ pub fn reorder(app: &mut SolveApp, tab: &str, id: &str, panel: &str, before: Opt
     if let Some(from) = pinned_on(app, tab, id) {
         let mut ids = own(app, tab, from);
         ids.retain(|x| x != id);
-        app.toolbar_custom.panels.insert(key(tab, from), ids);
+        app.toolbar_custom.panels.insert(key(&scope, tab, from), ids);
     }
     let mut ids = own(app, tab, panel);
     ids.retain(|x| x != id);
     let at = before.and_then(|b| ids.iter().position(|x| x == b)).unwrap_or(ids.len());
     ids.insert(at, id.to_string());
-    app.toolbar_custom.panels.insert(key(tab, panel), ids);
+    app.toolbar_custom.panels.insert(key(&scope, tab, panel), ids);
 }
 
 /// The pin icon of a drop-down row: pin the command, or remove it when it is pinned.
@@ -248,9 +269,10 @@ pub fn toggle(app: &mut SolveApp, tab: &str, id: &str) {
 
 /// Reset Toolbar: a tab's panels back to their defaults.
 pub fn reset(app: &mut SolveApp, tab: &str) {
-    let prefix = format!("{WORKSPACE}/{tab}/");
+    let scope = crate::profile::custom_scope(app);
+    let prefix = format!("{scope}/{tab}/");
     app.toolbar_custom.panels.retain(|k, _| !k.starts_with(&prefix));
-    app.toolbar_custom.gallery_buttons.remove(&format!("{WORKSPACE}/{tab}"));
+    app.toolbar_custom.gallery_buttons.remove(&format!("{scope}/{tab}"));
 }
 
 /// The menu of a command (toolbar button, drop-down row, S box row).
@@ -345,11 +367,11 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
                         .min(crate::theme::Tokens::get().control_height * 20.0),
                 )
                 .show(ui, |ui| {
-                    for (panel, cmds, n) in panel_lists(&tab) {
+                    for (panel, cmds, n) in panel_lists(app, &tab) {
                         if cmds.is_empty() {
                             continue;
                         }
-                        ui_kit::section(ui, panel, app.tr_label(panel), true, |ui| {
+                        ui_kit::section(ui, panel, &crate::profile::panel_label(app, &tab, panel), true, |ui| {
                             let shown = buttons(app, &tab, panel, &cmds, n);
                             for c in &cmds {
                                 let mut on = shown.iter().any(|b| b.id == c.id) || pinned_on(app, &tab, c.id).is_some();
@@ -386,16 +408,20 @@ mod migration_tests {
     use super::*;
 
     /// Each tab's panel lists are worked out once and come back the same as worked out anew,
-    /// for every tab the ribbon has (and an unknown one).
+    /// for every tab the SolidCraft ribbon has (and an unknown one).
     #[test]
     fn panel_lists_are_kept_and_match_the_registry() {
+        use solidcraft_engine::Session;
+        let app = SolveApp::new(Session::default(), crate::Services::default());
         let tabs: std::collections::BTreeSet<&str> = crate::workspace::SECTIONS.iter().map(|s| s.tab).chain(["NO SUCH TAB"]).collect();
         let ids = |l: &PanelLists| l.iter().map(|(p, cmds, n)| (*p, cmds.iter().map(|c| c.id).collect::<Vec<_>>(), *n)).collect::<Vec<_>>();
         for tab in tabs {
-            let fresh = panel_lists_of(tab);
-            assert_eq!(ids(&panel_lists(tab)), ids(&fresh), "{tab}");
-            assert_eq!(ids(&panel_lists(tab)), ids(&fresh), "{tab}, kept");
+            let fresh = panel_lists_of(crate::profile::ribbon(&app), tab, false);
+            assert_eq!(ids(&panel_lists(&app, tab)), ids(&fresh), "{tab}");
+            assert_eq!(ids(&panel_lists(&app, tab)), ids(&fresh), "{tab}, kept");
         }
+        assert!(panel_lists(&app, "NO SUCH TAB").is_empty());
+        assert!(!panel_lists(&app, "MODEL").is_empty());
     }
 
     #[test]

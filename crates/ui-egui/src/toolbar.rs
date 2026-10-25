@@ -25,11 +25,6 @@ fn panel_accent(t: &Tokens, tab: &str, panel: &str) -> Color32 {
     crate::theme::TabAccent::for_tab(t, tab).color
 }
 
-/// Panels shown on each tab (in order). Commands come from the registry by (tab, panel).
-pub fn panels(tab: &str) -> Vec<&'static str> {
-    crate::workspace::panels(tab)
-}
-
 /// How a panel is drawn on a toolbar that may be too narrow for every button.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Fit {
@@ -874,7 +869,7 @@ fn ribbon_button_galley(painter: &egui::Painter, label: &str, width: f32, color:
 }
 
 /// Ribbon headings use the translated labels, with normal word casing instead of registry caps.
-fn ribbon_label(app: &SolveApp, label: &str) -> String {
+pub(crate) fn ribbon_label(app: &SolveApp, label: &str) -> String {
     let label = app
         .tr_label(label)
         .split_whitespace()
@@ -901,7 +896,7 @@ fn ribbon_text(ui: &egui::Ui, at: egui::Pos2, text: &str, size: f32, color: Colo
 
 /// SKETCH while editing a sketch and SHEET METAL while a sheet body is active take the contextual
 /// tab style; SHEET METAL is an ordinary tab otherwise.
-fn contextual_tab(app: &SolveApp, tab: &str) -> bool {
+pub(crate) fn contextual_tab(app: &SolveApp, tab: &str) -> bool {
     tab == "SKETCH" || (tab == "SHEET METAL" && crate::workspace::sheet_body(app).is_some())
 }
 
@@ -911,7 +906,10 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) {
     let widths: Vec<_> = tabs
         .iter()
         .map(|tab| {
-            ui.painter().layout_no_wrap(ribbon_label(app, tab), crate::fonts::semibold(crate::theme::Tokens::get().font_button), t.text).size().x
+            ui.painter()
+                .layout_no_wrap(crate::profile::tab_label(app, tab), crate::fonts::semibold(crate::theme::Tokens::get().font_button), t.text)
+                .size()
+                .x
                 + 24.0
         })
         .collect();
@@ -957,7 +955,7 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) {
                         ui.scroll_to_rect(tr, Some(egui::Align::Center));
                     }
                     let response = ui.interact(tr, ui.id().with(("tab", tab)), Sense::click());
-                    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, ribbon_label(app, tab)));
+                    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, crate::profile::tab_label(app, tab)));
                     let accent = crate::theme::TabAccent::for_tab(&t, tab);
                     let fill = if contextual {
                         accent.color
@@ -972,7 +970,7 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) {
                     ribbon_text(
                         ui,
                         tr.center(),
-                        &ribbon_label(app, tab),
+                        &crate::profile::tab_label(app, tab),
                         t.font_button,
                         if contextual {
                             accent.on_fill(&t)
@@ -1100,6 +1098,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
         ribbon_tabs(app, ui, Rect::from_min_max(pos2(ribbon_left, r.top()), pos2(r.right(), r.top() + TAB_ROW_HEIGHT)));
         // Panels.
         let tab = app.ui.tab.clone();
+        let scope = crate::profile::custom_scope(app);
         // The command whose tool or dialog is open right now, shown pressed in the toolbar.
         let running: Option<String> = match (&app.tool, &app.dialog) {
             (Some(tool), _) => Some(tool.cmd.to_string()),
@@ -1119,14 +1118,14 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
         let mut overflow = Vec::new();
         // Every panel with all its buttons (the user's pins have no cap); a toolbar too narrow
         // for them narrows the buttons, then trims panels into their drop-down and the » menu.
-        let lists: Vec<_> = crate::toolbar_custom::panel_lists(&tab)
+        let lists: Vec<_> = crate::toolbar_custom::panel_lists(app, &tab)
             .into_iter()
             .map(|(panel, cmds, promote)| {
                 let mut shown = crate::toolbar_custom::buttons(app, &tab, panel, &cmds, promote);
                 // Gallery cells are painted together after the large buttons, in reading order.
                 if tab == "SKETCH" && panel == "CONSTRAIN" {
                     shown.sort_by_key(|c| {
-                        if app.toolbar_custom.in_gallery(&tab, panel, c.id) {
+                        if app.toolbar_custom.in_gallery(&scope, &tab, panel, c.id) {
                             crate::workspace::CONSTRAINT_GALLERY.iter().position(|id| *id == c.id).map(|i| i + 1).unwrap_or(0)
                         } else {
                             0
@@ -1141,11 +1140,11 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             .map(|(panel, _, shown)| {
                 let mut widths: Vec<_> = shown
                     .iter()
-                    .filter(|c| !app.toolbar_custom.in_gallery(&tab, panel, c.id))
+                    .filter(|c| !app.toolbar_custom.in_gallery(&scope, &tab, panel, c.id))
                     .map(|c| {
                         let family = crate::sketch_families::family(c.id)
                             .filter(|f| tab == "SKETCH" && *panel == "CREATE" && f.commands.first().copied() == Some(c.id));
-                        let label = family.map_or_else(|| crate::workspace::ribbon_button_label(c), |f| f.label);
+                        let label = family.map_or_else(|| crate::profile::button_label(app, c), |f| f.label);
                         if labels {
                             ButtonSize { width: ribbon_button_width(&painter, app.tr_label(label)), min_width: BUTTON_MIN_WIDTH }
                         } else {
@@ -1154,7 +1153,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                         }
                     })
                     .collect();
-                if shown.iter().any(|c| app.toolbar_custom.in_gallery(&tab, panel, c.id)) {
+                if shown.iter().any(|c| app.toolbar_custom.in_gallery(&scope, &tab, panel, c.id)) {
                     widths.push(ButtonSize { width: gallery_width, min_width: gallery_width });
                 }
                 PanelSize { buttons: widths }
@@ -1208,7 +1207,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             let popup_id = ui.id().with(("panel_menu", &tab, panel));
             // Dropped on the panel's free space (all of a collapsed panel): the button goes to
             // its end.
-            let gallery: Vec<_> = shown.iter().copied().filter(|c| app.toolbar_custom.in_gallery(&tab, panel, c.id)).collect();
+            let gallery: Vec<_> = shown.iter().copied().filter(|c| app.toolbar_custom.in_gallery(&scope, &tab, panel, c.id)).collect();
             let large: Vec<_> = shown.iter().copied().filter(|c| !gallery.iter().any(|g| g.id == c.id)).collect();
             let drawn = if collapsed { 0 } else { plan.shown.min(button_widths.len()) };
             // Buttons narrower than the panel's minimum width (a one-button panel) are centred.
@@ -1329,7 +1328,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                         sketch_menu_rows(app, ui, &variants, &mut menu, &mut toggle);
                     });
                 } else if labels {
-                    let label = app.tr_label(crate::workspace::ribbon_button_label(selected));
+                    let label = app.tr_label(crate::profile::button_label(app, selected));
                     let color = if info.enabled { t.text } else { t.text_dim };
                     let galley = ribbon_button_galley(&painter, label, whole.width() - BUTTON_LABEL_PADDING, color);
                     painter.galley(pos2(whole.center().x, whole.top() + 32.0), galley, t.text);
@@ -1413,7 +1412,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             if panel_open || hot {
                 painter.rect_filled(lr, t.radius_sm, if panel_open { accent.soft } else { t.hover });
             }
-            let label = if finish { app.tr("ui.ribbon_exit").to_string() } else { ribbon_label(app, panel) };
+            let label = if finish { app.tr("ui.ribbon_exit").to_string() } else { crate::profile::panel_label(app, &tab, panel) };
             let font = if panel_open || hot {
                 crate::fonts::semibold(crate::theme::Tokens::get().font_caption)
             } else {
@@ -1474,7 +1473,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 section_footer(ui);
                                 return;
                             }
-                            let grouped = crate::workspace::grouped_commands(&tab, panel, &cmds);
+                            let grouped = crate::profile::grouped_commands(app, &tab, panel, &cmds);
                             let cmds: Vec<_> = grouped.iter().map(|(_, c)| *c).collect();
                             let row_w = dropdown_width(app, ui, &cmds);
                             ui.set_width(row_w);
@@ -3105,7 +3104,7 @@ mod ribbon_gallery_tests {
         let mut loaded = crate::toolbar_custom::ToolbarCustom::default();
         loaded.load(&older);
         assert_eq!(loaded.panels, h.app.toolbar_custom.panels);
-        assert!(loaded.in_gallery("SKETCH", "CONSTRAIN", id));
+        assert!(loaded.in_gallery("DESIGN", "SKETCH", "CONSTRAIN", id));
         crate::toolbar_custom::reset(&mut h.app, "MODEL");
         h.frames(2);
         assert!(rect_of(&cell_handle).is_none());
@@ -3179,7 +3178,7 @@ mod fill_width_tests {
                 let right = bar.right() - 4.0 - finish.map_or(0.0, |f| f.width() + 4.0);
                 let count = |name: &str| crate::scenario::count_of(name).unwrap_or(-1.0);
                 let (collapsed, trimmed, more) = (count("toolbar_collapsed"), count("toolbar_trimmed"), count("toolbar_more"));
-                let lists = crate::toolbar_custom::panel_lists(tab);
+                let lists = crate::toolbar_custom::panel_lists(&h.app, tab);
                 let mut end = bar.left();
                 let mut on_bar = 0;
                 for (panel, cmds, promote) in &lists {

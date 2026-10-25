@@ -288,6 +288,10 @@ pub struct UiState {
     /// Last contextual body/sketch, only used to select on entry.
     #[serde(skip)]
     pub ribbon_context: Option<String>,
+    /// The profile and document kind the ribbon was last set up for (`"<profile>/<kind>"`);
+    /// when either changes the ribbon goes to its home tab.
+    #[serde(skip)]
+    pub ribbon_key: Option<String>,
     pub show_browser: bool,
     pub show_timeline: bool,
     pub show_grid: bool,
@@ -315,6 +319,7 @@ impl Default for UiState {
             layout: Default::default(),
             tab: "MODEL".into(),
             ribbon_context: None,
+            ribbon_key: None,
             sketch_return_tab: None,
             show_browser: true,
             show_timeline: true,

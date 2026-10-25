@@ -11,6 +11,19 @@ pub(super) fn interface(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             ui,
             |ui| {
                 ui_kit::settings_form(ui, t.form_label_width + t.space_16 + t.space_6, |ui| {
+                    let rect = ui_kit::row(ui, app.tr("prefs.ui_profile"), |ui| {
+                        let profiles = crate::profile::all();
+                        let names: Vec<&str> = profiles.iter().map(|p| app.tr(&p.name)).collect();
+                        let active = crate::profile::active(app).id.as_str();
+                        let mut selected = profiles.iter().position(|p| p.id == active).unwrap_or(0);
+                        if ui_kit::segmented(ui, &mut selected, &names, Default::default())
+                            && let Some(p) = profiles.get(selected)
+                        {
+                            let _ = crate::profile::choose(app, &p.id);
+                        }
+                        ui.min_rect()
+                    });
+                    crate::scenario::publish_target("prefs:ui_profile", rect);
                     ui_kit::row(ui, app.tr("prefs.workspace"), |ui| {
                         let mut selected = usize::from(app.ui.layout == crate::shell::LayoutMode::Docked);
                         if ui_kit::segmented(

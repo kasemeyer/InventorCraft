@@ -39,17 +39,22 @@ pub fn groups(tab: &str, panel: &str) -> &'static [CommandGroup] {
 
 /// Menu order is independent of the ribbon's promoted-button order.
 pub fn grouped_commands<'a>(tab: &str, panel: &str, commands: &[&'a CommandSpec]) -> Vec<(Option<&'static str>, &'a CommandSpec)> {
-    let groups = groups(tab, panel);
+    group_commands(&groups(tab, panel).iter().map(|g| (g.label, g.ids.to_vec())).collect::<Vec<_>>(), commands)
+}
+
+/// `commands` in drop-down order: each group's commands under its heading (on the first one),
+/// then the ungrouped ones in their order. Every profile's panels group through this.
+pub fn group_commands<'a, 'g>(groups: &[(&'g str, Vec<&'g str>)], commands: &[&'a CommandSpec]) -> Vec<(Option<&'g str>, &'a CommandSpec)> {
     let mut out = Vec::new();
-    for group in groups {
-        let mut heading = Some(group.label);
-        for id in group.ids {
+    for (label, ids) in groups {
+        let mut heading = Some(*label);
+        for id in ids {
             if let Some(command) = commands.iter().find(|c| c.id == *id) {
                 out.push((heading.take(), *command));
             }
         }
     }
-    out.extend(commands.iter().filter(|c| !groups.iter().any(|g| g.ids.contains(&c.id))).map(|c| (None, *c)));
+    out.extend(commands.iter().filter(|c| !groups.iter().any(|(_, ids)| ids.contains(&c.id))).map(|c| (None, *c)));
     out
 }
 
@@ -517,18 +522,21 @@ pub fn sheet_body(app: &crate::SolveApp) -> Option<String> {
     state.sheets.iter().find(|s| s.body == body).map(|s| s.body.clone())
 }
 
+/// The active profile's tabs for the active document: those shown always, and the sketch tabs
+/// while a sketch is open. SolidCraft's SHEET METAL is always reachable, as before the ribbon
+/// redesign: a sheet-metal part starts from an ordinary sketch or solid.
 pub fn visible_tabs(app: &crate::SolveApp) -> Vec<&'static str> {
+    use crate::profile::Shown;
     if crate::render_workspace::active(app) {
         return vec!["RENDER"];
     }
-    let mut tabs = TABS.to_vec();
-    if app.session.active_sketch.is_some() {
-        tabs.push("SKETCH");
-    }
-    // Always reachable, as before the ribbon redesign: a sheet-metal part starts from an
-    // ordinary sketch or solid, so the tab cannot wait for a sheet body.
-    tabs.push("SHEET METAL");
-    tabs
+    let sketching = app.session.active_sketch.is_some();
+    crate::profile::ribbon(app)
+        .tabs
+        .iter()
+        .filter(|t| t.shown == Shown::Always || (sketching && t.shown == Shown::Sketch))
+        .map(|t| t.id.as_str())
+        .collect()
 }
 
 /// Select contextual tabs on entry (or a different sheet body), allowing the other tabs to
@@ -536,6 +544,14 @@ pub fn visible_tabs(app: &crate::SolveApp) -> Vec<&'static str> {
 pub fn sync_context(app: &mut crate::SolveApp) {
     if crate::render_workspace::active(app) {
         return;
+    }
+    let ribbon = crate::profile::ribbon(app);
+    // Another profile or document kind starts over on its ribbon's home tab.
+    let key = format!("{}/{:?}", crate::profile::active(app).id, app.session.doc.kind);
+    if app.ui.ribbon_key.as_deref() != Some(key.as_str()) {
+        app.ui.tab = ribbon.home().into();
+        app.ui.ribbon_context = None;
+        app.ui.ribbon_key = Some(key);
     }
     let context = app.session.active_sketch.map(|id| format!("sketch:{id}")).or_else(|| sheet_body(app).map(|body| format!("sheet:{body}")));
     if app.ui.ribbon_context != context {
@@ -555,17 +571,17 @@ pub fn sync_context(app: &mut crate::SolveApp) {
             "SKETCH"
         } else if let Some(back) = back.as_deref().filter(|t| *t != "SKETCH" && visible_tabs(app).contains(t)) {
             // Finishing a sketch goes back to the tab it came from (#3250).
-            visible_tabs(app).into_iter().find(|t| t == &back).unwrap_or("MODEL")
-        } else if context.is_some() {
+            visible_tabs(app).into_iter().find(|t| t == &back).unwrap_or(ribbon.home())
+        } else if context.is_some() && visible_tabs(app).contains(&"SHEET METAL") {
             "SHEET METAL"
         } else {
-            "MODEL"
+            ribbon.home()
         }
         .into();
         app.ui.ribbon_context = context;
     }
     if !visible_tabs(app).contains(&app.ui.tab.as_str()) {
-        app.ui.tab = "MODEL".into();
+        app.ui.tab = ribbon.home().into();
     }
 }
 
@@ -573,10 +589,10 @@ pub fn select_command_tab(app: &mut crate::SolveApp, id: &str) {
     sync_context(app);
     let Some(c) = solidcraft_engine::find_command(id) else { return };
     // Keep the tab a toolbar click came from when it already lists this shared command.
-    if crate::toolbar_custom::panel_lists(&app.ui.tab).iter().any(|(_, cmds, _)| cmds.iter().any(|c| c.id == id)) {
+    if crate::toolbar_custom::panel_lists(app, &app.ui.tab).iter().any(|(_, cmds, _)| cmds.iter().any(|c| c.id == id)) {
         return;
     }
-    if let Some((tab, _)) = destination(c) {
+    if let Some((tab, _)) = crate::profile::ribbon(app).destination(c.id) {
         if tab == "RENDER" {
             return;
         } // The Render workspace owns its entry/exit lifecycle.

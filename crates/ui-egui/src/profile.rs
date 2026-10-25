@@ -7,7 +7,9 @@ use std::sync::OnceLock;
 
 use serde::Deserialize;
 use solidcraft_engine::doc::DocumentKind;
-use solidcraft_engine::{command_specs, find_command};
+use solidcraft_engine::{CommandSpec, command_specs, find_command};
+
+use crate::SolveApp;
 
 use crate::workspace;
 
@@ -101,7 +103,8 @@ impl Ribbon {
 
     /// Where a command lives: SolidCraft answers exactly as `workspace::destination`; a data
     /// profile answers with the first (tab, panel) that lists it, searching the home tab first,
-    /// then the other `Always` tabs in order, then the rest.
+    /// then the other `Always` tabs in order, then the rest; a visible panel anywhere wins over
+    /// a hidden one.
     pub fn destination(&self, command: &str) -> Option<(&str, &str)> {
         self.homes.get(command).map(|(tab, panel)| (tab.as_str(), panel.as_str()))
     }
@@ -111,20 +114,24 @@ impl Ribbon {
         self.tabs.iter().flat_map(|t| &t.panels).flat_map(|p| &p.commands).map(String::as_str).collect()
     }
 
-    /// A data profile's `homes`, in the search order `destination` documents.
+    /// A data profile's `homes`, in the search order `destination` documents: visible panels
+    /// first, so a command on a hidden panel (C3) goes there only when no visible one lists it.
     fn search_homes(&self) -> BTreeMap<String, (String, String)> {
         let home = self.home();
-        let order = self
+        let order: Vec<&RibbonTab> = self
             .tabs
             .iter()
             .filter(|t| t.id == home)
             .chain(self.tabs.iter().filter(|t| t.id != home && t.shown == Shown::Always))
-            .chain(self.tabs.iter().filter(|t| t.id != home && t.shown != Shown::Always));
+            .chain(self.tabs.iter().filter(|t| t.id != home && t.shown != Shown::Always))
+            .collect();
         let mut homes = BTreeMap::new();
-        for tab in order {
-            for panel in &tab.panels {
-                for c in &panel.commands {
-                    homes.entry(c.clone()).or_insert_with(|| (tab.id.clone(), panel.id.clone()));
+        for hidden in [false, true] {
+            for tab in &order {
+                for panel in tab.panels.iter().filter(|p| p.hidden == hidden) {
+                    for c in &panel.commands {
+                        homes.entry(c.clone()).or_insert_with(|| (tab.id.clone(), panel.id.clone()));
+                    }
                 }
             }
         }
@@ -637,6 +644,122 @@ pub fn get(id: &str) -> Option<&'static Profile> {
     all().iter().find(|p| p.id == id)
 }
 
+/// The profile the shell follows: `prefs.ui_profile`, or SolidCraft when it is empty (never
+/// chosen: tests and headless use), or `SHIPPED` when it names a profile this build lacks.
+pub fn active(app: &SolveApp) -> &'static Profile {
+    let id = app.preferences.ui_profile.as_str();
+    let found = if id.is_empty() { get(SOLIDCRAFT) } else { get(id).or_else(|| get(SHIPPED)) };
+    found.or_else(|| all().first()).unwrap_or_else(|| {
+        // `all()` always starts with SolidCraft; this only satisfies the type.
+        static FALLBACK: OnceLock<Profile> = OnceLock::new();
+        FALLBACK.get_or_init(solidcraft)
+    })
+}
+
+/// The active profile's ribbon for the active document's kind.
+pub fn ribbon(app: &SolveApp) -> &'static Ribbon {
+    active(app).ribbon(app.session.doc.kind)
+}
+
+/// Turn a profile on and apply its defaults (nav preset, navigator, theme, history dock).
+pub fn choose(app: &mut SolveApp, id: &str) -> Result<(), String> {
+    let Some(profile) = get(id) else {
+        let ids: Vec<&str> = all().iter().map(|p| p.id.as_str()).collect();
+        return Err(format!("no interface profile `{id}` ({})", ids.join(", ")));
+    };
+    app.preferences.ui_profile = profile.id.clone();
+    let d = &profile.defaults;
+    if let Some(nav) = &d.nav {
+        app.preferences.nav = nav.clone();
+    }
+    if let Some(navigator) = d.navigator {
+        app.preferences.navigator_style = navigator;
+    }
+    if let Some(theme) = &d.theme {
+        crate::prefs::select_theme(app, theme);
+    }
+    if let Some(history) = d.history {
+        let (left, under) = match history {
+            History::Bottom => (false, false),
+            History::Left => (true, false),
+            History::UnderBrowser => (true, true),
+        };
+        app.preferences.timeline_left = left;
+        app.preferences.timeline_under_browser = under;
+    }
+    app.ui.ribbon_key = None;
+    Ok(())
+}
+
+/// The apps call this once after loading preferences: an empty choice becomes `SHIPPED`.
+pub fn first_run(app: &mut SolveApp) {
+    if app.preferences.ui_profile.is_empty() {
+        let _ = choose(app, SHIPPED);
+    }
+}
+
+/// Toolbar-customisation scope: `toolbar_custom::WORKSPACE` ("DESIGN") for SolidCraft,
+/// `"<profile id>.<kind>"` ("inventor.part") otherwise.
+pub fn custom_scope(app: &SolveApp) -> String {
+    let profile = active(app);
+    if profile.id == SOLIDCRAFT {
+        crate::toolbar_custom::WORKSPACE.to_string()
+    } else {
+        format!("{}.{}", profile.id, kind_name(app.session.doc.kind))
+    }
+}
+
+/// The catalog id the active ribbon labels a tab (`panel: None`) or a panel with, if any.
+fn label_id(app: &SolveApp, tab: &str, panel: Option<&str>) -> Option<&'static str> {
+    let tab = ribbon(app).tab(tab)?;
+    match panel {
+        None => tab.label.as_deref(),
+        Some(panel) => tab.panel(panel)?.label.as_deref(),
+    }
+}
+
+/// Ribbon text with the toolbar's word casing (tab row, panel captions).
+pub fn tab_label(app: &SolveApp, tab: &str) -> String {
+    match label_id(app, tab, None) {
+        Some(id) => crate::i18n::tr(id).to_string(),
+        None => crate::toolbar::ribbon_label(app, tab),
+    }
+}
+
+pub fn panel_label(app: &SolveApp, tab: &str, panel: &str) -> String {
+    match label_id(app, tab, Some(panel)) {
+        Some(id) => crate::i18n::tr(id).to_string(),
+        None => crate::toolbar::ribbon_label(app, panel),
+    }
+}
+
+/// The translated caption of a tab (`panel: None`) or panel, for search rows:
+/// `crate::i18n::tr(label id)` when the profile labels it, else `crate::i18n::tr_label(id)`.
+pub fn caption(app: &SolveApp, tab: &'static str, panel: Option<&'static str>) -> &'static str {
+    match label_id(app, tab, panel) {
+        Some(id) => crate::i18n::tr(id),
+        None => crate::i18n::tr_label(panel.unwrap_or(tab)),
+    }
+}
+
+/// A command's compact ribbon button text, in English (callers translate it with `tr_label`).
+pub fn button_label<'a>(app: &SolveApp, command: &'a CommandSpec) -> &'a str {
+    match active(app).button_labels.get(command.id) {
+        Some(label) => label.as_str(),
+        None => workspace::ribbon_button_label(command),
+    }
+}
+
+/// The active panel's drop-down order (Ruling 18: one shared function, `workspace::group_commands`).
+pub fn grouped_commands<'a>(app: &SolveApp, tab: &str, panel: &str, commands: &[&'a CommandSpec]) -> Vec<(Option<&'static str>, &'a CommandSpec)> {
+    let groups: Vec<(&'static str, Vec<&'static str>)> = ribbon(app)
+        .tab(tab)
+        .and_then(|t| t.panel(panel))
+        .map(|p| p.groups.iter().map(|g| (g.label.as_str(), g.commands.iter().map(String::as_str).collect())).collect())
+        .unwrap_or_default();
+    workspace::group_commands(&groups, commands)
+}
+
 #[cfg(test)]
 #[path = "profile_tests.rs"]
 mod tests;
@@ -644,3 +767,7 @@ mod tests;
 #[cfg(test)]
 #[path = "profile_inventor_tests.rs"]
 mod inventor_tests;
+
+#[cfg(test)]
+#[path = "profile_shell_tests.rs"]
+mod shell_tests;

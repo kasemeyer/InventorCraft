@@ -233,16 +233,16 @@ const NOT_PLACES: [&str; 14] =
     ["translate", "dir1", "dir2", "axis", "direction", "normal", "pull", "color", "x_dir", "y_dir", "scale", "values", "limits", "size"];
 
 /// A command's toolbar button, or its panel when the button sits in a drop-down.
-fn button(command: &str) -> Option<Pos2> {
+fn button(app: &SolveApp, command: &str) -> Option<Pos2> {
     let spec = solidcraft_engine::find_command(command)?;
     crate::scenario::handle_at(&format!("toolbar:{}", spec.id))
-        .or_else(|| crate::workspace::destination(spec).and_then(|(t, p)| crate::scenario::handle_at(&format!("panel:{t}:{p}"))))
+        .or_else(|| crate::profile::ribbon(app).destination(spec.id).and_then(|(t, p)| crate::scenario::handle_at(&format!("panel:{t}:{p}"))))
 }
 
 /// Where the pointer goes for a command: its toolbar button (or its panel), then its picks on
 /// screen, at most [`MAX_PICK_STOPS`] of them.
 pub fn stops(app: &SolveApp, command: &str, params: &Value) -> Vec<Pos2> {
-    let mut out: Vec<Pos2> = button(command).into_iter().collect();
+    let mut out: Vec<Pos2> = button(app, command).into_iter().collect();
     let Some(rect) = app.viewport.rect else { return out };
     let proj = crate::viewport::projection(app, rect);
     let on_screen: Vec<Pos2> = picks(app, command, params).into_iter().filter_map(|w| proj.to_screen(w).filter(|p| rect.contains(*p))).collect();
@@ -252,18 +252,18 @@ pub fn stops(app: &SolveApp, command: &str, params: &Value) -> Vec<Pos2> {
 
 /// Where the pointer goes for an `engine.batch`: the toolbar buttons of its distinct commands, in
 /// the order they first come, at most [`MAX_BATCH_STOPS`] of them.
-pub fn batch_stops(steps: &[Value]) -> Vec<Pos2> {
-    batch_targets(steps).into_iter().map(|(at, _)| at).collect()
+pub fn batch_stops(app: &SolveApp, steps: &[Value]) -> Vec<Pos2> {
+    batch_targets(app, steps).into_iter().map(|(at, _)| at).collect()
 }
 
-fn batch_targets(steps: &[Value]) -> Vec<(Pos2, &'static str)> {
+fn batch_targets(app: &SolveApp, steps: &[Value]) -> Vec<(Pos2, &'static str)> {
     let mut seen: Vec<&str> = Vec::new();
     for c in steps.iter().filter_map(crate::control::batch_step_command) {
         if !seen.contains(&c) {
             seen.push(c);
         }
     }
-    let buttons: Vec<_> = seen.into_iter().filter_map(|c| Some((button(c)?, solidcraft_engine::find_command(c)?.label))).collect();
+    let buttons: Vec<_> = seen.into_iter().filter_map(|c| Some((button(app, c)?, solidcraft_engine::find_command(c)?.label))).collect();
     summarise(&buttons, MAX_BATCH_STOPS)
 }
 
@@ -343,7 +343,7 @@ pub fn intercept(app: &mut SolveApp, method: &str, params: &Value, reply: &Sende
         }
         // A batch is acted out as one request; one the app refuses is answered at once.
         "engine.batch" => match params.get("commands").and_then(Value::as_array) {
-            Some(steps) if crate::control::batch_refusal(steps).is_none() => batch_targets(steps).into(),
+            Some(steps) if crate::control::batch_refusal(steps).is_none() => batch_targets(app, steps).into(),
             _ => return false,
         },
         _ => return false,
@@ -605,7 +605,7 @@ mod tests {
         let mut h = crate::scenario::Harness::new();
         h.call("ui.agent_cursor", json!({"show": true, "speed": 1}));
         assert!(crate::scenario::handle_at("toolbar:solid.box").is_none());
-        assert!(button("solid.box").is_some(), "the closed group is the pointer's target");
+        assert!(button(&h.app, "solid.box").is_some(), "the closed group is the pointer's target");
         let (tx, rx) = std::sync::mpsc::channel();
         assert!(intercept(&mut h.app, "engine.execute", &json!({"command":"solid.box", "params":{"length":10,"width":10,"height":10}}), &tx));
         h.frames(3);
@@ -623,7 +623,7 @@ mod tests {
     fn a_batch_names_each_command_even_when_they_share_a_closed_group() {
         let mut h = crate::scenario::Harness::new();
         h.call("ui.agent_cursor", json!({"show": true, "speed": 1}));
-        assert_eq!(button("solid.box"), button("solid.sphere"));
+        assert_eq!(button(&h.app, "solid.box"), button(&h.app, "solid.sphere"));
         let (tx, rx) = std::sync::mpsc::channel();
         let params = json!({"commands":[
             {"command":"solid.box","params":{"length":10,"width":10,"height":10}},

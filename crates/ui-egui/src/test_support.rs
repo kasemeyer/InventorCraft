@@ -10,6 +10,17 @@ pub(crate) fn app_with_script(script: Value) -> SolveApp {
     SolveApp::new(session, Services::default())
 }
 
+/// A harness on the Inventor profile with the active document of `kind`.
+pub(crate) fn inventor(kind: solidcraft_engine::doc::DocumentKind) -> Harness {
+    let mut h = Harness::new();
+    assert_eq!(h.call("ui.prefs", json!({"ui_profile": "inventor"}))["ok"], json!(true));
+    h.app.session.doc_mut().kind = kind;
+    // The kind is how the design was created, not an edit: a blank design stays blank.
+    h.app.session.mark_saved();
+    h.frames(2);
+    h
+}
+
 pub(crate) fn sample_app() -> SolveApp {
     app_with_script(solidcraft_engine::sample::script())
 }
