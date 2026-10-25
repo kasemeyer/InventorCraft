@@ -375,42 +375,54 @@ pub fn press(app: &mut SolveApp, key: &str, repeat: bool) {
         }
         app.start(app.preferences.sketch_variants.resolve(id));
     } else if let Some(id) = sketch_tool_for(app, key) {
-        start_sketch_tool(app, id);
+        // A shortcut starts the family's remembered variant, as it does inside a sketch.
+        start_sketch_tool(app, app.preferences.sketch_variants.resolve(id));
     }
 }
 
-/// Open Create Sketch and start `id` in the new sketch (the body of `press`'s
-/// `sketch_tool_for` branch, extracted). `id` need not be `'static`: the registry's own
-/// `&'static str` is used (`find_command(id)?.id`), as `Dialog::then_start` and
-/// `Choices::resolve` require.
+/// Open Create Sketch and start exactly `id` in the new sketch, remembering it as its family's
+/// variant as `SolveApp::start` does. `id` need not be `'static`: the registry's own
+/// `&'static str` is used (`find_command(id)?.id`), as `Dialog::then_start` requires. A
+/// shortcut resolves the family's remembered variant before calling this.
 pub(crate) fn start_sketch_tool(app: &mut SolveApp, id: &str) {
+    start_sketch_tool_with(app, id, true);
+}
+
+/// `start_sketch_tool`, with `remember_variant` false for a pinned button
+/// (`SolveApp::start_pinned`): the tool still starts exactly, but the family's memory is kept.
+pub(crate) fn start_sketch_tool_with(app: &mut SolveApp, id: &str, remember_variant: bool) {
     let Some(id) = solidcraft_engine::find_command(id).map(|c| c.id) else { return };
     app.start("sketch.create");
     if let Some(d) = app.dialog.as_mut().filter(|d| matches!(d.kind, crate::dialogs::Kind::Sketch)) {
-        d.then_start = Some(app.preferences.sketch_variants.resolve(id));
+        d.then_start = Some(id);
+        d.then_start_pinned = !remember_variant;
     }
 }
 
+/// A tool a new sketch can start: a registry SKETCH-tab command, not the Finish Sketch panel nor
+/// Normal/Construction (a mode of the drawing in progress). Shared by the shortcut path
+/// (`sketch_tool_for`) and the click path (`starts_sketch`) so the two cannot drift apart.
+fn is_sketch_tool(c: &solidcraft_engine::CommandSpec) -> bool {
+    c.tab == "SKETCH" && c.panel != "FINISH SKETCH" && c.id != "sketch.construction"
+}
+
 /// Whether starting `id` now should open a sketch first: no sketch is open, the active ribbon's
-/// SKETCH tab is `Shown::Always`, and `id` is a sketch tool (registry tab "SKETCH", panel not
-/// "FINISH SKETCH", not `sketch.construction`) that cannot run outside a sketch. The registry's
-/// SKETCH tab also holds commands that run without one (Zebra, Insert DXF, Canvas): they run.
+/// SKETCH tab is `Shown::Always`, and `id` is a sketch tool (`is_sketch_tool`) that cannot run
+/// outside a sketch. The registry's SKETCH tab also holds commands that run without one (Zebra,
+/// Insert DXF, Canvas): they run. (A shortcut needs no `Shown` check: its key always works.)
 pub(crate) fn starts_sketch(app: &SolveApp, id: &str) -> bool {
     app.session.active_sketch.is_none()
         && crate::profile::ribbon(app).tab("SKETCH").is_some_and(|t| t.shown == crate::profile::Shown::Always)
-        && solidcraft_engine::find_command(id)
-            .is_some_and(|c| c.tab == "SKETCH" && c.panel != "FINISH SKETCH" && c.id != "sketch.construction" && !c.info(&app.session).enabled)
+        && solidcraft_engine::find_command(id).is_some_and(|c| is_sketch_tool(c) && !c.info(&app.session).enabled)
 }
 
-/// Outside a sketch: the SKETCH-tab command bound to `key` that a new sketch would start. Not
-/// Normal/Construction (a mode of the drawing in progress) nor the Finish Sketch panel.
+/// Outside a sketch: the sketch tool (`is_sketch_tool`) bound to `key` that a new sketch would
+/// start.
 fn sketch_tool_for(app: &SolveApp, key: &str) -> Option<&'static str> {
     if app.session.active_sketch.is_some() {
         return None;
     }
-    commands_for(app, key).into_iter().find(|id| {
-        solidcraft_engine::find_command(id).is_some_and(|c| c.tab == "SKETCH" && c.panel != "FINISH SKETCH" && c.id != "sketch.construction")
-    })
+    commands_for(app, key).into_iter().find(|id| solidcraft_engine::find_command(id).is_some_and(is_sketch_tool))
 }
 
 /// Bind `key` to a command (`""` clears it). Refused for reserved keys, and when other commands

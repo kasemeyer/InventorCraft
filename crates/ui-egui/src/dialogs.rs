@@ -446,8 +446,12 @@ pub struct Dialog {
     pub extra: serde_json::Map<String, Value>,
     /// What the inputs were when OK was refused: `error` stays only while they still are.
     pub refused: Option<Refused>,
-    /// Create Sketch opened by a sketch tool's shortcut: that tool starts once the sketch is open.
+    /// Create Sketch opened by a sketch tool (its shortcut, or a click outside a sketch): that
+    /// tool starts once the sketch is open.
     pub then_start: Option<&'static str>,
+    /// `then_start` came from a pinned button: it starts as `SolveApp::start_pinned` does,
+    /// leaving the family's remembered variant alone.
+    pub then_start_pinned: bool,
     /// Edges picked by hand in a Fillet or Chamfer dialog, before tangent-chain expansion.
     pub(crate) picked_edges: Vec<Sel>,
     /// Whether `inputs[0]` currently includes the tangent chains of `picked_edges`.
@@ -633,6 +637,7 @@ impl Dialog {
             extra: serde_json::Map::new(),
             refused: None,
             then_start: None,
+            then_start_pinned: false,
             picked_edges: Vec::new(),
             chain_applied,
             shell_chain: Default::default(),
@@ -2673,7 +2678,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             Ok(_) => {
                 look_at_sketch(app);
                 cancel = true;
-                then_start = d.then_start;
+                then_start = d.then_start.map(|id| (id, d.then_start_pinned));
             }
             Err(error) => d.refuse(app, error),
         }
@@ -2686,7 +2691,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         match start_sketch(app, &sel) {
             Ok(()) => {
                 cancel = true;
-                then_start = d.then_start;
+                then_start = d.then_start.map(|id| (id, d.then_start_pinned));
             }
             Err(error) => d.refuse(app, error),
         }
@@ -2773,9 +2778,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         // Editing done: put the timeline marker back where it was.
         let _ = roll_marker(app, marker);
     }
-    // The shortcut that asked for this sketch starts its tool in it.
-    if let Some(id) = then_start {
-        app.start(id);
+    // The tool that asked for this sketch starts in it.
+    match then_start {
+        Some((id, true)) => app.start_pinned(id),
+        Some((id, false)) => app.start(id),
+        None => {}
     }
 }
 

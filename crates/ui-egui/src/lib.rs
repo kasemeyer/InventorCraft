@@ -997,7 +997,7 @@ impl SolveApp {
         // Outside a sketch, a sketch tool on an always-on Sketch tab (Inventor) opens Create
         // Sketch first and starts in the new sketch, as its shortcut key does.
         if crate::keymap::starts_sketch(self, id) {
-            crate::keymap::start_sketch_tool(self, id);
+            crate::keymap::start_sketch_tool_with(self, id, remember_variant);
             return;
         }
         // A disabled command starts nothing, however it was reached. The toolbar greys its

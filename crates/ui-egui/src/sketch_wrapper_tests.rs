@@ -55,3 +55,50 @@ fn commands_that_run_outside_a_sketch_are_never_wrapped() {
     assert!(!h.app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Sketch)), "Zebra opens no Create Sketch");
     assert!(h.app.session.active_sketch.is_none());
 }
+
+fn running(h: &Harness) -> Option<&str> {
+    h.app.tool.as_ref().map(|t| t.cmd)
+}
+
+fn remembered(h: &Harness, family_default: &'static str) -> &'static str {
+    h.app.preferences.sketch_variants.resolve(family_default)
+}
+
+/// Review fix: a variant picked by hand (a drop-down row, a button) outside a sketch is the tool
+/// that starts once the plane is picked, and it becomes the family's remembered variant.
+#[test]
+fn an_explicit_variant_pick_outside_a_sketch_starts_that_variant() {
+    let mut h = inventor(Part);
+    h.app.preferences.sketch_variants.remember("sketch.rectangle.center");
+    h.app.start("sketch.rectangle.two_point");
+    assert_eq!(h.app.dialog.as_ref().and_then(|d| d.then_start), Some("sketch.rectangle.two_point"));
+    h.step(&json!({"click": {"plane": "XY"}})).unwrap();
+    h.settle();
+    assert!(h.app.session.active_sketch.is_some());
+    assert_eq!(running(&h), Some("sketch.rectangle.two_point"));
+    assert_eq!(remembered(&h, "sketch.rectangle.two_point"), "sketch.rectangle.two_point", "the explicit pick is remembered");
+}
+
+/// A pinned button outside a sketch starts its exact tool and leaves the family's memory alone,
+/// as it does inside a sketch.
+#[test]
+fn a_pinned_variant_outside_a_sketch_starts_exactly_and_is_not_remembered() {
+    let mut h = inventor(Part);
+    h.app.preferences.sketch_variants.remember("sketch.rectangle.center");
+    h.app.start_pinned("sketch.rectangle.two_point");
+    assert_eq!(h.app.dialog.as_ref().and_then(|d| d.then_start), Some("sketch.rectangle.two_point"));
+    h.step(&json!({"click": {"plane": "XY"}})).unwrap();
+    h.settle();
+    assert_eq!(running(&h), Some("sketch.rectangle.two_point"));
+    assert_eq!(remembered(&h, "sketch.rectangle.two_point"), "sketch.rectangle.center", "a pinned start remembers nothing");
+}
+
+/// The shortcut path still resolves the family's remembered variant.
+#[test]
+fn a_shortcut_outside_a_sketch_still_starts_the_remembered_variant() {
+    let mut h = inventor(Part);
+    h.app.preferences.sketch_variants.remember("sketch.rectangle.center");
+    let key = effective(&h.app, "sketch.rectangle.two_point").expect("Rectangle has a shortcut");
+    press(&mut h.app, &key, false);
+    assert_eq!(h.app.dialog.as_ref().and_then(|d| d.then_start), Some("sketch.rectangle.center"));
+}
