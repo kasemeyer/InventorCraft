@@ -375,11 +375,31 @@ pub fn press(app: &mut SolveApp, key: &str, repeat: bool) {
         }
         app.start(app.preferences.sketch_variants.resolve(id));
     } else if let Some(id) = sketch_tool_for(app, key) {
-        app.start("sketch.create");
-        if let Some(d) = app.dialog.as_mut().filter(|d| matches!(d.kind, crate::dialogs::Kind::Sketch)) {
-            d.then_start = Some(app.preferences.sketch_variants.resolve(id));
-        }
+        start_sketch_tool(app, id);
     }
+}
+
+/// Open Create Sketch and start `id` in the new sketch (the body of `press`'s
+/// `sketch_tool_for` branch, extracted). `id` need not be `'static`: the registry's own
+/// `&'static str` is used (`find_command(id)?.id`), as `Dialog::then_start` and
+/// `Choices::resolve` require.
+pub(crate) fn start_sketch_tool(app: &mut SolveApp, id: &str) {
+    let Some(id) = solidcraft_engine::find_command(id).map(|c| c.id) else { return };
+    app.start("sketch.create");
+    if let Some(d) = app.dialog.as_mut().filter(|d| matches!(d.kind, crate::dialogs::Kind::Sketch)) {
+        d.then_start = Some(app.preferences.sketch_variants.resolve(id));
+    }
+}
+
+/// Whether starting `id` now should open a sketch first: no sketch is open, the active ribbon's
+/// SKETCH tab is `Shown::Always`, and `id` is a sketch tool (registry tab "SKETCH", panel not
+/// "FINISH SKETCH", not `sketch.construction`) that cannot run outside a sketch. The registry's
+/// SKETCH tab also holds commands that run without one (Zebra, Insert DXF, Canvas): they run.
+pub(crate) fn starts_sketch(app: &SolveApp, id: &str) -> bool {
+    app.session.active_sketch.is_none()
+        && crate::profile::ribbon(app).tab("SKETCH").is_some_and(|t| t.shown == crate::profile::Shown::Always)
+        && solidcraft_engine::find_command(id)
+            .is_some_and(|c| c.tab == "SKETCH" && c.panel != "FINISH SKETCH" && c.id != "sketch.construction" && !c.info(&app.session).enabled)
 }
 
 /// Outside a sketch: the SKETCH-tab command bound to `key` that a new sketch would start. Not
@@ -1090,6 +1110,10 @@ mod tests {
 #[cfg(test)]
 #[path = "sketch_shortcut_tests.rs"]
 mod sketch_shortcut_tests;
+
+#[cfg(test)]
+#[path = "sketch_wrapper_tests.rs"]
+mod sketch_wrapper_tests;
 
 #[cfg(test)]
 mod card_tests {

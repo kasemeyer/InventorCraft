@@ -939,9 +939,9 @@ fn ribbon_text(ui: &egui::Ui, at: egui::Pos2, text: &str, size: f32, color: Colo
 }
 
 /// SKETCH while editing a sketch and SHEET METAL while a sheet body is active take the contextual
-/// tab style; SHEET METAL is an ordinary tab otherwise.
+/// tab style; each is an ordinary tab otherwise (Inventor's Sketch tab is always shown).
 pub(crate) fn contextual_tab(app: &SolveApp, tab: &str) -> bool {
-    tab == "SKETCH" || (tab == "SHEET METAL" && crate::workspace::sheet_body(app).is_some())
+    (tab == "SKETCH" && app.session.active_sketch.is_some()) || (tab == "SHEET METAL" && crate::workspace::sheet_body(app).is_some())
 }
 
 /// The tooltip of a panel collapsed into one button: its caption and how many commands it holds.

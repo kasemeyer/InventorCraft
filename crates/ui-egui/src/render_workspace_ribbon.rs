@@ -104,6 +104,11 @@ pub(super) fn action_ready(app: &SolveApp, id: &str) -> Result<(), String> {
 
 pub(super) fn command_info(app: &SolveApp, command: &CommandSpec) -> CommandInfo {
     let mut info = command.info(&app.session);
+    // A sketch tool on an always-on Sketch tab opens a sketch first, so it is never greyed.
+    if !info.enabled && crate::keymap::starts_sketch(app, command.id) {
+        info.enabled = true;
+        info.disabled_reason = None;
+    }
     if info.enabled
         && super::active(app)
         && handled(command.id)

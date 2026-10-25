@@ -994,6 +994,12 @@ impl SolveApp {
             edit_clipboard::paste(self, None);
             return;
         }
+        // Outside a sketch, a sketch tool on an always-on Sketch tab (Inventor) opens Create
+        // Sketch first and starts in the new sketch, as its shortcut key does.
+        if crate::keymap::starts_sketch(self, id) {
+            crate::keymap::start_sketch_tool(self, id);
+            return;
+        }
         // A disabled command starts nothing, however it was reached. The toolbar greys its
         // button, but a shortcut, the command palette and the control channel all land here.
         // Its reason goes to the status line, so the refusal is never silent.
