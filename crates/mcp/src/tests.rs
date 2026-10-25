@@ -1485,6 +1485,23 @@ fn recorded_batch(batch: Result<Value, String>, args: Value) -> (Recorder, Value
     (b, body, is_error)
 }
 
+/// `new_design` hands `kind` to `file.new`, as a tool and as a batch step, and its schema names
+/// the kinds.
+#[test]
+fn new_design_passes_kind_to_file_new() {
+    let mut b = Recorder { calls: Vec::new(), batch: Ok(json!({})) };
+    let r = crate::tools::call_tool(&mut b, "new_design", &json!({"name": "porch", "kind": "assembly"}));
+    assert_ne!(r["isError"], true, "{r}");
+    assert_eq!(b.calls[0].1, json!({"command": "file.new", "params": {"name": "porch", "kind": "assembly"}}));
+    let steps = json!([{"command": "new_design", "params": {"kind": "assembly"}}]);
+    let (b, body, is_error) = recorded_batch(Ok(json!({"completed": 1, "results": [{}], "undone": 0})), json!({"commands": steps}));
+    assert!(!is_error, "{body}");
+    assert_eq!(b.calls[0].1["commands"], json!([{"command": "file.new", "params": {"kind": "assembly"}}]));
+    let defs = tool_definitions();
+    let tool = defs.iter().find(|t| t["name"] == "new_design").unwrap();
+    assert_eq!(tool["inputSchema"]["properties"]["kind"]["enum"], json!(["part", "assembly", "drawing"]));
+}
+
 fn methods(b: &Recorder) -> Vec<&str> {
     b.calls.iter().map(|(m, _)| m.as_str()).collect()
 }

@@ -289,7 +289,13 @@ pub fn tool_definitions() -> Vec<Value> {
             "new_design",
             "New design",
             "Start a new, empty design (unsaved changes to the current one are discarded).",
-            obj(json!({"name": string("Design name (default Untitled)")}), &[]),
+            obj(
+                json!({
+                    "name": string("Design name (default Untitled)"),
+                    "kind": {"type": "string", "enum": ["part", "assembly", "drawing"], "description": "What the design is (default part); only an assembly can hold linked components."},
+                }),
+                &[],
+            ),
             Effect::Replaces,
         ),
         tool(
@@ -558,7 +564,7 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
         "running" => b.call("control.running", json!({})),
         "undo" => exec(b, "edit.undo", json!({})),
         "redo" => exec(b, "edit.redo", json!({})),
-        "new_design" => exec(b, "file.new", pick(a, &["name"])),
+        "new_design" => exec(b, "file.new", pick(a, &["name", "kind"])),
         "open" => exec(b, "doc.open", pick(a, &["path", "up", "names"])),
         "save" => exec(b, "file.save", pick(a, &["path", "format"])),
         other => Err(format!("unknown tool `{other}`")),
@@ -634,7 +640,7 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<String>), String> {
         "export" => mapped("file.export", pick(a, &["path", "format", "bodies", "mesh_prefix", "effort", "velocity"])),
         "save" => mapped("file.save", pick(a, &["path", "format"])),
         "open" => mapped("doc.open", pick(a, &["path", "up", "names"])),
-        "new_design" => mapped("file.new", pick(a, &["name"])),
+        "new_design" => mapped("file.new", pick(a, &["name", "kind"])),
         "crash_reports" => match a.get("id") {
             Some(_) => mapped("diagnostics.crash_report", pick(a, &["id"])),
             None => mapped("diagnostics.crash_reports", pick(a, &["limit"])),
