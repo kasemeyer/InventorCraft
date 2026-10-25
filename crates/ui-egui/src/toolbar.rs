@@ -6,6 +6,7 @@ use crate::ui_kit::{Container, Edge, Surface};
 use egui::{Align2, Color32, FontId, Rect, Sense, Stroke, pos2, vec2};
 use serde_json::json;
 
+use crate::ribbon_face::{FaceItem, SMALL_ROWS, column_width, face_items};
 use crate::theme::Tokens;
 use crate::{SolveApp, icons};
 
@@ -1033,7 +1034,6 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
     let button_height = if labels { BUTTON_HEIGHT } else { ICON_BUTTON_HEIGHT };
     let group_height = if labels { GROUP_HEIGHT } else { ICON_GROUP_HEIGHT };
     let ribbon_height = ribbon_height(labels);
-    let gallery_width = if labels { CONSTRAINT_GRID_WIDTH } else { 6.0 * 27.0 };
     let cards = crate::shell::Cards::new(ui.available_rect_before_wrap(), app.ui.layout, ribbon_height);
     let height = if floating { cards.bottom - ui.available_rect_before_wrap().top() } else { ribbon_height };
     let fill = if floating { Color32::TRANSPARENT } else { t.toolbar };
@@ -1127,26 +1127,36 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             .into_iter()
             .map(|(panel, cmds, promote)| {
                 let mut shown = crate::toolbar_custom::buttons(app, &tab, panel, &cmds, promote);
-                // Gallery cells are painted together after the large buttons, in reading order.
+                // Gallery cells are painted together after the face's buttons, in reading order.
                 if tab == "SKETCH" && panel == "CONSTRAIN" {
                     shown.sort_by_key(|c| {
                         if app.toolbar_custom.in_gallery(&scope, &tab, panel, c.id) {
-                            crate::workspace::CONSTRAINT_GALLERY.iter().position(|id| *id == c.id).map(|i| i + 1).unwrap_or(0)
+                            crate::profile::gallery_position(&scope, c.id).map(|i| i + 1).unwrap_or(0)
                         } else {
                             0
                         }
                     });
                 }
-                (panel, cmds, shown)
+                // The face: large buttons and columns of small ones (an icon-only ribbon has no
+                // room for three rows: every button is large there).
+                let face: Vec<_> = shown.iter().copied().filter(|c| !app.toolbar_custom.in_gallery(&scope, &tab, panel, c.id)).collect();
+                let items = face_items(&face, |id| labels && crate::profile::is_small(app, &tab, panel, id));
+                (panel, cmds, shown, items)
             })
             .collect();
         let sizes: Vec<PanelSize> = lists
             .iter()
-            .map(|(panel, _, shown)| {
-                let mut widths: Vec<_> = shown
+            .map(|(panel, _, shown, items)| {
+                let mut widths: Vec<_> = items
                     .iter()
-                    .filter(|c| !app.toolbar_custom.in_gallery(&scope, &tab, panel, c.id))
-                    .map(|c| {
+                    .map(|item| {
+                        let c = match item {
+                            FaceItem::Large(c) => c,
+                            FaceItem::Column(column) => {
+                                let labels: Vec<&str> = column.iter().map(|c| app.tr_label(crate::profile::button_label(app, c))).collect();
+                                return ButtonSize { width: column_width(&painter, &labels), min_width: 40.0 };
+                            }
+                        };
                         let family = crate::sketch_families::family(c.id)
                             .filter(|f| tab == "SKETCH" && *panel == "CREATE" && f.commands.first().copied() == Some(c.id));
                         let label = family.map_or_else(|| crate::profile::button_label(app, c), |f| f.label);
@@ -1158,8 +1168,10 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                         }
                     })
                     .collect();
-                if shown.iter().any(|c| app.toolbar_custom.in_gallery(&scope, &tab, panel, c.id)) {
-                    widths.push(ButtonSize { width: gallery_width, min_width: gallery_width });
+                let cells = shown.iter().filter(|c| app.toolbar_custom.in_gallery(&scope, &tab, panel, c.id)).count();
+                if cells > 0 {
+                    let width = gallery_width(labels, cells);
+                    widths.push(ButtonSize { width, min_width: width });
                 }
                 PanelSize { buttons: widths }
             })
@@ -1189,7 +1201,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             "toolbar_trimmed",
             plans.iter().zip(&sizes).filter(|(p, s)| p.fit == Fit::Buttons && p.shown < s.buttons.len()).count() as f64,
         );
-        for ((panel, cmds, shown), plan) in lists.into_iter().zip(plans) {
+        for ((panel, cmds, shown, items), plan) in lists.into_iter().zip(plans) {
             let panel: &&str = &panel;
             if plan.fit == Fit::More {
                 overflow.push((*panel, menu_commands(&cmds, &shown)));
@@ -1213,7 +1225,6 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             // Dropped on the panel's free space (all of a collapsed panel): the button goes to
             // its end.
             let gallery: Vec<_> = shown.iter().copied().filter(|c| app.toolbar_custom.in_gallery(&scope, &tab, panel, c.id)).collect();
-            let large: Vec<_> = shown.iter().copied().filter(|c| !gallery.iter().any(|g| g.id == c.id)).collect();
             let drawn = if collapsed { 0 } else { plan.shown.min(button_widths.len()) };
             // Buttons narrower than the panel's minimum width (a one-button panel) are centred.
             let buttons_width = button_widths.iter().take(drawn).sum::<f32>() + drawn.saturating_sub(1) as f32 * BUTTON_GAP;
@@ -1247,13 +1258,49 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             }
             let mut button_x = bx;
-            for (c, button_width) in large.iter().zip(button_widths.iter().copied()).take(drawn) {
+            for (item, button_width) in items.iter().zip(button_widths.iter().copied()).take(drawn) {
+                let whole = Rect::from_min_size(pos2(button_x, top + 2.0), vec2(button_width, button_height));
+                button_x += button_width + BUTTON_GAP;
+                let c = match item {
+                    FaceItem::Large(c) => *c,
+                    FaceItem::Column(column) => {
+                        // Small buttons: a 16 px icon and one line of label, SMALL_ROWS high.
+                        // Sketch-family commands draw here as plain rows (no variant arrow).
+                        let row_height = button_height / SMALL_ROWS as f32;
+                        for (row, c) in column.iter().copied().enumerate() {
+                            let rect =
+                                Rect::from_min_size(pos2(whole.left(), whole.top() + row as f32 * row_height), vec2(whole.width(), row_height));
+                            let info = crate::render_workspace::interactive_command_info(app, c);
+                            let resp = ribbon_hit(ui, &painter, rect, c, panel, &mut drop, &mut menu);
+                            crate::scenario::publish_rect(&format!("button:{}", c.id), rect);
+                            let accent = crate::theme::TabAccent::for_tab(&t, &tab);
+                            if resp.is_pointer_button_down_on() || running.as_deref() == Some(c.id) {
+                                painter.rect(rect, t.radius_sm, accent.soft, Stroke::new(1.0, accent.color), egui::StrokeKind::Inside);
+                            } else if resp.hovered() && info.enabled {
+                                painter.rect_filled(rect, t.radius_sm, t.hover);
+                            }
+                            let icon_rect = Rect::from_min_size(pos2(rect.left() + 6.0, rect.center().y - 8.0), vec2(16.0, 16.0));
+                            icons::paint_icon(&painter, icon_rect, c.icon, if info.enabled { 1.0 } else { 0.35 });
+                            let label = app.tr_label(crate::profile::button_label(app, c));
+                            let color = if info.enabled { t.text } else { t.text_dim };
+                            let text_left = icon_rect.right() + 4.0;
+                            let mut job = egui::text::LayoutJob::simple_singleline(label.to_owned(), FontId::proportional(t.font_button), color);
+                            job.wrap = egui::text::TextWrapping::truncate_at_width((rect.right() - 4.0 - text_left).max(0.0));
+                            let galley = painter.layout_job(job);
+                            painter.galley(pos2(text_left, rect.center().y - galley.size().y / 2.0), galley, color);
+                            let name = app.tr_label(c.label).to_string();
+                            resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled() && info.enabled, &name));
+                            if ribbon_tooltip(app, resp, c, info.disabled_reason.as_deref()).clicked() && info.enabled {
+                                app.start_pinned(c.id);
+                            }
+                        }
+                        continue;
+                    }
+                };
                 // Only the family's default pin follows the part's choice. Explicitly pinned
                 // variants remain exact commands, including in customised toolbars.
                 let family = crate::sketch_families::family(c.id).filter(|f| sketch_create && f.commands.first().copied() == Some(c.id));
                 let selected = family.and_then(|f| app.preferences.sketch_variants.selected(f)).unwrap_or(c);
-                let whole = Rect::from_min_size(pos2(button_x, top + 2.0), vec2(button_width, button_height));
-                button_x += button_width + BUTTON_GAP;
                 let mut br = whole;
                 if family.is_some() {
                     if labels {
@@ -1263,30 +1310,10 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                 }
                 let info = crate::render_workspace::interactive_command_info(app, selected);
-                let resp = ui.interact(br, ui.id().with(("cmd", c.id)), Sense::click_and_drag());
-                crate::scenario::publish_handle(&format!("toolbar:{}", c.id), br.center());
-                // The button itself (`toolbar:<id>` is also a drop-down row's while one is open).
-                crate::scenario::publish_handle(&format!("button:{}", c.id), br.center());
+                let resp = ribbon_hit(ui, &painter, br, c, panel, &mut drop, &mut menu);
                 crate::scenario::publish_rect(&format!("button:{}", c.id), whole);
                 if selected.id != c.id {
                     crate::scenario::publish_handle(&format!("button:{}", selected.id), br.center());
-                }
-                if resp.drag_started() {
-                    resp.dnd_set_drag_payload(ToolbarDrag { id: c.id, from_menu: false });
-                }
-                if let Some(d) = resp.dnd_hover_payload::<ToolbarDrag>()
-                    && d.id != c.id
-                {
-                    painter
-                        .line_segment([pos2(br.left() - 1.0, br.top() + 2.0), pos2(br.left() - 1.0, br.bottom() - 2.0)], Stroke::new(2.0, t.accent));
-                }
-                if let Some(d) = resp.dnd_release_payload::<ToolbarDrag>()
-                    && d.id != c.id
-                {
-                    drop = Some((d.id, *panel, Some(c.id)));
-                }
-                if resp.secondary_clicked() {
-                    menu = Some((resp.interact_pointer_pos().unwrap_or(br.left_bottom()), c.id));
                 }
                 let accent = crate::theme::TabAccent::for_tab(&t, &tab);
                 let family_open = family.is_some_and(|f| egui::Popup::is_id_open(ui.ctx(), ui.id().with(("family", f.label)).with("popup")));
@@ -1339,7 +1366,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     painter.galley(pos2(whole.center().x, whole.top() + 32.0), galley, t.text);
                 }
             }
-            if !collapsed && drawn > large.len() {
+            if !collapsed && drawn > items.len() {
                 if !gallery.is_empty() {
                     // A quiet rule sets the grid apart from the large button before it.
                     t.secondary_line(
@@ -1348,8 +1375,8 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                         t.toolbar.lerp_to_gamma(t.border, 0.5),
                     );
                 }
+                let columns = gallery_columns(labels, gallery.len());
                 for (index, c) in gallery.iter().enumerate() {
-                    let columns = if labels { 3 } else { 6 };
                     let cell = Rect::from_min_size(
                         pos2(button_x + (index % columns) as f32 * 27.0, top + 6.0 + (index / columns) as f32 * 23.0),
                         vec2(24.0, 20.0),
@@ -1656,6 +1683,53 @@ enum RowAction {
 const ROW_H: f32 = 30.0;
 
 const CONSTRAINT_GRID_WIDTH: f32 = 82.0;
+
+/// The constraint gallery's columns: SolidCraft's three (six on an icon-only ribbon), more when
+/// a profile's gallery has more cells than two rows (one row) of those hold.
+fn gallery_columns(labels: bool, cells: usize) -> usize {
+    if labels { cells.div_ceil(2).max(3) } else { cells.max(6) }
+}
+
+/// The constraint gallery's width for its cells: [`CONSTRAINT_GRID_WIDTH`] for SolidCraft's.
+fn gallery_width(labels: bool, cells: usize) -> f32 {
+    let columns = gallery_columns(labels, cells) as f32;
+    if labels { CONSTRAINT_GRID_WIDTH + (columns - 3.0) * 27.0 } else { columns * 27.0 }
+}
+
+/// A ribbon button's interaction: its `toolbar:`/`button:` handles, dragging it to reorder,
+/// the drop indicator and a drop before it, and its menu (secondary click).
+fn ribbon_hit(
+    ui: &egui::Ui,
+    painter: &egui::Painter,
+    rect: Rect,
+    c: &'static solidcraft_engine::CommandSpec,
+    panel: &'static str,
+    drop: &mut Option<(&'static str, &'static str, Option<&'static str>)>,
+    menu: &mut Option<(egui::Pos2, &'static str)>,
+) -> egui::Response {
+    let t = Tokens::get();
+    let resp = ui.interact(rect, ui.id().with(("cmd", c.id)), Sense::click_and_drag());
+    crate::scenario::publish_handle(&format!("toolbar:{}", c.id), rect.center());
+    // The button itself (`toolbar:<id>` is also a drop-down row's while one is open).
+    crate::scenario::publish_handle(&format!("button:{}", c.id), rect.center());
+    if resp.drag_started() {
+        resp.dnd_set_drag_payload(ToolbarDrag { id: c.id, from_menu: false });
+    }
+    if let Some(d) = resp.dnd_hover_payload::<ToolbarDrag>()
+        && d.id != c.id
+    {
+        painter.line_segment([pos2(rect.left() - 1.0, rect.top() + 2.0), pos2(rect.left() - 1.0, rect.bottom() - 2.0)], Stroke::new(2.0, t.accent));
+    }
+    if let Some(d) = resp.dnd_release_payload::<ToolbarDrag>()
+        && d.id != c.id
+    {
+        *drop = Some((d.id, panel, Some(c.id)));
+    }
+    if resp.secondary_clicked() {
+        *menu = Some((resp.interact_pointer_pos().unwrap_or(rect.left_bottom()), c.id));
+    }
+    resp
+}
 
 /// Registry parameter syntax is not a user-facing description. Reuse existing catalog prose
 /// where present; other commands intentionally show only their name and registered shortcut.

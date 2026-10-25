@@ -769,6 +769,24 @@ pub fn button_label<'a>(app: &SolveApp, command: &'a CommandSpec) -> &'a str {
     }
 }
 
+/// Whether `id` draws small on that panel of the active ribbon (false for SolidCraft).
+pub fn is_small(app: &SolveApp, tab: &str, panel: &str, id: &str) -> bool {
+    ribbon(app).tab(tab).and_then(|t| t.panel(panel)).is_some_and(|p| p.is_small(id))
+}
+
+/// Where `id` sits in the constraint gallery (the SKETCH/CONSTRAIN panel's grid of icon-only
+/// cells) of a customisation scope ([`custom_scope`]): SolidCraft's
+/// `workspace::CONSTRAINT_GALLERY`, else the small commands of that profile and kind's
+/// CONSTRAIN panel, in the panel's order. None when it is not a gallery command there.
+pub fn gallery_position(scope: &str, id: &str) -> Option<usize> {
+    if scope == crate::toolbar_custom::WORKSPACE {
+        return workspace::CONSTRAINT_GALLERY.iter().position(|c| *c == id);
+    }
+    let (profile, kind) = scope.split_once('.')?;
+    let (_, ribbon) = get(profile)?.ribbons().find(|(k, _)| kind_name(*k) == kind)?;
+    ribbon.tab("SKETCH")?.panel("CONSTRAIN")?.small.iter().position(|c| c == id)
+}
+
 /// The active panel's drop-down order (Ruling 18: one shared function, `workspace::group_commands`).
 pub fn grouped_commands<'a>(app: &SolveApp, tab: &str, panel: &str, commands: &[&'a CommandSpec]) -> Vec<(Option<&'static str>, &'a CommandSpec)> {
     let groups: Vec<(&'static str, Vec<&'static str>)> = ribbon(app)

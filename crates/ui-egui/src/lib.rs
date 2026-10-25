@@ -192,6 +192,7 @@ pub mod render_workspace;
 mod revolve_edit_tests;
 #[cfg(test)]
 mod revolve_manipulator_tests;
+mod ribbon_face;
 mod rule_editor;
 #[cfg(test)]
 mod rule_editor_tests;

@@ -28,6 +28,9 @@ pub struct ToolbarCustom {
     pub gallery_buttons: BTreeMap<String, Vec<String>>,
     /// The Customize Toolbar window is open (not kept).
     pub customizing: bool,
+    /// `"<scope>/<tab>/<panel>"` → the user showed (true) or hid (false) the panel (C3; only
+    /// panels the user changed: the rest follow the ribbon's `hidden`).
+    pub panel_shown: BTreeMap<String, bool>,
 }
 
 impl ToolbarCustom {
@@ -36,12 +39,12 @@ impl ToolbarCustom {
     pub fn in_gallery(&self, scope: &str, tab: &str, panel: &str, id: &str) -> bool {
         tab == "SKETCH"
             && panel == "CONSTRAIN"
-            && crate::workspace::CONSTRAINT_GALLERY.contains(&id)
+            && crate::profile::gallery_position(scope, id).is_some()
             && !self.gallery_buttons.get(&format!("{scope}/{tab}")).is_some_and(|ids| ids.iter().any(|c| c == id))
     }
 
     pub fn prefs(&self) -> Value {
-        json!({"version": 2, "panels": self.panels, "gallery_buttons": self.gallery_buttons})
+        json!({"version": 2, "panels": self.panels, "gallery_buttons": self.gallery_buttons, "panel_shown": self.panel_shown})
     }
     pub fn load(&mut self, v: &Value) {
         let current = v.get("version").and_then(Value::as_u64) == Some(2);
@@ -70,6 +73,12 @@ impl ToolbarCustom {
                     })
                     .collect()
             })
+            .unwrap_or_default();
+        self.panel_shown = v
+            .get("panel_shown")
+            .filter(|_| current)
+            .and_then(Value::as_object)
+            .map(|o| o.iter().take(500).filter_map(|(k, v)| Some((k.clone(), v.as_bool()?))).collect())
             .unwrap_or_default();
         if !current {
             self.migrate();
@@ -163,9 +172,19 @@ pub fn panel_lists(app: &SolveApp, tab: &str) -> PanelLists {
         Ok(mut lists) => lists.entry(cache).or_insert_with(|| panel_lists_of(ribbon, tab, sketching)).clone(),
         Err(_) => panel_lists_of(ribbon, tab, sketching),
     };
+    let scope = crate::profile::custom_scope(app);
     let hidden = |panel: &str| ribbon.tab(tab).and_then(|t| t.panel(panel)).is_some_and(|p| p.hidden);
-    lists.retain(|(panel, ..)| !hidden(panel));
+    lists.retain(|(panel, ..)| match app.toolbar_custom.panel_shown.get(&key(&scope, tab, panel)) {
+        Some(shown) => *shown,
+        None => !hidden(panel),
+    });
     lists
+}
+
+/// Show or hide a panel for the active profile and kind (`"<scope>/<tab>/<panel>"`).
+pub fn set_panel_shown(app: &mut SolveApp, tab: &str, panel: &str, shown: bool) {
+    let scope = crate::profile::custom_scope(app);
+    app.toolbar_custom.panel_shown.insert(key(&scope, tab, panel), shown);
 }
 
 /// [`panel_lists`] worked out from a ribbon: the tab's panels shown always (and those shown
@@ -238,7 +257,7 @@ pub fn reorder(app: &mut SolveApp, tab: &str, id: &str, panel: &str, before: Opt
     let scope = crate::profile::custom_scope(app);
     // A gallery command dropped on a gallery cell goes (back) into the gallery; dropped anywhere
     // else it becomes a full-size button.
-    if tab == "SKETCH" && crate::workspace::CONSTRAINT_GALLERY.contains(&id) {
+    if tab == "SKETCH" && crate::profile::gallery_position(&scope, id).is_some() {
         let into_gallery = before.is_some_and(|b| app.toolbar_custom.in_gallery(&scope, tab, panel, b));
         let ids = app.toolbar_custom.gallery_buttons.entry(format!("{scope}/{tab}")).or_default();
         ids.retain(|c| c != id);
@@ -267,11 +286,12 @@ pub fn toggle(app: &mut SolveApp, tab: &str, id: &str) {
     }
 }
 
-/// Reset Toolbar: a tab's panels back to their defaults.
+/// Reset Toolbar: a tab's panels back to their defaults (buttons, gallery and shown panels).
 pub fn reset(app: &mut SolveApp, tab: &str) {
     let scope = crate::profile::custom_scope(app);
     let prefix = format!("{scope}/{tab}/");
     app.toolbar_custom.panels.retain(|k, _| !k.starts_with(&prefix));
+    app.toolbar_custom.panel_shown.retain(|k, _| !k.starts_with(&prefix));
     app.toolbar_custom.gallery_buttons.remove(&format!("{scope}/{tab}"));
 }
 
