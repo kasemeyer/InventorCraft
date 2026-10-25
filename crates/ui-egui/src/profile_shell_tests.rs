@@ -325,6 +325,23 @@ fn ui_set_keeps_the_tab_it_sets() {
     assert_eq!(h.app.ui.tab, "SHEET METAL");
 }
 
+/// Review fix: `ui.set` while a sketch is open keeps the tab the sketch returns to.
+#[test]
+fn ui_set_while_sketching_keeps_the_tab_to_return_to() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    assert_eq!(h.call("ui.set", json!({"tab": "INSPECT"}))["ok"], json!(true));
+    h.frames(2);
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.ui.tab, "SKETCH");
+    assert_eq!(h.call("ui.set", json!({"showGrid": false}))["ok"], json!(true));
+    h.frames(2);
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.ui.tab, "INSPECT", "finishing the sketch returns to the tab it started from");
+}
+
 /// Review fix: the tab resets when the ribbon changes, not whenever the document kind does.
 #[test]
 fn switching_kinds_keeps_the_tab_when_the_ribbon_is_the_same() {

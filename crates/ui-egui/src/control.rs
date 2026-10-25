@@ -441,6 +441,8 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
                     // Not serialised either: without it the next frame would take the ribbon for
                     // a new one and go to its home tab.
                     u.ribbon_key = app.ui.ribbon_key.clone();
+                    // Nor is the tab an open sketch returns to (#3250).
+                    u.sketch_return_tab = app.ui.sketch_return_tab.clone();
                     app.ui = u;
                     app.session.visibility = v;
                     ok(ui_state(app))
