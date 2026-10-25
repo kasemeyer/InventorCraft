@@ -171,6 +171,12 @@ pub static DESIGN_SAVE_OPTIONS: &[OptionSpec] = &[
     OptionSpec { param: "preview", label: "Display preview", kind: OptionKind::Bool { default: false } },
 ];
 
+/// The design row: every design extension (`crate::DESIGN_EXTS`), then plain JSON.
+const DESIGN_ROW_EXTS: [&str; 6] = {
+    let d = crate::DESIGN_EXTS;
+    [d[0], d[1], d[2], d[3], d[4], "json"]
+};
+
 /// Every format, designs first, then artifacts roughly as the Export list shows them. The
 /// first row matching an extension wins in [`for_path`], so the design row stays above the
 /// design-JSON row and the sketch DXF row above the view DXF row.
@@ -178,7 +184,7 @@ pub static FORMATS: &[FormatSpec] = &[
     FormatSpec {
         id: "design",
         label: "SolidCraft design",
-        extensions: &[crate::DESIGN_EXT, crate::LEGACY_DESIGN_EXT, "json"],
+        extensions: &DESIGN_ROW_EXTS,
         role: Role::Design,
         import: Some(ImportSpec { target: ImportTarget::Design, options: &[], native_only: false }),
         export: None,
@@ -470,7 +476,7 @@ mod tests {
     fn import_filter_groups_hold_the_expected_extensions() {
         let native = import_filters(true);
         let find = |label: &str| native.iter().find(|(l, _)| *l == label).map(|(_, e)| e.clone()).unwrap_or_default();
-        assert_eq!(find("SolidCraft design (container or JSON)"), vec![crate::DESIGN_EXT, crate::LEGACY_DESIGN_EXT, "json"]);
+        assert_eq!(find("SolidCraft design (container or JSON)"), crate::DESIGN_EXTS.iter().copied().chain(["json"]).collect::<Vec<_>>());
         assert_eq!(find("STEP"), vec!["step", "stp"]);
         assert_eq!(find("IGES"), vec!["igs", "iges"]);
         assert_eq!(find("FreeCAD and Rhino"), vec!["fcstd", "3dm"]);

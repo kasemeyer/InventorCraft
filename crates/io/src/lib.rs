@@ -19,6 +19,9 @@ pub use design::{
 };
 mod legacy_dir;
 #[cfg(test)]
+#[path = "lib_tests.rs"]
+mod lib_tests;
+#[cfg(test)]
 mod mutate;
 mod native_cad;
 pub use native_cad::{NATIVE_CAD_EXTS, is_native_cad_path, native_cad_to_step};
@@ -45,13 +48,24 @@ pub use urdf::{UrdfOptions, UrdfPackage, urdf};
 use solidcraft_doc::{Document, Metadata, ModelState};
 use solidcraft_geom::{Mesh, Vec3};
 
-/// Design file extension.
+/// The kind-less design extension. Such files still open everywhere a design opens; the UI's
+/// Save As, crash recovery and the web download still write it. The engine's `file.save` and
+/// `file.save_as` give a path without an extension the document kind's own instead.
 pub const DESIGN_EXT: &str = "solidcraft";
 /// The design extension of earlier releases. Compatibility shim (docs/compatibility.md): such
 /// files still open everywhere a design opens; new designs are saved as [`DESIGN_EXT`].
 pub const LEGACY_DESIGN_EXT: &str = "solvecraft";
-/// Every extension a design file may have, current first.
-pub const DESIGN_EXTS: [&str; 2] = [DESIGN_EXT, LEGACY_DESIGN_EXT];
+/// Every extension a design file may have: each kind's own, then the kind-less ones.
+pub const DESIGN_EXTS: [&str; 5] = {
+    let k = solidcraft_doc::DocumentKind::EXTENSIONS;
+    [k[0], k[1], k[2], DESIGN_EXT, LEGACY_DESIGN_EXT]
+};
+
+/// The document kind a path's extension names, any case; `None` for a kind-less design
+/// extension, another format, or no extension.
+pub fn kind_for_path(path: &str) -> Option<solidcraft_doc::DocumentKind> {
+    solidcraft_doc::DocumentKind::from_extension(std::path::Path::new(path).extension()?.to_str()?)
+}
 
 /// Is this a design file name (`.solidcraft`, or the legacy extension), any case?
 pub fn is_design_path(path: &str) -> bool {
@@ -345,7 +359,7 @@ impl Format {
             "3mf" => Format::ThreeMf,
             "3mf-tagged" => Format::ThreeMfTagged,
             "urdf" => Format::Urdf,
-            "solidcraft" | "solvecraft" | "json" => Format::Design,
+            e if DESIGN_EXTS.contains(&e) || e == "json" => Format::Design,
             _ => return Err(IoError::Format(ext)),
         })
     }
