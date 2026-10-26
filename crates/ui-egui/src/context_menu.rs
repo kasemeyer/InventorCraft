@@ -393,13 +393,29 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
             }
             v
         }
-        Target::Units => crate::prefs::UNITS
-            .iter()
-            .map(|u| {
-                let item = cmd(app, "document.units", u).with(json!({ "units": u }));
-                if app.session.doc.units == *u { item.key("current") } else { item }
-            })
-            .collect(),
+        Target::Units => {
+            let mut v: Vec<Item> = crate::prefs::UNITS
+                .iter()
+                .map(|u| {
+                    let item = cmd(app, "document.units", u).with(json!({ "units": u }));
+                    if app.session.doc.units == *u { item.key("current") } else { item }
+                })
+                .collect();
+            // The document's precision (Document Settings › Units): where it carries one, or the
+            // profile's template writes one. SolidCraft documents without it show none.
+            let workflow = &crate::profile::active(app).workflow;
+            let template = workflow.inch_length_decimals.is_some() || workflow.mm_length_decimals.is_some();
+            if crate::prefs::document_length_decimals(&app.session.doc).is_some() || template {
+                let shown = crate::prefs::shown_length_decimals(app);
+                v.push(Item::sep());
+                for n in 0..=6u8 {
+                    let label = crate::i18n::format("ui.doc_decimals", &[("count", &n.to_string())]);
+                    let item = act("ui.docDecimals", &label, "").with(json!({ "decimals": n }));
+                    v.push(if n == shown { item.key("current") } else { item });
+                }
+            }
+            v
+        }
         Target::NamedView { name } => crate::browser::view_items(app, name),
         Target::ViewCube => {
             let current = |on: bool| if on { "current" } else { "" };
@@ -1103,6 +1119,13 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         }
         "ui.previousView" => {
             crate::view_history::previous(app);
+        }
+        "ui.docDecimals" => {
+            if let Some(n) = p.get("decimals").and_then(Value::as_u64).and_then(|n| u8::try_from(n).ok())
+                && let Err(e) = crate::prefs::set_document_length_decimals(app, n)
+            {
+                app.set_status(e, true);
+            }
         }
         "ui.relinkSource" => {
             if let Some(component) = id_of(&p, "component") {

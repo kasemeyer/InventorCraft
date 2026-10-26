@@ -40,7 +40,7 @@ pub(crate) fn occurrence_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     let shared = !m.path.is_empty() && app.session.occurrence_scope_count(&m.path).is_ok_and(|n| n > 1);
     let title = crate::i18n::format("browser.move_title", &[("name", &name)]);
     let at = panel_pos(app);
-    let (units, decimals) = (app.session.doc.units.clone(), app.preferences.length_decimals);
+    let (units, decimals) = (app.session.doc.units.clone(), crate::prefs::shown_length_decimals(app));
     let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_occ_move"), "move", &title)
         .placed(egui::Align2::LEFT_TOP, at)
         .fields()

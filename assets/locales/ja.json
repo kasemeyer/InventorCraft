@@ -2666,6 +2666,7 @@
   "ui.distance": "距離",
   "ui.distance_1": "距離 1",
   "ui.distance_2": "距離 2",
+  "ui.doc_decimals": "小数点以下 {count} 桁",
   "ui.document_settings": "ドキュメントの設定",
   "ui.don_t_save": "保存しない",
   "ui.draft": "勾配",

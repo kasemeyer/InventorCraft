@@ -2666,6 +2666,7 @@
   "ui.distance": "Distance",
   "ui.distance_1": "Distance 1",
   "ui.distance_2": "Distance 2",
+  "ui.doc_decimals": "{count} decimals",
   "ui.document_settings": "Document Settings",
   "ui.don_t_save": "Don't Save",
   "ui.draft": "Draft",

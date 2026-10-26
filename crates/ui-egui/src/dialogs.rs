@@ -724,21 +724,21 @@ impl Dialog {
             "sketch.create" => Dialog::new(Kind::Sketch, vec![SelInput::new("Plane", PLANES | PLANAR_FACES, false)]),
             "solid.extrude" => Dialog::new(
                 Kind::Extrude {
-                    distance: "10 mm".into(),
+                    distance: template_length(app, "10", "1"),
                     direction: 0,
                     operation: usize::from(has_bodies),
                     auto_op: true,
                     smart: crate::smart_extrude::Smart { auto_to_object: app.preferences.extrude_auto_to_object, ..Default::default() },
-                    distance2: "10 mm".into(),
+                    distance2: template_length(app, "10", "1"),
                     taper: "0 deg".into(),
                     taper_present: false,
                     to_offset: String::new(),
                     start: String::new(),
                     all: false,
                     thin: false,
-                    wall: "2 mm".into(),
+                    wall: template_length(app, "2", "0.1"),
                     wall_side: 0,
-                    wall2: "1 mm".into(),
+                    wall2: template_length(app, "1", "0.05"),
                 },
                 vec![SelInput::new("Profiles", EXTRUDE_ACCEPT, true)],
             ),
@@ -746,10 +746,15 @@ impl Dialog {
                 Kind::Revolve { angle: "360 deg".into(), operation: 0, axis: None },
                 vec![SelInput::new("Profile", PROFILES, true), SelInput::new("Axis", AXES, false)],
             ),
-            "solid.fillet" => Dialog::new(fillet_kind("2 mm", false), vec![SelInput::new("Edges", EDGES | FACES, true)]),
-            "solid.chamfer" => Dialog::new(fillet_kind("1 mm", true), vec![SelInput::new("Edges", EDGES | FACES, true)]),
+            "solid.fillet" => Dialog::new(fillet_kind(&template_length(app, "2", "0.125"), false), vec![SelInput::new("Edges", EDGES | FACES, true)]),
+            "solid.chamfer" => {
+                Dialog::new(fillet_kind(&template_length(app, "1", "0.0625"), true), vec![SelInput::new("Edges", EDGES | FACES, true)])
+            }
             "solid.shell" => {
-                let (kind, inputs) = Kind::simple_start(id)?;
+                let (mut kind, inputs) = Kind::simple_start(id)?;
+                if let Kind::Shell { thickness, .. } = &mut kind {
+                    *thickness = template_length(app, "2", "0.1");
+                }
                 let mut d = Dialog::new(kind, inputs);
                 // Faces joined smoothly to the picked ones too.
                 d.extra.insert("tangent_chain".into(), json!(true));
@@ -779,10 +784,10 @@ impl Dialog {
                 ],
             ),
             "solid.remove" => Dialog::new(Kind::Remove, vec![SelInput::new("Bodies", BODIES, true)]),
-            "solid.pattern.path" => Dialog::new(
-                Kind::PathPattern { count: "4".into(), spacing: "20 mm".into() },
-                vec![SelInput::new("Objects", BODIES, true), SelInput::new("Path", CURVES, true)],
-            ),
+            "solid.pattern.path" => {
+                let (kind, inputs) = pattern_start(app, 2);
+                Dialog::new(kind, inputs)
+            }
             "mesh.convert" => Dialog::new(Kind::MeshConvert { tolerance: "0.05 mm".into() }, vec![SelInput::new("Mesh body", BODIES, false)]),
             "construct.plane.midplane" => Dialog::new(
                 Kind::Midplane,
@@ -826,14 +831,10 @@ impl Dialog {
                     true,
                 )],
             ),
-            "solid.pattern.rectangular" => Dialog::new(
-                Kind::PatternRect { count: "3".into(), spacing: "20 mm".into(), count2: "1".into(), spacing2: "20 mm".into() },
-                vec![
-                    SelInput::new("Objects", BODIES, true),
-                    SelInput::new("Direction", AXES | EDGES, false),
-                    SelInput::new("Direction 2", AXES | EDGES, false),
-                ],
-            ),
+            "solid.pattern.rectangular" => {
+                let (kind, inputs) = pattern_start(app, 0);
+                Dialog::new(kind, inputs)
+            }
             "solid.pattern.circular" => Dialog::new(
                 Kind::PatternCirc { count: "6".into(), angle: "360 deg".into() },
                 vec![SelInput::new("Objects", BODIES, true), SelInput::new("Axis", AXES, false)],
@@ -853,7 +854,7 @@ impl Dialog {
                 ]
             }),
             "solid.move" => Dialog::new(crate::dialogs_move::kind(0), crate::dialogs_move::inputs(0)),
-            "solid.hole" => Dialog::new(hole_defaults(), single_hole_inputs()),
+            "solid.hole" => Dialog::new(hole_defaults(app), single_hole_inputs()),
             "solid.box" => Dialog::new(
                 Kind::Primitive {
                     cmd: "solid.box",
@@ -2013,7 +2014,7 @@ fn object_type_row(d: &mut Dialog, ui: &mut egui::Ui) {
 
 /// Rows above the selection inputs: the pattern type and object type, the Hole placement (one
 /// face point, or sketch points).
-fn placement_row(d: &mut Dialog, ui: &mut egui::Ui) {
+fn placement_row(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui) {
     if matches!(d.kind, Kind::Mirror) {
         object_type_row(d, ui);
         return;
@@ -2034,24 +2035,7 @@ fn placement_row(d: &mut Dialog, ui: &mut egui::Ui) {
         if ty != cur {
             // Same objects, the new pattern's other inputs.
             let objects = d.inputs.first().map(|i| i.items.clone()).unwrap_or_default();
-            let (kind, mut inputs) = match ty {
-                0 => (
-                    Kind::PatternRect { count: "3".into(), spacing: "20 mm".into(), count2: "1".into(), spacing2: "20 mm".into() },
-                    vec![
-                        SelInput::new("Objects", BODIES, true),
-                        SelInput::new("Direction", AXES | EDGES, false),
-                        SelInput::new("Direction 2", AXES | EDGES, false),
-                    ],
-                ),
-                1 => (
-                    Kind::PatternCirc { count: "6".into(), angle: "360 deg".into() },
-                    vec![SelInput::new("Objects", BODIES, true), SelInput::new("Axis", AXES, false)],
-                ),
-                _ => (
-                    Kind::PathPattern { count: "4".into(), spacing: "20 mm".into() },
-                    vec![SelInput::new("Objects", BODIES, true), SelInput::new("Path", CURVES, true)],
-                ),
-            };
+            let (kind, mut inputs) = pattern_start(app, ty);
             let accept = d.inputs.first().map(|i| i.accept).unwrap_or(BODIES);
             if let Some(i) = inputs.first_mut() {
                 i.items = objects;
@@ -3062,6 +3046,51 @@ fn fillet_kind(size: &str, chamfer: bool) -> Kind {
     Kind::Fillet { radius: size.into(), chamfer, chain: true, ctype: 0, distance2: size.into(), angle: "45 deg".into(), flip: false }
 }
 
+/// Inches or feet: the inch template applies.
+pub(crate) fn imperial(units: &str) -> bool {
+    matches!(units.trim(), "in" | "ft")
+}
+
+/// The profile asks for template values and the design is imperial.
+fn inch_template(app: &SolveApp) -> bool {
+    crate::profile::active(app).workflow.template_values && imperial(&app.session.doc.units)
+}
+
+/// A new panel's length: "{inch} in" when the profile asks for template values and the design is
+/// imperial, else "{mm} mm" (today's literal). Always carries its unit: a bare stored length is
+/// millimetres.
+pub(crate) fn template_length(app: &SolveApp, mm: &str, inch: &str) -> String {
+    if inch_template(app) { format!("{inch} in") } else { format!("{mm} mm") }
+}
+
+/// A new pattern panel of the Type row's `ty` (0 rectangular, 1 circular, 2 path): its values and
+/// its inputs. The pattern commands and the Type row's switch both start here.
+fn pattern_start(app: &SolveApp, ty: usize) -> (Kind, Vec<SelInput>) {
+    match ty {
+        0 => (
+            Kind::PatternRect {
+                count: "3".into(),
+                spacing: template_length(app, "20", "1"),
+                count2: "1".into(),
+                spacing2: template_length(app, "20", "1"),
+            },
+            vec![
+                SelInput::new("Objects", BODIES, true),
+                SelInput::new("Direction", AXES | EDGES, false),
+                SelInput::new("Direction 2", AXES | EDGES, false),
+            ],
+        ),
+        1 => (
+            Kind::PatternCirc { count: "6".into(), angle: "360 deg".into() },
+            vec![SelInput::new("Objects", BODIES, true), SelInput::new("Axis", AXES, false)],
+        ),
+        _ => (
+            Kind::PathPattern { count: "4".into(), spacing: template_length(app, "20", "1") },
+            vec![SelInput::new("Objects", BODIES, true), SelInput::new("Path", CURVES, true)],
+        ),
+    }
+}
+
 /// A length field's first text: `number` in the design's units, with the unit written out so the
 /// field shows it as the other dialogs show theirs ("20 mm", "20 in"). OK makes the size the bare
 /// number would.
@@ -3093,16 +3122,21 @@ pub(crate) fn shown_expr(e: &str, kind: ValueKind) -> String {
     if solidcraft_engine::doc::expr::is_bare_number(e) { format!("{} {unit}", e.trim()) } else { e.to_string() }
 }
 
-fn hole_defaults() -> Kind {
+fn hole_defaults(app: &SolveApp) -> Kind {
+    let mut opts = HoleOpts::default();
+    if inch_template(app) {
+        // ANSI Unified, UNC by default (UNF in the Profile row), as the inch template's holes.
+        opts.thread = "1/4-20 UNC".into();
+    }
     Kind::Hole {
-        diameter: "5 mm".into(),
-        depth: "10 mm".into(),
+        diameter: template_length(app, "5", "0.25"),
+        depth: template_length(app, "10", "0.5"),
         kind: 0,
-        cb_diameter: "9 mm".into(),
-        cb_depth: "3 mm".into(),
-        cs_diameter: "10 mm".into(),
+        cb_diameter: template_length(app, "9", "0.4375"),
+        cb_depth: template_length(app, "3", "0.125"),
+        cs_diameter: template_length(app, "10", "0.5"),
         cs_angle: "90 deg".into(),
-        opts: HoleOpts::default(),
+        opts,
     }
 }
 
@@ -4781,7 +4815,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
         }
         FeatureKind::Hole { position, at, direction, diameter, depth, hole, points, thread, to, references } => {
             let mut d = start("solid.hole")?;
-            let mut k = hole_defaults();
+            let mut k = hole_defaults(app);
             if let Kind::Hole { diameter: dia, depth: dep, kind, cb_diameter, cb_depth, cs_diameter, cs_angle, opts } = &mut k {
                 *dia = diameter.to_string();
                 opts.all = depth.is_none();
@@ -5691,3 +5725,7 @@ mod shell_thickness_tests {
 #[cfg(test)]
 #[path = "panel_flow_tests.rs"]
 mod panel_flow_tests;
+
+#[cfg(test)]
+#[path = "template_values_tests.rs"]
+mod template_values_tests;

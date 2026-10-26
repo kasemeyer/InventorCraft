@@ -1144,12 +1144,64 @@ pub fn show_mm(app: &SolveApp, v: f64, power: i32) -> String {
         _ => "",
     };
     let value = v * k.powi(power);
-    format!("{:.*} {u}{sup}", length_precision(value, &app.session.doc.units, app.preferences.length_decimals), value)
+    format!("{:.*} {u}{sup}", length_precision(value, &app.session.doc.units, shown_length_decimals(app)), value)
 }
 
 /// Numbers in millimetres, in the design's units without the unit name.
 pub fn show_mm_bare(app: &SolveApp, v: f64) -> String {
-    length_number(v, &app.session.doc.units, app.preferences.length_decimals)
+    length_number(v, &app.session.doc.units, shown_length_decimals(app))
+}
+
+/// Metadata key of TCI-CAD's document settings: `{"length_decimals": n}`. Precision is a
+/// document setting (Inventor's Document Settings › Units), saved with the file.
+pub(crate) const DOC_SETTINGS_KEY: &str = "com.tci-cad.units";
+
+/// The document's own length decimals (0–6), if it carries them.
+pub(crate) fn document_length_decimals(doc: &solidcraft_engine::doc::Document) -> Option<u8> {
+    let n = doc.metadata.get(DOC_SETTINGS_KEY)?.get("length_decimals")?.as_u64()?;
+    u8::try_from(n).ok().filter(|n| *n <= 6)
+}
+
+/// Decimals the length displays use: the document's setting, else the user's `length_decimals`
+/// preference (legacy documents that carry none).
+pub(crate) fn shown_length_decimals(app: &SolveApp) -> u8 {
+    document_length_decimals(&app.session.doc).unwrap_or(app.preferences.length_decimals)
+}
+
+/// The document settings object with `length_decimals` set, other keys kept.
+fn doc_settings_with(doc: &solidcraft_engine::doc::Document, decimals: u8) -> serde_json::Value {
+    let mut settings = doc.metadata.get(DOC_SETTINGS_KEY).and_then(serde_json::Value::as_object).cloned().unwrap_or_default();
+    settings.insert("length_decimals".into(), json!(decimals));
+    serde_json::Value::Object(settings)
+}
+
+/// At creation, write the template's decimals into the new blank document: the profile's
+/// `inch_length_decimals` for an imperial design, `mm_length_decimals` otherwise; nothing when
+/// that is None. Not an undo step; the saved state is kept.
+pub(crate) fn apply_template_decimals(app: &mut SolveApp) {
+    let workflow = &crate::profile::active(app).workflow;
+    let template = if crate::dialogs::imperial(&app.session.doc.units) { workflow.inch_length_decimals } else { workflow.mm_length_decimals };
+    let Some(n) = template else { return };
+    if !app.session.doc.features.is_empty() || document_length_decimals(&app.session.doc).is_some() {
+        return;
+    }
+    let saved = !app.session.is_dirty();
+    let value = doc_settings_with(&app.session.doc, n);
+    if app.session.execute("document.metadata.set", &json!({ "key": DOC_SETTINGS_KEY, "value": value })).is_ok() {
+        app.session.undo.pop();
+        if saved {
+            app.session.mark_saved();
+        }
+    }
+}
+
+/// Change the active document's decimals: one undo step (`document.metadata.set`).
+pub(crate) fn set_document_length_decimals(app: &mut SolveApp, decimals: u8) -> Result<(), String> {
+    if decimals > 6 {
+        return Err(format!("{decimals} decimals: at most 6"));
+    }
+    let value = doc_settings_with(&app.session.doc, decimals);
+    app.run("document.metadata.set", json!({ "key": DOC_SETTINGS_KEY, "value": value })).map(drop).map_err(|e| e.to_string())
 }
 
 /// The window system choices (`Prefs::window_system`, #3083).

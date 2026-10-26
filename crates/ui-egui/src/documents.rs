@@ -270,6 +270,7 @@ pub fn new_document(app: &mut SolveApp, kind: DocumentKind, units: Option<&str>)
     adopt(app, s);
     let units = units.map_or_else(|| app.preferences.default_units.clone(), str::to_string);
     crate::prefs::apply_new_design_units(app, &units);
+    crate::prefs::apply_template_decimals(app);
 }
 
 /// Create a new tab directly; the File view chooses units before using [`new_design`].

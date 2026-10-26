@@ -2666,6 +2666,7 @@
   "ui.distance": "距离",
   "ui.distance_1": "距离 1",
   "ui.distance_2": "距离 2",
+  "ui.doc_decimals": "{count} 位小数",
   "ui.document_settings": "文档设置",
   "ui.don_t_save": "不保存",
   "ui.draft": "拔模",

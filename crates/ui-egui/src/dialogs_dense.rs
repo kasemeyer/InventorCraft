@@ -182,7 +182,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
     if let Some(key) = manage_hint {
         ui_kit::text(ui, tr(key), ui_kit::Text::Hint("manage"));
     }
-    placement_row(d, ui);
+    placement_row(app, d, ui);
     if matches!(&d.kind, Kind::Hole { opts, .. } if !opts.multiple) {
         // Each reference edge with its distance (#37).
         enter |= crate::hole_refs::input_rows(d, ui, &app.session);

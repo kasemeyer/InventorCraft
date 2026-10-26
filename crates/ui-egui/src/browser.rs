@@ -2458,7 +2458,7 @@ pub fn dims_overlay(app: &SolveApp, ctx: &egui::Context) {
             let expr = c.param.as_ref().and_then(|p| app.session.doc.param(p)).map(|p| p.expr.as_str());
             let col = if c.driven { tk.dimension_driven } else { tk.dimension };
             let galley = painter.layout_no_wrap(
-                crate::dim_view::label(&c.kind, expr, c.driven, &app.session.doc.units, app.preferences.length_decimals),
+                crate::dim_view::label(&c.kind, expr, c.driven, &app.session.doc.units, crate::prefs::shown_length_decimals(app)),
                 FontId::proportional(tk.font_caption),
                 col,
             );

@@ -57,8 +57,7 @@ impl StraightPreview {
                 return None;
             }
         }
-        if app.session.doc.units != "mm"
-            || ["distance2", "start_offset", "from", "to", "to_offset", "thin"].iter().any(|key| params.get(*key).is_some())
+        if ["distance2", "start_offset", "from", "to", "to_offset", "thin"].iter().any(|key| params.get(*key).is_some())
             || params.get("through_all").and_then(Value::as_bool) == Some(true)
         {
             return None;
@@ -74,7 +73,14 @@ impl StraightPreview {
             }
         }
         let distance = params.get("distance")?;
-        let expression = distance.as_str().map(str::to_owned).unwrap_or_else(|| distance.to_string());
+        let raw = distance.as_str().map(str::to_owned).unwrap_or_else(|| distance.to_string());
+        // As the engine reads it on commit: a bare number is in the design's unit.
+        let expression = app.session.doc.with_design_unit(&raw, solidcraft_engine::doc::expr::Kind::Length);
+        // A unit-less expression is in the design's unit in the geometry but in millimetres in
+        // `eval`: it keeps the engine preview.
+        if app.session.doc.units.trim() != "mm" && !solidcraft_engine::doc::expr::is_literal(&expression) {
+            return None;
+        }
         let mut distance = app.session.doc.eval(&expression, solidcraft_engine::doc::expr::Kind::Length).ok()?;
         if direction == "negative" {
             distance = -distance;
@@ -270,7 +276,7 @@ mod tests {
     use crate::{dialogs::Kind, scenario::Harness};
     use serde_json::json;
 
-    fn mesh_volume(scene: &GpuScene) -> f64 {
+    pub(super) fn mesh_volume(scene: &GpuScene) -> f64 {
         scene
             .tris
             .as_chunks::<{ crate::gpu::TRI_SIZE * 3 }>()
@@ -419,3 +425,7 @@ mod tests {
         assert!(StraightPreview::default().compute(&harness.app, &commands, Colors::from_tokens(&crate::theme::Tokens::get())).is_none());
     }
 }
+
+#[cfg(test)]
+#[path = "extrude_preview_units_tests.rs"]
+mod units_tests;

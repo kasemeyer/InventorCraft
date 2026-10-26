@@ -880,6 +880,10 @@ pub fn first_run(app: &mut SolveApp) {
             app.preferences.default_units = units.clone();
             crate::prefs::default_units_changed(app);
         }
+        // The fresh-install blank design carries the template's precision too.
+        if crate::documents::active_is_blank(app) {
+            crate::prefs::apply_template_decimals(app);
+        }
         return;
     }
     let Some(profile) = get(&app.preferences.ui_profile) else { return };

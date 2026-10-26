@@ -15,7 +15,7 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     };
     let mut edit: Option<Value> = None;
-    let (units, decimals) = (app.session.doc.units.clone(), app.preferences.length_decimals);
+    let (units, decimals) = (app.session.doc.units.clone(), crate::prefs::shown_length_decimals(app));
     let title = crate::i18n::format(if m.calibrate { "browser.calibrate_title" } else { "browser.edit_canvas_title" }, &[("name", &c.name)]);
     let at = panel_pos(app);
     let (calibrate, name) = (m.calibrate, c.id);
