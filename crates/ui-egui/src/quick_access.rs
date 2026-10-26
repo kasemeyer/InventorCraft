@@ -15,7 +15,9 @@ const SELECT_OPENED: &str = "sc_qat_select_opened";
 /// The Quick Access Toolbar's entries, in order, for the active state: (id, icon, enabled).
 /// Ids: "new", "open", "save", "undo", "redo", "select", "return", "update".
 pub(crate) fn entries(app: &SolveApp) -> Vec<(&'static str, &'static str, bool)> {
-    let update = solidcraft_engine::find_command("timeline.compute_all").is_some_and(|c| c.info(&app.session).enabled);
+    // Return and Update act on the design, so they wait behind Home like Save and Select.
+    let live = design_shown(app) && !app.file_load.busy();
+    let update = live && solidcraft_engine::find_command("timeline.compute_all").is_some_and(|c| c.info(&app.session).enabled);
     vec![
         ("new", "new", FileAction::New.enabled(app)),
         ("open", "open", FileAction::Open.enabled(app)),
@@ -23,7 +25,7 @@ pub(crate) fn entries(app: &SolveApp) -> Vec<(&'static str, &'static str, bool)>
         ("undo", "undo", FileAction::Undo.enabled(app)),
         ("redo", "redo", FileAction::Redo.enabled(app)),
         ("select", "filter", design_shown(app)),
-        ("return", "finish", app.session.active_sketch.is_some()),
+        ("return", "finish", live && app.session.active_sketch.is_some()),
         ("update", "compute", update),
     ]
 }
@@ -41,7 +43,7 @@ pub(crate) fn tip(app: &SolveApp, id: &str) -> String {
         _ => ("ui.qat.update", ""),
     };
     let label = app.tr(key);
-    let needs_design = matches!(id, "save" | "undo" | "redo" | "select");
+    let needs_design = matches!(id, "save" | "undo" | "redo" | "select" | "return" | "update");
     if needs_design && !design_shown(app) {
         crate::i18n::format("ui.needs_design", &[("command", label)])
     } else if shortcut.is_empty() {
@@ -51,9 +53,10 @@ pub(crate) fn tip(app: &SolveApp, id: &str) -> String {
     }
 }
 
-/// Run an entry (the Select entry toggles its drop-down). A disabled entry does nothing.
+/// Run an entry (the Select entry toggles its drop-down). A disabled entry does nothing, and no
+/// entry runs while a file loads.
 pub(crate) fn run(app: &mut SolveApp, ctx: &egui::Context, id: &str) {
-    if !entries(app).iter().any(|(entry, _, enabled)| *entry == id && *enabled) {
+    if app.file_load.busy() || !entries(app).iter().any(|(entry, _, enabled)| *entry == id && *enabled) {
         return;
     }
     match id {

@@ -107,3 +107,29 @@ fn the_workspace_switcher_is_drawn_only_under_solidcraft() {
         assert!(h.app.shell.cards.iter().all(|c| c.width() > crate::toolbar::WORKSPACE_WIDTH), "{layout:?}: {:?}", h.app.shell.cards);
     }
 }
+
+#[test]
+fn return_and_update_wait_for_a_design_behind_home() {
+    let mut h = inventor(Part);
+    h.frames(2);
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points": [[0, 0], [10, 0]]})).unwrap();
+    h.app.home.open = true;
+    h.frames(2);
+    assert!(entries(&h.app).contains(&("return", "finish", false)), "Return waits for the design behind Home");
+    assert!(entries(&h.app).contains(&("update", "compute", false)), "Update waits for the design behind Home");
+    let needs = |label: &str| crate::i18n::format("ui.needs_design", &[("command", label)]);
+    assert_eq!(tip(&h.app, "return"), needs(h.app.tr("ui.qat.return")));
+    assert_eq!(tip(&h.app, "update"), needs(h.app.tr("ui.qat.update")));
+    let ctx = h.ctx.clone();
+    run(&mut h.app, &ctx, "return");
+    assert!(h.app.session.active_sketch.is_some(), "a click on Return behind Home does nothing");
+
+    h.app.home.open = false;
+    h.frames(2);
+    assert!(entries(&h.app).contains(&("return", "finish", true)));
+    assert!(entries(&h.app).contains(&("update", "compute", true)));
+    assert_eq!(tip(&h.app, "return"), h.app.tr("ui.qat.return"));
+    run(&mut h.app, &ctx, "return");
+    assert!(h.app.session.active_sketch.is_none(), "Return works with the design shown");
+}
