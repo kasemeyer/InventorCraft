@@ -217,6 +217,9 @@ pub(crate) fn run_ui_action(app: &mut SolveApp, id: &str) -> bool {
         }
         "ui.view_home" => app.animate_view("home"),
         "ui.view_fit" => app.animate_view("fit"),
+        "ui.view_previous" => {
+            crate::view_history::previous(app);
+        }
         _ => return false,
     }
     true

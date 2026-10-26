@@ -38,7 +38,7 @@
   "view_cube": {"edges": true, "compass": true},
   "letter_keys": "aliases",
   "alias_wait_ms": 750,
-  "function_keys": {"F6": "ui.view_home"},
+  "function_keys": {"F5": "ui.view_previous", "F6": "ui.view_home"},
   "aliases": [
     {"keys": "S", "command": "sketch.create", "scope": "model"},
     {"keys": "M", "command": "inspect.measure", "scope": "everywhere"},

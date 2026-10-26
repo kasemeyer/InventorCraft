@@ -265,6 +265,7 @@ mod ui_kit_guard_tests;
 /// The product name: the window title, the process name and the app bar's wordmark.
 pub const APP_NAME: &str = "TCI-CAD";
 pub mod update;
+mod view_history;
 pub mod view_pick;
 pub mod viewport;
 mod viewport_layout;
@@ -392,6 +393,8 @@ pub struct SolveApp {
     pub cam: Camera,
     /// A view change in progress (axis view, Home, Fit); any mouse navigation cancels it.
     pub cam_anim: Option<CameraAnim>,
+    /// The settled views Previous View walks back through.
+    pub(crate) views: view_history::ViewHistory,
     /// Seconds since start, as of this frame.
     pub now: f64,
     /// The history marker before Edit Sketch rolled the timeline to the sketch; Finish Sketch
@@ -569,6 +572,7 @@ impl SolveApp {
             cam_anim: None,
             now: 0.0,
             pre_sketch_marker: None,
+            views: Default::default(),
             services,
             file_picker: None,
             saving: None,
@@ -1662,6 +1666,8 @@ impl SolveApp {
             self.set_up_axis(self.ui.up_axis);
         }
         self.step_view_animation(ctx);
+        let busy = ctx.input(|i| i.pointer.any_down() || i.is_scrolling());
+        view_history::settle(self, busy);
         self.poll_control_jobs(ctx);
         self.drain_control(ctx);
         self.follow_view_request(true);
