@@ -3731,7 +3731,7 @@ fn agent_chip(app: &mut SolveApp, ui: &egui::Ui, rect: Rect) {
 }
 
 /// How long a status message stays in the view (milliseconds).
-const STATUS_TOAST_MS: f64 = 6000.0;
+pub(crate) const STATUS_TOAST_MS: f64 = 6000.0;
 
 /// A single visual pattern for ongoing work, the existing six-second status and the 3D mouse
 /// calibration offer, stacked from the bottom of the free view. Returns the toasts' rects.

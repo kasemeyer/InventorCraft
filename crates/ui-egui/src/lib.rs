@@ -247,6 +247,7 @@ pub mod space_mouse_calibration;
 pub mod space_mouse_model;
 pub mod space_mouse_offer;
 pub mod stand_up;
+mod status_bar;
 #[cfg(test)]
 mod sweep_dialog_tests;
 pub(crate) mod test_boat;
@@ -1827,6 +1828,10 @@ impl SolveApp {
         theme::TabAccent::publish(self, ui.ctx());
         if !floating {
             agent_chat::show(self, ui);
+        }
+        // Before the layouts split: the bar takes the window's bottom strip in either layout.
+        if crate::profile::active(self).workflow.status_bar {
+            status_bar::show(self, ui);
         }
         if !floating && show_timeline && !left_timeline {
             timeline::timeline(self, ui);
