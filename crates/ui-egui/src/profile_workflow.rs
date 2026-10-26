@@ -65,14 +65,33 @@ pub enum MenuContext {
     Body,
     Empty,
     Sketch,
+    /// A sketch curve selected in the sketch being edited.
+    SketchLine,
+    /// A sketch dimension (or other constraint) selected in the sketch being edited.
+    SketchDimension,
     Tool,
     Panel,
+    /// An assembly with a component selected.
+    AssemblyComponent,
+    /// An assembly with nothing selected.
+    AssemblyEmpty,
 }
 
 impl MenuContext {
     /// Every context a marking menu must lay out.
-    pub const ALL: [MenuContext; 7] =
-        [MenuContext::Face, MenuContext::Edge, MenuContext::Body, MenuContext::Empty, MenuContext::Sketch, MenuContext::Tool, MenuContext::Panel];
+    pub const ALL: [MenuContext; 11] = [
+        MenuContext::Face,
+        MenuContext::Edge,
+        MenuContext::Body,
+        MenuContext::Empty,
+        MenuContext::Sketch,
+        MenuContext::SketchLine,
+        MenuContext::SketchDimension,
+        MenuContext::Tool,
+        MenuContext::Panel,
+        MenuContext::AssemblyComponent,
+        MenuContext::AssemblyEmpty,
+    ];
 
     fn name(self) -> &'static str {
         match self {
@@ -81,8 +100,12 @@ impl MenuContext {
             MenuContext::Body => "body",
             MenuContext::Empty => "empty",
             MenuContext::Sketch => "sketch",
+            MenuContext::SketchLine => "sketch_line",
+            MenuContext::SketchDimension => "sketch_dimension",
             MenuContext::Tool => "tool",
             MenuContext::Panel => "panel",
+            MenuContext::AssemblyComponent => "assembly_component",
+            MenuContext::AssemblyEmpty => "assembly_empty",
         }
     }
 }
@@ -103,6 +126,9 @@ pub struct MenuLayout {
     pub overflow: Vec<String>,
     /// Planning-repo path of the capture this layout was read from. None: unverified.
     pub evidence: Option<String>,
+    /// What the capture shows that TCI-CAD has no command or action for, where it shows it
+    /// ("E: Continue", "list: How To…"). Recorded, never drawn: the slot stays empty.
+    pub unmapped: Vec<String>,
 }
 
 /// Marking-menu items that are UI actions rather than registry commands (`context_menu::run_item`
@@ -122,6 +148,10 @@ pub const MARKING_ACTIONS: &[&str] = &[
     "ui.home",
     "ui.properties",
     "ui.delete",
+    "ui.copy",
+    "ui.hide",
+    "ui.showAll",
+    "ui.findBrowser",
 ];
 
 /// The ring has this many slots, clockwise from north.

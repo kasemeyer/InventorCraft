@@ -3357,8 +3357,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             let _ = app.run("select.set", json!({ "items": items, "add": add }));
         }
         // A right-click, unless the same press opened the mouse gestures' ring.
+        // A profile's marking menu opens in every state, inside a tool or a panel too.
         if resp.secondary_clicked() && delta == egui::Vec2::ZERO && !crate::mouse_gesture::took_press(app) {
-            if app.tool.is_some() {
+            if crate::marking_menu::layout(app).is_some() {
+                crate::context_menu::open(app, p);
+            } else if app.tool.is_some() {
                 crate::tools::finish(app);
             } else if app.dialog.is_none() {
                 crate::context_menu::open(app, p);

@@ -209,7 +209,7 @@ pub struct MenuState {
     /// The right button is held through the menu: releasing over a direction picks it.
     pub flick: bool,
     /// A right press in the viewport that may become a press-and-hold: where and when.
-    press: Option<(Pos2, f64)>,
+    pub(crate) press: Option<(Pos2, f64)>,
     /// `ui.menu` asked to open at a point once the pointer got there.
     pending: Option<(Pos2, Target)>,
     /// An inline rename in progress.
@@ -288,7 +288,7 @@ fn sel_sketch(app: &SolveApp) -> Option<u64> {
 }
 
 /// Bodies the selection touches (bodies, and the bodies of selected faces and edges).
-fn touched_bodies(app: &SolveApp) -> Vec<String> {
+pub(crate) fn touched_bodies(app: &SolveApp) -> Vec<String> {
     let mut v: Vec<String> = Vec::new();
     for s in &app.session.selection {
         let b = match s {
@@ -313,8 +313,12 @@ pub fn component_bodies(app: &SolveApp, id: u64) -> Vec<String> {
     app.session.model.state().bodies.iter().filter(|b| doc.component_within(doc.model_body_component(b), id)).map(|b| b.name.clone()).collect()
 }
 
-/// The eight radial commands, clockwise from the top.
+/// The eight radial commands, clockwise from the top: the profile's marking ring where it lays
+/// one out, else upstream's.
 pub fn radial_items(app: &SolveApp) -> Vec<Item> {
+    if let Some(ring) = crate::marking_menu::ring(app) {
+        return ring;
+    }
     let repeat = match &app.last_command {
         Some((_, label)) => act("ui.repeat", &format!("Repeat {label}"), "redo").key(crate::keymap::REPEAT_KEY),
         None => act("ui.repeat", "Repeat", "redo").key(crate::keymap::REPEAT_KEY).on(false),
@@ -347,7 +351,8 @@ pub fn radial_items(app: &SolveApp) -> Vec<Item> {
 /// The list of a menu (under the ring for the viewport).
 pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
     let mut v = match target {
-        Target::Viewport => viewport_items(app),
+        // The profile's marking-menu list where it lays one out; browser targets keep their lists.
+        Target::Viewport => crate::marking_menu::overflow(app).unwrap_or_else(|| viewport_items(app)),
         Target::Body { name } => body_items(app, std::slice::from_ref(name), true),
         Target::Sketch { id } => sketch_items(app, *id),
         Target::Feature { id } => vec![
@@ -1081,6 +1086,24 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         }
         "ui.finishSketch" => app.finish_sketch(),
         "ui.cancelSketch" => app.cancel_sketch(),
+        // The marking menu inside a tool or a panel.
+        "ui.done" => {
+            crate::tools::finish(app);
+            app.tool = None;
+        }
+        "ui.ok" => request_panel(app, crate::dialogs::PanelAction::Ok),
+        "ui.applyContinue" => request_panel(app, crate::dialogs::PanelAction::ApplyAndContinue),
+        "ui.cancel" => {
+            if app.dialog.is_some() {
+                request_panel(app, crate::dialogs::PanelAction::Cancel);
+            } else {
+                crate::dim_view::cancel();
+                app.tool = None;
+            }
+        }
+        "ui.previousView" => {
+            crate::view_history::previous(app);
+        }
         "ui.relinkSource" => {
             if let Some(component) = id_of(&p, "component") {
                 crate::linked_source::start(app, component);
@@ -1384,6 +1407,9 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             if let Some(ss) = id_of(&p, "sketch").and_then(|id| st.sketch(id)) {
                 let to = crate::dialogs::onto_sketch(app.cam.looking_from(ss.plane.normal()), ss);
                 app.animate_to(to);
+            } else if let Some(cam) = p.get("camera") {
+                // The marking menu's Look At on a face, edge or body: Normal to Selection's path.
+                let _ = app.run("view.normal_to", json!({ "camera": cam }));
             }
         }
         "ui.nav" => {
@@ -1411,6 +1437,13 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             let _ = app.run(id, p);
         }
         id => app.start(id),
+    }
+}
+
+/// Ask the open panel for a footer action (the marking menu); it acts on its next frame.
+fn request_panel(app: &mut SolveApp, action: crate::dialogs::PanelAction) {
+    if let Some(d) = app.dialog.as_mut() {
+        d.requested = Some(action);
     }
 }
 
@@ -1578,14 +1611,18 @@ pub fn open(app: &mut SolveApp, at: Pos2) {
     });
     crate::select_other::close(app);
     let selected = |app: &SolveApp, sel: &Sel| app.session.selection.iter().any(|x| crate::selection::same_item(x, sel));
-    if app.session.active_sketch.is_none()
+    // Inside a tool or a panel (the marking menu opens there too) the right-click selects nothing.
+    let free = app.tool.is_none() && app.dialog.is_none();
+    if free
+        && app.session.active_sketch.is_none()
         && let Some(h) = app.viewport.hover.clone()
         && let Some((_, sel)) = crate::viewport::candidate(app, &[h])
         && !selected(app, &sel)
         && !matches!(sel, Sel::Plane { .. } | Sel::Axis { .. })
     {
         let _ = app.run("select.set", json!({ "items": [sel] }));
-    } else if app.session.active_sketch.is_some()
+    } else if free
+        && app.session.active_sketch.is_some()
         && let Some(h) = app.viewport.hover.clone()
         && let Some((_, sel)) = crate::viewport::candidate(app, &[h])
         && (matches!(sel, Sel::SketchCurve { .. } | Sel::SketchPoint { .. } | Sel::SketchMidpoint { .. })
@@ -1597,12 +1634,13 @@ pub fn open(app: &mut SolveApp, at: Pos2) {
     open_for(app, at, Target::Viewport);
 }
 
-/// Open a menu for a target (the radial ring only for the viewport).
+/// Open a menu for a target (the radial ring only for the viewport: the opt-in ring, or the
+/// profile's marking menu; browser targets are always lists).
 pub fn open_for(app: &mut SolveApp, at: Pos2, target: Target) {
     app.menu.key_row = None;
     app.menu.submenu = None;
     app.menu.submenu_key = None;
-    app.menu.radial = target == Target::Viewport && app.preferences.radial_context_menu;
+    app.menu.radial = target == Target::Viewport && (app.preferences.radial_context_menu || crate::marking_menu::layout(app).is_some());
     app.menu.target = target;
     app.menu.flick = false;
     app.menu.opener = None;
@@ -1718,6 +1756,22 @@ fn list_place(c: Pos2, h: f32, screen: Rect) -> Pos2 {
     pos2((c.x - RX - 12.0 - LIST_W).max(screen.left() + 4.0), y)
 }
 
+/// Where a marking menu's list goes: centred under the cursor, `LIST_DROP` below it, or ending
+/// that far above it when it does not fit below (as the capture shows near the bottom), kept on
+/// screen.
+fn marking_list_place(at: Pos2, h: f32, screen: Rect) -> Pos2 {
+    let drop = crate::marking_menu::LIST_DROP;
+    let x = (at.x - LIST_W / 2.0).clamp(screen.left() + 4.0, (screen.right() - LIST_W - 4.0).max(screen.left() + 4.0));
+    let y = if at.y + drop + h <= screen.bottom() - 4.0 {
+        at.y + drop
+    } else if at.y - drop - h >= screen.top() + 4.0 {
+        at.y - drop - h
+    } else {
+        (screen.bottom() - h - 4.0).max(screen.top())
+    };
+    pos2(x, y)
+}
+
 /// Width of list menus.
 pub const LIST_W: f32 = 250.0;
 
@@ -1752,6 +1806,12 @@ fn sector(d: Vec2) -> Option<usize> {
 /// Press-and-hold of the right button in the viewport opens the menu; releasing over a
 /// direction picks it.
 fn track_hold(app: &mut SolveApp, ctx: &egui::Context) {
+    // A profile's marking menu opens on a right-click only: no press-and-hold, no flick.
+    if crate::marking_menu::layout(app).is_some() {
+        app.menu.press = None;
+        app.menu.flick = false;
+        return;
+    }
     if !app.preferences.radial_context_menu || crate::mouse_gesture::active(app) {
         app.menu.press = None;
         app.menu.flick = false;
@@ -1819,8 +1879,25 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let pointer = ctx.input(|i| i.pointer.latest_pos());
     let mut inside = app.menu.opener.is_some_and(|r| pointer.is_some_and(|p| r.contains(p)));
 
+    let marking = crate::marking_menu::layout(app).is_some();
     let list_at = if target == Target::Workspace {
         pos2(at.x.clamp(screen.left(), (screen.right() - 470.0).max(screen.left())), at.y)
+    } else if app.menu.radial && marking {
+        // The profile's marking menu: pills around the cursor, the list under them.
+        let ring = radial_items(app);
+        let offsets = &crate::marking_menu::PILL_OFFSETS;
+        let bounds = crate::ui_kit::marking_bounds(ctx, at, &ring, offsets);
+        inside |= pointer.is_some_and(|p| bounds.contains(p));
+        let resp = Container::new(ctx, Surface::Popup)
+            .area(egui::Id::new("sc_marking_menu"))
+            .fixed_pos(bounds.min)
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                let _ = ui.allocate_exact_size(bounds.size(), Sense::hover());
+                picked = crate::ui_kit::marking_ring(ui, at, &ring, offsets).or(picked.take());
+            });
+        inside |= resp.response.contains_pointer();
+        marking_list_place(at, list_height(&list), screen)
     } else if app.menu.radial {
         let c = radial_center(at, screen);
         let radial = radial_items(app);
@@ -1938,7 +2015,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             i.key_pressed(egui::Key::Escape),
         )
     });
-    if secondary && inside && app.menu.radial {
+    if secondary && inside && app.menu.radial && !marking {
         // A right press on the ring: drag toward a command and release to pick it.
         app.menu.flick = true;
     } else if (primary || secondary) && !inside || esc {

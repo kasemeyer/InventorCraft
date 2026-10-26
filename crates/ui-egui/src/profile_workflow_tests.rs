@@ -22,7 +22,7 @@ fn strings(ids: &[&str]) -> Vec<String> {
 /// Inventor's workflow with its Face layout replaced by this ring and overflow.
 fn face_only(ring: &[&str], overflow: &[&str]) -> Workflow {
     let mut w = inventor().workflow.clone();
-    let layout = MenuLayout { ring: strings(ring), overflow: strings(overflow), evidence: None };
+    let layout = MenuLayout { ring: strings(ring), overflow: strings(overflow), ..MenuLayout::default() };
     w.marking_menu.as_mut().unwrap().insert(MenuContext::Face, layout);
     w
 }
@@ -128,8 +128,15 @@ fn first_run_prefers_the_profiles_units() {
 
 #[test]
 fn uncaptured_marking_menus_are_flagged() {
-    let expected: Vec<String> =
-        ["edge", "body", "empty", "sketch", "tool", "panel"].iter().map(|c| format!("{c} marking menu has no capture (unverified)")).collect();
-    assert_eq!(workflow_warnings(&inventor().workflow), expected);
+    // Every graphics-window context Inventor lays out is read from a capture (Task 4).
+    assert_eq!(workflow_warnings(&inventor().workflow), Vec::<String>::new());
+    for (ctx, layout) in inventor_layouts() {
+        let evidence = layout.evidence.as_deref().unwrap_or_default();
+        assert!(evidence.starts_with("docs/evidence/screenshots/"), "{ctx}: {evidence:?}");
+    }
+    // A layout without one is flagged as unverified.
+    let mut w = inventor().workflow.clone();
+    w.marking_menu.as_mut().unwrap().get_mut(&MenuContext::Panel).unwrap().evidence = None;
+    assert_eq!(workflow_warnings(&w), vec!["panel marking menu has no capture (unverified)".to_string()]);
     assert_eq!(workflow_warnings(&profile::get("solidcraft").unwrap().workflow), Vec::<String>::new());
 }

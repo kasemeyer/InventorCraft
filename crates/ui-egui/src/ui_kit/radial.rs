@@ -151,6 +151,84 @@ pub(crate) fn radial_menu(ui: &mut Ui, center: Pos2, items: &[Item], hot: Option
     picked
 }
 
+/// A marking-menu pill's height, logical points (the capture's 36 px at 175 %).
+const PILL_H: f32 = 36.0 / 1.75;
+/// Icon size inside a pill and the gap around it.
+const PILL_ICON: f32 = 14.0;
+
+/// Where each pill of a marking ring goes (None for a separator). A pill hugs its label and
+/// icon; west slots end at their offset, east slots start there, N and S are centred on it.
+fn pill_rects(ctx: &egui::Context, center: Pos2, items: &[Item], offsets: &[Vec2; 8]) -> Vec<Option<Rect>> {
+    let t = Tokens::get();
+    items
+        .iter()
+        .take(8)
+        .enumerate()
+        .map(|(k, item)| {
+            if item.id == "-" {
+                return None;
+            }
+            let label = crate::i18n::tr_label(&item.label).to_string();
+            let text = ctx.fonts_mut(|f| f.layout_no_wrap(label, FontId::proportional(t.font_label), t.form_ink)).size().x;
+            let icon = if item.icon.is_empty() { 0.0 } else { PILL_ICON + t.space_6 };
+            let size = vec2(text + icon + 2.0 * t.space_10, PILL_H);
+            let at = center + offsets[k];
+            let min_x = match k {
+                1..=3 => at.x,
+                5..=7 => at.x - size.x,
+                _ => at.x - size.x / 2.0,
+            };
+            Some(Rect::from_min_size(Pos2::new(min_x, at.y - size.y / 2.0), size))
+        })
+        .collect()
+}
+
+/// The box around a marking ring's pills (the cursor's point when it has none).
+pub(crate) fn marking_bounds(ctx: &egui::Context, center: Pos2, items: &[Item], offsets: &[Vec2; 8]) -> Rect {
+    pill_rects(ctx, center, items, offsets).into_iter().flatten().fold(Rect::from_center_size(center, Vec2::splat(1.0)), |a, r| a.union(r))
+}
+
+/// A marking menu's ring: one pill per item at its offset from `center` (N clockwise), label
+/// and the command's icon on the dialog surface, lit with the tab accent under the pointer.
+/// Returns the enabled pill clicked.
+pub(crate) fn marking_ring(ui: &mut Ui, center: Pos2, items: &[Item], offsets: &[Vec2; 8]) -> Option<Item> {
+    let t = Tokens::get();
+    let accent = crate::theme::TabAccent::current(ui.ctx());
+    let mut picked = None;
+    for (item, rect) in items.iter().zip(pill_rects(ui.ctx(), center, items, offsets)) {
+        let Some(rect) = rect else { continue };
+        let enabled = item.enabled && ui.is_enabled();
+        let response = ui.interact(rect, ui.id().with(("marking", &item.id)), if enabled { Sense::click() } else { Sense::hover() });
+        crate::scenario::publish_target(&format!("marking:{}", item.id), rect);
+        let lit = enabled && response.hovered();
+        let mut painter = ui.painter().clone();
+        if !enabled {
+            painter.multiply_opacity(0.4);
+        }
+        painter.rect(
+            rect,
+            PILL_H / 2.0,
+            if lit { accent.soft } else { t.dialog_body },
+            Stroke::new(if lit { 1.6 } else { 1.0 }, if lit { accent.color } else { t.dialog_border }),
+            egui::StrokeKind::Inside,
+        );
+        let mut x = rect.left() + t.space_10;
+        if !item.icon.is_empty() {
+            let icon = Rect::from_min_size(Pos2::new(x, rect.center().y - PILL_ICON / 2.0), Vec2::splat(PILL_ICON));
+            crate::icons::paint_accented(&painter, icon, &item.icon, crate::theme::TabAccent::current_icon_accent(ui.ctx()), 1.0);
+            x += PILL_ICON + t.space_6;
+        }
+        let label = crate::i18n::tr_label(&item.label);
+        let ink = if lit { accent.ink } else { t.form_ink };
+        painter.text(Pos2::new(x, rect.center().y), Align2::LEFT_CENTER, label, FontId::proportional(t.font_label), ink);
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
+        if enabled && response.clicked() {
+            picked = Some(item.clone());
+        }
+    }
+    picked
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

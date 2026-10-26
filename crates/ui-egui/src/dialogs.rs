@@ -423,12 +423,40 @@ impl Default for HoleOpts {
 }
 
 /// A footer action asked for from outside the footer (the marking menu).
-// Only tests ask for these until the marking menu does (B-2 Task 4); then this expectation fails and goes.
-#[cfg_attr(not(test), expect(dead_code, reason = "the marking menu asks for OK and + through `Dialog::requested` in B-2 Task 4"))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PanelAction {
     Ok,
     ApplyAndContinue,
+    Cancel,
+}
+
+/// A sketch-modify panel that applies with "Apply" and stays open for the next one.
+fn repeatable(d: &Dialog) -> bool {
+    matches!(&d.kind, Kind::SketchModify(k) if crate::sketch_modify_ui::repeatable(k)) && d.editing.is_none() && !d.extra.contains_key("pattern")
+}
+
+/// A feature panel that applies with "+" and stays open for the next one, where the profile asks.
+fn continues(app: &SolveApp, d: &Dialog) -> bool {
+    !repeatable(d) && d.editing.is_none() && crate::profile::active(app).workflow.apply_and_continue && continues_kind(&d.kind)
+}
+
+/// Whether the panel acts on `action` asked for from outside its footer: never while an issue
+/// report is being written; OK and "+" not while a feature computes, OK only on panels that have
+/// it, "+" only on panels that offer it (or Apply).
+pub(crate) fn can_act(app: &SolveApp, d: &Dialog, action: PanelAction) -> bool {
+    if app.issue_report.draft.is_some() {
+        return false;
+    }
+    match action {
+        PanelAction::Cancel => true,
+        PanelAction::Ok => app.applying.is_none() && !matches!(d.kind, Kind::Sketch | Kind::Measure { .. }),
+        PanelAction::ApplyAndContinue => app.applying.is_none() && (continues(app, d) || repeatable(d)),
+    }
+}
+
+/// What is picked makes the panel's feature (the footer's OK would be enabled).
+pub(crate) fn makes_feature(app: &SolveApp, d: &Dialog) -> bool {
+    !d.previews() || apply_commands(app, d).is_ok()
 }
 
 /// Feature panels that can apply and stay open for the next one.
@@ -2585,10 +2613,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let panel =
         panel.reset_scroll(reset_scroll && matches!(d.kind, Kind::Appearance(_) | Kind::Motion(crate::dialogs_motion::Mo::Configurations { .. })));
     let window = panel.window(ctx);
-    let repeatable =
-        matches!(&d.kind, Kind::SketchModify(k) if crate::sketch_modify_ui::repeatable(k)) && d.editing.is_none() && !d.extra.contains_key("pattern");
+    let repeatable = repeatable(&d);
     // Feature panels apply with "+" and stay open for the next one, where the profile asks.
-    let continues = !repeatable && d.editing.is_none() && crate::profile::active(app).workflow.apply_and_continue && continues_kind(&d.kind);
+    let continues = continues(app, &d);
     if let Kind::ConfirmDelete { with, fail, .. } = &d.kind {
         let detail = with.join(" · ");
         let (closed, action) = crate::ui_kit::Confirm::new(egui::Id::new(("sc_dialog", title(&d.kind))), "delete", &heading)
@@ -2699,14 +2726,19 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     if !report_active && enter_applies && app.applying.is_none() && (enter || canvas_enter || (enter_free && nothing_focused)) {
         ok = true;
     }
-    // OK or "+" asked for from outside the footer (the marking menu) acts like its button.
-    match d.requested.take() {
-        Some(PanelAction::Ok) if has_ok => ok = true,
-        Some(PanelAction::ApplyAndContinue) if continues => {
-            ok = true;
-            apply_again = true;
+    // OK, "+" or Cancel asked for from outside the footer (the marking menu) acts like its
+    // button. A request the panel cannot act on now is dropped: it never fires later.
+    if let Some(action) = d.requested.take()
+        && can_act(app, &d, action)
+    {
+        match action {
+            PanelAction::Ok => ok = true,
+            PanelAction::ApplyAndContinue => {
+                ok = true;
+                apply_again = true;
+            }
+            PanelAction::Cancel => cancel = true,
         }
-        _ => {}
     }
     if !report_active && esc && !app.esc_handled {
         app.esc_handled = true;

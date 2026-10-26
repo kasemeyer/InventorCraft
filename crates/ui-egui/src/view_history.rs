@@ -62,7 +62,6 @@ pub(crate) fn previous(app: &mut SolveApp) -> bool {
 }
 
 /// Whether `previous` has a view to go to.
-#[cfg_attr(not(test), expect(dead_code, reason = "the marking menu's Previous View asks it in B-2 Task 4"))]
 pub(crate) fn can_go_back(app: &SolveApp) -> bool {
     !app.views.back.is_empty()
 }
