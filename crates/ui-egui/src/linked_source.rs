@@ -181,7 +181,7 @@ mod tests {
 
     fn answer(app: &mut SolveApp, path: Option<String>) {
         app.services.pick_open = Some(Box::new(move |extensions| {
-            assert_eq!(extensions, &["solidcraft"]);
+            assert_eq!(extensions, &["tcipart", "tciasm", "tcidrw", "solidcraft", "solvecraft"]);
             let result = path.clone();
             Box::pin(async move { result })
         }));
@@ -275,7 +275,7 @@ mod tests {
         let item = find(&app, component).unwrap();
         let chosen = folder.join("bracket").to_string_lossy().into_owned();
         app.services.pick_save = Some(Box::new(move |name, extensions| {
-            assert_eq!((name, extensions), ("Bracket.solidcraft", &["solidcraft"][..]));
+            assert_eq!((name, extensions), ("Bracket.solidcraft", &["tcipart", "tciasm", "solidcraft"][..]));
             let result = Some(chosen.clone());
             Box::pin(async move { result })
         }));
