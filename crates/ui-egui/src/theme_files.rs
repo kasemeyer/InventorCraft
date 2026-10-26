@@ -524,8 +524,8 @@ pub fn export(name: &str, base: Base, t: &Tokens) -> Value {
     json!({"format": FORMAT, "name": name, "base": base, "colors": colors, "radii": radii, "borders": borders, "icon_palette": icon_palette})
 }
 
-/// The theme files that come with SolidCraft (original files; Gruvbox, Tokyo Night, Solarized, Nord, Nosferatu and Catppuccin map open-source palettes, MIT).
-const BUILTIN: [(&str, &str); 20] = [
+/// The theme files that come with SolidCraft (original files; Gruvbox, Tokyo Night, Solarized, Nord, Nosferatu and Catppuccin map open-source palettes, MIT; `tci-dark` is TCI-CAD's, its colours measured from the owner's reference captures).
+const BUILTIN: [(&str, &str); 21] = [
     ("gruvbox-dark", include_str!("../../../assets/styles/ui/themes/gruvbox-dark.json")),
     ("gruvbox-dark-hard", include_str!("../../../assets/styles/ui/themes/gruvbox-dark-hard.json")),
     ("gruvbox-dark-soft", include_str!("../../../assets/styles/ui/themes/gruvbox-dark-soft.json")),
@@ -546,6 +546,7 @@ const BUILTIN: [(&str, &str); 20] = [
     ("graphite", include_str!("../../../assets/styles/ui/themes/graphite.json")),
     ("nosferatu", include_str!("../../../assets/styles/ui/themes/nosferatu.json")),
     ("catppuccin-mocha", include_str!("../../../assets/styles/ui/themes/catppuccin-mocha.json")),
+    ("tci-dark", include_str!("../../../assets/styles/ui/themes/tci-dark.json")),
 ];
 
 /// The built-in themes, read once (one that fails to read is left out; a test reads them all).

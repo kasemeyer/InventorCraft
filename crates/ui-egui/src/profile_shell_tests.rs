@@ -216,6 +216,26 @@ fn first_run_adopts_inventor_and_its_defaults() {
 }
 
 #[test]
+fn first_run_turns_on_the_tci_dark_theme() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    first_run(&mut app);
+    assert_eq!(app.preferences.theme, "tci-dark");
+    assert!(app.ui.dark);
+}
+
+#[test]
+fn tci_dark_ships_with_the_measured_palette() {
+    let f = crate::theme_files::find("tci-dark", &[]).expect("tci-dark is built in");
+    assert!(f.base.is_dark());
+    assert_eq!(f.colors["toolbar"], json!("#3b4453"));
+    assert_eq!(f.colors["app_bar"], json!("#222933"));
+    assert_eq!(f.colors["accent"], json!("#38abdf"));
+    assert_eq!(f.colors["sel_face"], json!("#6ba1c8"));
+    assert_eq!(f.colors["viewport_top"], json!("#272d39"));
+    assert!(crate::theme_files::find("tci-light", &[]).is_none(), "no light TCI theme in Plan B");
+}
+
+#[test]
 fn first_run_keeps_a_chosen_profile() {
     let mut app = SolveApp::new(Session::default(), Services::default());
     app.preferences.ui_profile = "solidcraft".into();
