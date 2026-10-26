@@ -569,7 +569,7 @@ pub(super) fn extent_glyphs() -> [ui_kit::GlyphSegment; 3] {
 }
 
 fn glyph_segment(key: &'static str, glyph: fn(egui::Rect, Color32) -> Vec<egui::Shape>) -> ui_kit::GlyphSegment {
-    ui_kit::GlyphSegment { key, tip: tr(key).to_owned(), glyph }
+    ui_kit::GlyphSegment { key, tip: crate::i18n::tr_label(key).to_owned(), glyph }
 }
 
 /// The glyphs' stroke width in a square of side `s`.

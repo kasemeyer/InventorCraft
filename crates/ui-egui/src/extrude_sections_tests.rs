@@ -128,6 +128,17 @@ fn direction_and_extent_glyphs_draw_arrows_not_words() {
         assert!(shapes.iter().all(|s| square.expand(1.0).contains_rect(s.visual_bounding_rect())), "{}: inside its square", g.key);
         assert_eq!(g.tip, g.key, "{}: the word is the hover text (English)", g.key);
     }
+    // In Japanese the hover text is the translated word; the key stays English.
+    {
+        let _ja = crate::i18n::scope("ja");
+        let tips: Vec<_> = dense::direction_glyphs().into_iter().map(|g| (g.key, g.tip)).collect();
+        assert_eq!(
+            tips,
+            [("Default", "既定".to_owned()), ("Flipped", "反転".to_owned()), ("Symmetric", "対称".to_owned()), ("Asymmetric", "非対称".to_owned())]
+        );
+        let tips: Vec<_> = dense::extent_glyphs().into_iter().map(|g| g.tip).collect();
+        assert_eq!(tips, ["距離", "終了", "貫通"]);
+    }
     let blocks = |g: &crate::ui_kit::GlyphSegment| (g.glyph)(square, ink).iter().filter(|s| matches!(s, egui::Shape::Rect(_))).count();
     assert_eq!(extents.iter().map(blocks).collect::<Vec<_>>(), [0, 1, 1], "To and Through All meet a block");
 }
@@ -175,6 +186,20 @@ fn boolean_glyphs_draw_bodies_not_words() {
         assert!(!shapes.iter().any(|s| matches!(s, egui::Shape::Text(_))), "{}: no text", g.key);
         assert!(shapes.iter().all(|s| square.expand(1.0).contains_rect(s.visual_bounding_rect())), "{}: inside its square", g.key);
         assert_eq!(g.tip, g.key, "{}: the word is the hover text (English)", g.key);
+    }
+    {
+        // In Japanese the hover text is the translated word; the key stays English.
+        let _ja = crate::i18n::scope("ja");
+        let tips: Vec<_> = dense::boolean_glyphs().into_iter().map(|g| (g.key, g.tip)).collect();
+        assert_eq!(
+            tips,
+            [
+                ("Join", "結合".to_owned()),
+                ("Cut", "切り取り".to_owned()),
+                ("Intersect", "交差".to_owned()),
+                ("New Solid", "新しいソリッド".to_owned())
+            ]
+        );
     }
     let shapes: Vec<_> = glyphs.iter().map(|g| (g.glyph)(square, ink)).collect();
     // Join: two filled bodies that overlap (merged).
