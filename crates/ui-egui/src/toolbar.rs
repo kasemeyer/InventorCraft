@@ -2294,10 +2294,12 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 let again = app.last_escape.is_some_and(|t| now - t <= ESCAPE_TWICE_S);
                 app.last_escape = Some(now);
                 // Not while a tool is still out (its first Esc only ended a chain): this press
-                // puts it down, and the next quick one finishes.
+                // puts it down, and the next quick one finishes. A profile without the gesture
+                // (Inventor) lets the second press fall through to the single-Esc chain below.
                 if again
                     && app.tool.is_none()
                     && app.dialog.is_none()
+                    && crate::profile::active(app).workflow.escape_twice_finishes_sketch
                     && let Some(sketch) = app.session.active_sketch
                 {
                     app.last_escape = None;

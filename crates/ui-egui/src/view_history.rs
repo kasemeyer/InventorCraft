@@ -45,8 +45,7 @@ pub(crate) fn settle(app: &mut SolveApp, busy: bool) {
     }
 }
 
-/// The camera as it last stood still (Task 6 reads it before a sketch's look-at settles).
-#[cfg_attr(not(test), expect(dead_code, reason = "a sketch's look-at reads the settled view in B-2 Task 6"))]
+/// The camera as it last stood still (`sketch_view` reads it before a sketch's look-at settles).
 pub(crate) fn settled(app: &SolveApp) -> Option<Camera> {
     app.views.settled
 }

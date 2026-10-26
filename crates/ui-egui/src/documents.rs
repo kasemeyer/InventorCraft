@@ -27,6 +27,8 @@ pub struct DocSlot {
     pre_sketch_marker: Option<Option<usize>>,
     view: DocView,
     occurrence_move: Option<crate::browser::OccMove>,
+    /// The sketch its view looked at and the view to return to (a tab switch is not a finish).
+    sketch_view: crate::sketch_view::SketchView,
 }
 
 /// The per-design part of the UI state the session doesn't keep (what is hidden, shown or locked
@@ -46,6 +48,7 @@ impl DocSlot {
             pre_sketch_marker: None,
             view: DocView::default(),
             occurrence_move: None,
+            sketch_view: Default::default(),
         }
     }
 }
@@ -120,6 +123,7 @@ fn swap_in(app: &mut SolveApp, slot: DocSlot) -> DocSlot {
         pre_sketch_marker: std::mem::replace(&mut app.pre_sketch_marker, slot.pre_sketch_marker),
         view: take_view(app),
         occurrence_move: std::mem::replace(&mut app.tree.occurrence_move, slot.occurrence_move),
+        sketch_view: std::mem::replace(&mut app.sketch_view, slot.sketch_view),
     };
     // Only the displayed design owns the process-wide crash replay journal.
     app.session.crash_journal = out.session.crash_journal;

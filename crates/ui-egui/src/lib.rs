@@ -238,6 +238,7 @@ pub(crate) mod sketch_text;
 mod sketch_text_handles;
 mod sketch_text_move;
 pub mod sketch_tools;
+mod sketch_view;
 pub mod smart_extrude;
 #[cfg(test)]
 mod smart_extrude_ui_tests;
@@ -396,6 +397,8 @@ pub struct SolveApp {
     pub cam_anim: Option<CameraAnim>,
     /// The settled views Previous View walks back through.
     pub(crate) views: view_history::ViewHistory,
+    /// The sketch the view last looked at, and the view to go back to when it is left.
+    pub(crate) sketch_view: sketch_view::SketchView,
     /// Seconds since start, as of this frame.
     pub now: f64,
     /// The history marker before Edit Sketch rolled the timeline to the sketch; Finish Sketch
@@ -574,6 +577,7 @@ impl SolveApp {
             now: 0.0,
             pre_sketch_marker: None,
             views: Default::default(),
+            sketch_view: Default::default(),
             services,
             file_picker: None,
             saving: None,
@@ -1667,6 +1671,7 @@ impl SolveApp {
             self.set_up_axis(self.ui.up_axis);
         }
         self.step_view_animation(ctx);
+        sketch_view::tick(self);
         let busy = ctx.input(|i| i.pointer.any_down() || i.is_scrolling());
         view_history::settle(self, busy);
         self.poll_control_jobs(ctx);
