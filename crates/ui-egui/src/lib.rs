@@ -1620,6 +1620,8 @@ impl SolveApp {
     pub fn cancel_view_animation(&mut self) {
         self.pending_fit = None;
         self.cam_anim = None;
+        // A Previous View the user took over is no longer a restore: where they stop settles.
+        self.views.end_restore();
     }
 
     /// Hand the view to an external navigation device without a pending mouse orbit or spin
@@ -1672,7 +1674,7 @@ impl SolveApp {
         }
         self.step_view_animation(ctx);
         sketch_view::tick(self);
-        let busy = ctx.input(|i| i.pointer.any_down() || i.is_scrolling());
+        let busy = view_history::busy(self, ctx);
         view_history::settle(self, busy);
         self.poll_control_jobs(ctx);
         self.drain_control(ctx);

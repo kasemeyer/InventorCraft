@@ -648,6 +648,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
 /// mouse only reads the device and queues the motion ([`crate::space_mouse::navigate_frame`]).
 pub(crate) fn device(app: &mut SolveApp, rect: Rect, caps: NavCaps) {
     let Some(queued) = app.viewport.device_motion.take() else { return };
+    app.space_mouse.moved_at = Some(app.now);
     let turn = caps.orbit && app.session.active_sketch.is_none();
     let height = f64::from(rect.height().max(1.0));
     device_camera(&mut app.cam, queued.motion, queued.seconds, height, turn, app.preferences.zoom_reverse, app.preferences.free_orbit);

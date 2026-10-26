@@ -13,6 +13,9 @@ use crate::SolveApp;
 /// The deepest the back stack goes; older views are dropped.
 pub const MAX_VIEWS: usize = 32;
 
+/// How long a 3D mouse's cap rests before the view it left counts as settled (seconds).
+pub const DEVICE_REST_S: f64 = 0.3;
+
 #[derive(Default)]
 pub struct ViewHistory {
     /// The camera as it last stood still.
@@ -21,6 +24,33 @@ pub struct ViewHistory {
     back: Vec<Camera>,
     /// `previous` is moving to a popped view: settling there pushes nothing.
     restoring: bool,
+}
+
+impl ViewHistory {
+    /// The view `previous` was moving to was taken over (`cancel_view_animation`): where the
+    /// camera settles now is a new view, pushed like any other.
+    pub(crate) fn end_restore(&mut self) {
+        self.restoring = false;
+    }
+}
+
+/// Whether a gesture is moving the camera this frame: a button held, a scroll, a spin, or 3D
+/// mouse motion in the last [`DEVICE_REST_S`] (its every frame would otherwise settle a view).
+/// While the cap is resting it asks for the frame after the rest, so the view settles without
+/// waiting for other input.
+pub(crate) fn busy(app: &SolveApp, ctx: &egui::Context) -> bool {
+    if ctx.input(|i| i.pointer.any_down() || i.is_scrolling()) || app.viewport.spin {
+        return true;
+    }
+    let Some(at) = app.space_mouse.moved_at else {
+        return false;
+    };
+    let left = (DEVICE_REST_S - (app.now - at)).min(DEVICE_REST_S);
+    if !(left > 0.0) {
+        return false;
+    }
+    ctx.request_repaint_after(std::time::Duration::from_secs_f64(left + 0.01));
+    true
 }
 
 /// Once per frame: when nothing moves the camera (`!busy`, no animation), a camera different from

@@ -87,6 +87,9 @@ pub struct Input {
     /// The motion `navigate_frame` handed the view this frame (calibrated, reassigned, inverted and
     /// scaled), for the test model on the Preferences page to move with; none when the view got none.
     pub motion: Option<DeviceMotion>,
+    /// When (egui time) device motion last moved a view; Previous View settles a view only once
+    /// the cap has rested a moment (`view_history::busy`).
+    pub moved_at: Option<f64>,
     /// The test model's view on that page, and when it was last drawn (`test_boat`).
     pub boat: Option<crate::test_boat::Boat>,
     /// The driver mapping navigation used last frame, which says what each axis does to the view.
