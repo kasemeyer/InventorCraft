@@ -955,7 +955,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, action: FileAction) {
             }
         }
         FileAction::New(units) => {
-            crate::documents::new_design(app);
+            crate::documents::new_design_in(app, (units != "preferred").then_some(units));
             if units != "preferred" && !app.home.open && crate::documents::active_is_blank(app) {
                 crate::prefs::apply_new_design_units(app, units);
             }

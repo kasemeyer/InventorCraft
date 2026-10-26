@@ -252,3 +252,37 @@ fn editing_a_hole_keeps_its_stored_values() {
     assert_eq!(diameter, "5 mm");
     assert_eq!(depth, "10 mm");
 }
+
+#[test]
+fn a_home_mm_tile_under_an_inch_preference_takes_the_mm_precision() {
+    let mut h = inventor(DocumentKind::Part);
+    h.app.preferences.default_units = "in".into();
+    h.app.home.show(0);
+    h.frames(3);
+    h.step(&json!({"click": {"handle": "home:new_mm"}})).unwrap();
+    h.frames(3);
+    assert!(!h.app.home.open);
+    assert_eq!(h.app.session.doc.units, "mm");
+    assert_eq!(document_length_decimals(&h.app.session.doc), Some(2), "the mm template's precision, not the inch one");
+    assert_eq!(h.app.preferences.default_units, "in");
+}
+
+#[test]
+fn a_units_preference_change_on_a_blank_inch_design_moves_its_precision() {
+    let mut h = new_part("in");
+    assert_eq!(document_length_decimals(&h.app.session.doc), Some(3));
+    assert!(crate::documents::active_is_blank(&h.app));
+    h.app.preferences.default_units = "mm".into();
+    crate::prefs::default_units_changed(&mut h.app);
+    assert_eq!(h.app.session.doc.units, "mm");
+    assert_eq!(document_length_decimals(&h.app.session.doc), Some(2));
+    assert!(!h.app.session.is_dirty() && h.app.session.undo.is_empty());
+}
+
+#[test]
+fn a_design_with_work_keeps_its_precision() {
+    let mut h = part_in("in");
+    h.app.run("document.metadata.set", json!({"key": DOC_SETTINGS_KEY, "value": {"length_decimals": 5}})).unwrap();
+    apply_template_decimals(&mut h.app);
+    assert_eq!(document_length_decimals(&h.app.session.doc), Some(5));
+}

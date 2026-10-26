@@ -1031,7 +1031,8 @@ pub(crate) fn default_units_changed(app: &mut SolveApp) {
     }
 }
 
-/// Explicit units for a new-design tile; the user's default preference stays unchanged.
+/// Explicit units for a new-design tile; the user's default preference stays unchanged. A blank
+/// design also takes the template's precision for those units ([`apply_template_decimals`]).
 pub(crate) fn apply_new_design_units(app: &mut SolveApp, units: &str) {
     if app.session.doc.features.is_empty() && app.session.doc.units != units {
         let saved = !app.session.is_dirty();
@@ -1041,6 +1042,9 @@ pub(crate) fn apply_new_design_units(app: &mut SolveApp, units: &str) {
                 app.session.mark_saved();
             }
         }
+    }
+    if crate::documents::active_is_blank(app) {
+        apply_template_decimals(app);
     }
 }
 
@@ -1177,12 +1181,15 @@ fn doc_settings_with(doc: &solidcraft_engine::doc::Document, decimals: u8) -> se
 
 /// At creation, write the template's decimals into the new blank document: the profile's
 /// `inch_length_decimals` for an imperial design, `mm_length_decimals` otherwise; nothing when
-/// that is None. Not an undo step; the saved state is kept.
+/// that is None. A blank design's decimals follow its units again (a units change before any
+/// work); a document with its own decimals otherwise keeps them. Not an undo step; the saved
+/// state is kept.
 pub(crate) fn apply_template_decimals(app: &mut SolveApp) {
     let workflow = &crate::profile::active(app).workflow;
     let template = if crate::dialogs::imperial(&app.session.doc.units) { workflow.inch_length_decimals } else { workflow.mm_length_decimals };
     let Some(n) = template else { return };
-    if !app.session.doc.features.is_empty() || document_length_decimals(&app.session.doc).is_some() {
+    let current = document_length_decimals(&app.session.doc);
+    if !app.session.doc.features.is_empty() || current == Some(n) || (current.is_some() && !crate::documents::active_is_blank(app)) {
         return;
     }
     let saved = !app.session.is_dirty();

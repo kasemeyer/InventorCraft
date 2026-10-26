@@ -234,8 +234,14 @@ pub fn adopt(app: &mut SolveApp, session: Session) {
 /// takes Units of new designs (#1205): a launch starts on that empty design, so returning
 /// here used to leave it in millimetres.
 pub fn new_design(app: &mut SolveApp) {
+    new_design_in(app, None);
+}
+
+/// [`new_design`] with a Home tile's units (`None`: Units of new designs). Under a profile with a
+/// new-document template the tile's units reach the template, so its precision follows them.
+pub fn new_design_in(app: &mut SolveApp, units: Option<&str>) {
     if let Some(kind) = crate::profile::active(app).defaults.new_document {
-        new_document(app, kind, None);
+        new_document(app, kind, units);
         return;
     }
     if app.file_picker_busy() {
