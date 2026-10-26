@@ -222,3 +222,21 @@ fn a_sketch_entered_while_the_3d_mouse_rests_returns_to_where_the_cap_left_the_v
     h.frames(2);
     assert!(h.app.cam == moved, "back where the cap left it, not the stale settled view: {:?}", h.app.cam);
 }
+
+#[test]
+fn closing_the_last_tab_mid_sketch_leaves_the_blank_design_where_it_starts() {
+    let mut h = inv();
+    h.app.animate_view("top");
+    h.frames(2);
+    let top = h.app.cam;
+    crate::dialogs::start_sketch(&mut h.app, &plane("XZ")).unwrap();
+    h.frames(2);
+    crate::documents::close(&mut h.app, 0, true);
+    assert_eq!(h.app.docs.count(), 1);
+    assert!(h.app.session.active_sketch.is_none());
+    let fresh = h.app.cam;
+    h.frames(3);
+    assert!(h.app.cam == fresh, "the blank design keeps its own camera: {:?} vs {:?}", h.app.cam, fresh);
+    assert!(h.app.cam != top, "not the closed design's view from before its sketch");
+    assert!(h.app.cam_anim.is_none());
+}

@@ -342,6 +342,8 @@ pub fn close(app: &mut SolveApp, i: usize, force: bool) {
         app.tool = None;
         app.session.replace_design(Session::default());
         app.session.revision = rev + 1;
+        // The closed design's sketch entry goes with it: no return to its view from before.
+        app.sketch_view = Default::default();
         crate::prefs::apply_new_design(app);
         app.cam = Camera::default();
         app.fit_view();
