@@ -286,3 +286,14 @@ fn a_design_with_work_keeps_its_precision() {
     apply_template_decimals(&mut h.app);
     assert_eq!(document_length_decimals(&h.app.session.doc), Some(5));
 }
+
+#[test]
+fn choosing_the_current_decimals_is_not_an_undo_step() {
+    let mut h = new_part("in");
+    let three = items(&h.app, &Target::Units).into_iter().find(|i| i.id == "ui.docDecimals" && i.shortcut == "current").unwrap();
+    assert_eq!(three.params.as_ref().unwrap()["decimals"], json!(3));
+    run_item(&mut h.app, &three, egui::Pos2::ZERO);
+    assert_eq!(document_length_decimals(&h.app.session.doc), Some(3));
+    assert!(h.app.session.undo.is_empty(), "no undo step");
+    assert!(!h.app.session.is_dirty());
+}

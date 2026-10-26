@@ -1136,7 +1136,9 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             crate::view_history::previous(app);
         }
         "ui.docDecimals" => {
+            // The current choice is not a change: no undo step, no dirty document.
             if let Some(n) = p.get("decimals").and_then(Value::as_u64).and_then(|n| u8::try_from(n).ok())
+                && crate::prefs::document_length_decimals(&app.session.doc) != Some(n)
                 && let Err(e) = crate::prefs::set_document_length_decimals(app, n)
             {
                 app.set_status(e, true);
