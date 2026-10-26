@@ -3,7 +3,7 @@
 # Adapted from PhotoCraft's AppRun (storytold/photocraft, Apache-2.0; see ATTRIBUTION.md).
 #
 # On Wayland the compositor resolves a window's dock icon by taking the window's
-# app_id (ai.storyteller.solidcraft) and looking up an installed .desktop file.
+# app_id (com.tcicad.TciCad) and looking up an installed .desktop file.
 # An AppImage installs nothing, so every AppImage run would otherwise show the
 # generic "Wayland" icon. Best-effort desktop integration: on first run
 # (and whenever the AppImage's path changes) install the .desktop entry and the
@@ -18,7 +18,7 @@
 set -u
 
 APPDIR="$(dirname "$(readlink -f "$0")")"
-DESK_ID=ai.storyteller.solidcraft
+DESK_ID=com.tcicad.TciCad
 # Compatibility shim (docs/compatibility.md): the desktop id of releases before 0.8.
 OLD_DESK_ID=ai.storyteller.solvecraft
 

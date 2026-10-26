@@ -528,7 +528,7 @@ fn app_viewport() -> Result<egui::ViewportBuilder, eframe::Error> {
     let icon =
         egui::IconData { rgba: app_icon::rgba(64).map_err(|e| eframe::Error::AppCreation(std::io::Error::other(e).into()))?, width: 64, height: 64 };
     Ok(egui::ViewportBuilder::default()
-        .with_title("SolidCraft")
+        .with_title(solidcraft_ui_egui::APP_NAME)
         .with_icon(icon)
         .with_inner_size([1600.0, 1000.0])
         .with_min_inner_size([960.0, 600.0])
@@ -541,12 +541,13 @@ fn app_viewport() -> Result<egui::ViewportBuilder, eframe::Error> {
 }
 
 /// The window's app id: it names the desktop entry, so it is the packages' reverse-DNS id.
-/// TCI-CAD's own, not SolidCraft's, so the two never share a desktop entry or window identity.
-const APP_ID: &str = "com.tcicad.TciCad";
+/// TCI-CAD's own, not SolidCraft's, so the two never share a desktop entry or window identity;
+/// the io crate's `APP_ID` is the one source.
+const APP_ID: &str = solidcraft_engine::io::APP_ID;
 
 fn main() -> eframe::Result {
     #[cfg(target_os = "macos")]
-    objc2_foundation::NSProcessInfo::processInfo().setProcessName(objc2_foundation::ns_string!("SolidCraft"));
+    objc2_foundation::NSProcessInfo::processInfo().setProcessName(objc2_foundation::ns_string!("TCI-CAD"));
     mark("main");
     // Validate before crash markers or any user preference read.
     let settings = settings_dir().map_err(|error| eframe::Error::AppCreation(error.into()))?;
@@ -679,7 +680,7 @@ fn main() -> eframe::Result {
     let starting = settings.clone();
     mark("run_native");
     let result = eframe::run_native(
-        "SolidCraft",
+        solidcraft_ui_egui::APP_NAME,
         options,
         Box::new(move |cc| {
             created_in_app.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -994,10 +995,47 @@ mod msaa_tests {
     #[test]
     fn tci_cad_has_its_own_app_id_and_settings_folder() {
         assert_eq!(super::APP_ID, "com.tcicad.TciCad");
-        assert_ne!(super::APP_ID, solidcraft_engine::io::APP_ID);
+        // One id everywhere: the window, the io crate (Flatpak paths) and the updater.
+        assert_eq!(solidcraft_engine::io::APP_ID, super::APP_ID);
+        assert_eq!(solidcraft_ui_egui::update::APP_ID, super::APP_ID);
         assert_ne!(super::APP_ID, solidcraft_engine::io::LEGACY_APP_ID);
         assert_eq!(super::SETTINGS_FOLDER, "TCI-CAD");
         assert!(!["SolidCraft", "SolveCraft"].contains(&super::SETTINGS_FOLDER));
+    }
+
+    /// The window and process say TCI-CAD.
+    #[test]
+    fn the_window_is_titled_tci_cad() {
+        assert_eq!(solidcraft_ui_egui::APP_NAME, "TCI-CAD");
+        let viewport = super::app_viewport().expect("viewport");
+        assert_eq!(viewport.title.as_deref(), Some("TCI-CAD"));
+    }
+
+    /// Every packaging file that names the app id names TCI-CAD's, and none names upstream's.
+    #[test]
+    fn packaging_files_use_the_one_app_id() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let id = super::APP_ID;
+        let read = |rel: &str| std::fs::read_to_string(root.join(rel)).unwrap_or_else(|e| panic!("{rel}: {e}"));
+        let files = [
+            format!("assets/platforms/linux/{id}.desktop"),
+            format!("assets/platforms/linux/{id}.metainfo.xml.in"),
+            format!("assets/platforms/linux/{id}.mime.xml"),
+            format!("packaging/linux/flatpak/{id}.bundle.yml"),
+            "assets/platforms/macos/Info.plist.in".into(),
+            "packaging/env.sh".into(),
+            "packaging/linux/AppRun".into(),
+            "packaging/linux/snap/snapcraft.yaml".into(),
+            "packaging/macos/package.sh".into(),
+            "flake.nix".into(),
+        ];
+        for rel in &files {
+            let text = read(rel);
+            assert!(text.contains(id), "{rel} names {id}");
+            assert!(!text.contains("ai.storyteller.solidcraft"), "{rel} still names upstream's id");
+        }
+        assert!(read(&files[0]).lines().any(|l| l.trim() == format!("StartupWMClass={id}")));
+        assert!(read(&files[3]).lines().any(|l| l.trim() == format!("id: {id}")));
     }
 
     #[test]

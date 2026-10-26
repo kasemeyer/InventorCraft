@@ -22,7 +22,7 @@ New designs are saved as `.solidcraft`. Files with the old extension still open 
 | Browser file picker | `apps/solidcraft-web/src/files.rs` (`accept`) |
 | Windows | `assets/platforms/windows/solidcraft.wxs`: the `.solvecraft` extension on the design ProgId and in `SupportedTypes` |
 | macOS | `assets/platforms/macos/Info.plist.in`: `solvecraft` in the design document type's extensions |
-| Linux / FreeBSD / Flatpak | `assets/platforms/linux/ai.storyteller.solidcraft.mime.xml`: `*.solvecraft` glob and the `application/x-solvecraft` alias |
+| Linux / FreeBSD / Flatpak | `assets/platforms/linux/com.tcicad.TciCad.mime.xml`: `*.solvecraft` glob and the `application/x-solvecraft` alias |
 
 Recent-files entries that point at a `.solvecraft` file keep working: they are plain paths and
 open through the same detection. The browser app also lists designs it stored under the old
@@ -52,30 +52,27 @@ neither → unset).
 
 ## 4. Settings, preferences, autosave and recovery folders
 
-New folders use the SolidCraft name:
+TCI-CAD keeps its own folders and preferences key, so it never reads or changes those of a
+SolidCraft or SolveCraft installed on the same machine:
 
 | | Linux | macOS | Windows |
 |---|---|---|---|
-| Preferences, graphics settings | `~/.local/share/solidcraft` | `~/Library/Application Support/SolidCraft` | `%APPDATA%\SolidCraft\data` |
-| Recovery (autosave) | `…/solidcraft/recovery` | `…/SolidCraft/recovery` | `%LOCALAPPDATA%\SolidCraft\recovery` |
+| Preferences, graphics settings | `~/.local/share/tci-cad` | `~/Library/Application Support/TCI-CAD` | `%APPDATA%\TCI-CAD\data` |
+| Recovery (autosave) | `~/.local/share/tci-cad/recovery` | `…/TCI-CAD/recovery` | `%LOCALAPPDATA%\TCI-CAD\recovery` |
+| Control channel tokens and port | `~/.local/share/tci-cad/control` | `…/TCI-CAD/control` | `%LOCALAPPDATA%\TCI-CAD\control` |
 
-On first launch, if the new folder doesn't exist but the old one (`solvecraft` / `SolveCraft`)
-does, it is **copied** to the new location; the old folder is never deleted or changed. The
-window and UI state that eframe kept under `ai.storyteller.solvecraft` is copied the same way.
-Autosaves copied from the old folder (`<id>.solvecraft`) are listed and recovered like new ones.
-The preferences key in eframe's storage is `solidcraft.prefs`; `solvecraft.prefs` is read when
-it is missing (desktop and browser, `solidcraft_ui_egui::prefs::stored`). The browser app also
-reads files and the autosave it kept under the old names in local storage and OPFS
+The preferences key in eframe's storage is `tci-cad.prefs` (`solidcraft_ui_egui::prefs::STORAGE_KEY`);
+`solidcraft.prefs` and `solvecraft.prefs` are never read. Nothing is copied from SolidCraft's or
+SolveCraft's settings or recovery folders: TCI-CAD's first launch is a fresh install, and the
+legacy-settings migration (`adopt_legacy_settings`) was removed. Autosaves named `<id>.solvecraft`
+inside TCI-CAD's own recovery folder are still listed and recovered. The browser app also reads
+files and the autosave it kept under the old names in local storage and OPFS
 (`apps/solidcraft-web/src/files.rs`). A 3DxWare profile the driver made for the old executable
 name is read until it makes a new one (`apps/solidcraft/src/space_mouse.rs`).
-In the Flatpak sandbox these folders live under `~/.var/app/<app id>/data`; for data kept under
-the app id of releases before 0.8, see [Linux app ID](#linux-app-id).
-The thumbnail cache is not migrated; it is rebuilt. The copy helper is
-`solidcraft_io::adopt_legacy_dir`, used by the desktop app (`adopt_legacy_settings`) and
-`solidcraft_engine::recovery::default_dir`. Tests: `legacy_dir` (copy once, never overwrite,
-old folder intact), `first_launch_adopts_the_previous_release_settings`,
-`autosave_from_a_legacy_folder_is_listed_and_loads`, `recovery_dirs_and_their_legacy_names`,
-`stored_prefs_fall_back_to_the_legacy_key`.
+In the Flatpak sandbox these folders live under `~/.var/app/com.tcicad.TciCad/data`.
+The thumbnail cache is not migrated; it is rebuilt. Tests: `recovery_and_data_folders_are_tci_cads`,
+`the_control_folder_is_under_tci_cads_data_folder`, `tci_cad_has_its_own_app_id_and_settings_folder`,
+`tci_cad_reads_only_its_own_prefs_key`, `autosave_from_a_legacy_folder_is_listed_and_loads`.
 
 ## 5. `solvecraft-cli` alias
 
@@ -111,43 +108,26 @@ test `legacy_design_files_and_resource_uris`).
 
 | Package | Decision | Why |
 |---|---|---|
-| Flatpak app ID / Linux desktop ID | changed in 0.8 from `ai.storyteller.solvecraft` to `ai.storyteller.solidcraft` | The ID the ArtCraft launcher looks for (`ai.storyteller.<name>`). The `.desktop`, metainfo and MIME file names, the icon name, and the Wayland `app_id` / X11 class follow it. Existing installs are moved over; see [Linux app ID](#linux-app-id). |
+| Flatpak app ID / Linux desktop ID | `com.tcicad.TciCad` | TCI-CAD's own id, so it never shares a desktop entry, Flatpak data folder or window identity with SolidCraft. The `.desktop`, metainfo and MIME file names, the icon name, the Wayland `app_id` / X11 class, the macOS bundle id, the updater (`update::APP_ID`) and `solidcraft_io::APP_ID` all use it; test `packaging_files_use_the_one_app_id`. |
 | Flatpak remote file | `solidcraft.flatpakrepo`, plus a legacy `solvecraft.flatpakrepo` copy | Old links keep working; existing remotes point at the repo URL, which is unchanged. |
-| macOS bundle ID | changed to `ai.storyteller.solidcraft` | No updater depends on it; the app is drag-installed. macOS may ask again on first launch (unsigned builds). |
-| MSI `UpgradeCode` | **kept** | So the new MSI upgrades the old install in place. Product name is SolidCraft; the default folder becomes `Program Files\SolidCraft` (the major upgrade removes the old folder). A custom install folder isn't remembered across this one upgrade. |
+| macOS bundle ID | `com.tcicad.TciCad` | No updater depends on it; the app is drag-installed. |
+| MSI `UpgradeCode` | still SolidCraft's | Not yet changed: see the Plan B final-wave report (an owner decision, since a new code also needs new component GUIDs). |
 | deb / rpm package name | renamed to `solidcraft`; deb `Replaces`/`Conflicts`/`Provides: solvecraft`, rpm `Obsoletes`/`Provides: solvecraft` | Installing the new package replaces the old one instead of installing side by side. |
 | AppImage | `solidcraft-<version>-linux-<arch>.AppImage`; the release also carries a copy of its `.zsync` under the old `solvecraft-…` name | AppImages already installed look for the old-named `.zsync`, so AppImageUpdate keeps finding updates. |
 
 ## Linux app ID
 
-Releases up to 0.7 used `ai.storyteller.solvecraft`; 0.8 uses `ai.storyteller.solidcraft`
-everywhere (Flatpak, deb, rpm, AppImage, Snap, FreeBSD, Nix). The shims:
+TCI-CAD uses `com.tcicad.TciCad` everywhere (Flatpak, deb, rpm, AppImage, Snap, FreeBSD, Nix).
+It does not claim to replace SolidCraft (`ai.storyteller.solidcraft`) or SolveCraft
+(`ai.storyteller.solvecraft`): its metainfo has no `<replaces>` or legacy `<provides>`, its desktop
+entry no `X-Flatpak-RenamedFrom`, and its Flatpak manifest no grant to the old app's data folder.
+Upstream's remaining rename shims are still in the tree and name only SolveCraft's old id:
 
 | Shim | Where | What it does |
 |---|---|---|
-| End-of-life rebase in the Flatpak repository | `packaging/flatpak-site.sh` | Each release's Pages deploy keeps the old `app/ai.storyteller.solvecraft/<arch>/stable` refs (mirrored from the previous deploy) and marks them once with `flatpak build-commit-from --end-of-life-rebase=ai.storyteller.solvecraft=ai.storyteller.solidcraft`. `flatpak update` then says the old app is end-of-life and offers to replace it with the new one; accepting installs `ai.storyteller.solidcraft`, uninstalls the old app, and Flatpak moves `~/.var/app/ai.storyteller.solvecraft` to the new id's folder (leaving a symlink at the old path) on the first launch, so settings and autosaves come along unchanged. |
-| AppStream `<replaces>` / `<provides>` | `assets/platforms/linux/ai.storyteller.solidcraft.metainfo.xml.in` | Software centres treat the new id as the successor of the old one and of `ai.storyteller.solvecraft.desktop`. |
-| `X-Flatpak-RenamedFrom` | `assets/platforms/linux/ai.storyteller.solidcraft.desktop` | Desktops that honour it (GNOME Shell) keep favourites and pinned launchers pointing at the renamed entry. |
-| Read-only access to the old Flatpak data folder | `--filesystem=~/.var/app/ai.storyteller.solvecraft:ro` in `packaging/linux/flatpak/ai.storyteller.solidcraft.bundle.yml`; `solidcraft_io::legacy_flatpak_path`, used by `adopt_legacy_settings` and `recovery::default_dir` | When the new app was installed next to the old one (for example from a `.flatpak` bundle, which has no update feed) instead of through the rebase, its first launch copies settings and autosaves from the old app's folder, as in section 4. The old folder is not changed. |
-| The old window `app_id` as eframe's legacy storage key | `adopt_legacy_settings` (`LEGACY_APP_ID`) | Window state that releases before the settings rename kept under `~/.local/share/ai.storyteller.solvecraft` is still copied (section 4). |
-| Old AppImage menu entries | `packaging/linux/AppRun` | An AppImage's first run removes the `ai.storyteller.solvecraft.desktop` entry and icons that an AppImage up to 0.7 installed in `~/.local/share`, so the menu doesn't show the app twice. |
-
-deb and rpm need no shim: the package (`solidcraft`) is unchanged, and an upgrade removes the old
-`/usr/share/applications/ai.storyteller.solvecraft.desktop`, metainfo, MIME and icon files
-because the new version doesn't ship them; the post-install script refreshes the desktop, MIME
-and icon caches, so no stale menu entry is left. The Snap is unaffected apart from its
-`common-id`: snapd names its menu entry after the snap.
-
-Flatpak installed from a downloaded `.flatpak` bundle (no update feed): install the new bundle,
-launch it once (settings and autosaves are copied), then
-`flatpak uninstall --user ai.storyteller.solvecraft`.
-
-**Removal:** keep the end-of-life refs in the Flatpak repository for at least six months after
-0.8.0 (until 2027-04) and at least two minor releases; removing them strands any install that
-hasn't run `flatpak update` since. The read-only filesystem grant and `legacy_flatpak_path` can go
-at the same time. `<replaces>`, `<provides>` and `X-Flatpak-RenamedFrom` are harmless and can stay.
-Tests: `flatpak_twin_maps_our_sandbox_data_to_the_old_app_id`,
-`first_launch_adopts_the_previous_release_settings`.
+| End-of-life rebase in the Flatpak repository | `packaging/flatpak-site.sh` | Marks the old `ai.storyteller.solvecraft` refs end-of-life with a rebase to `$app_id`. |
+| Old AppImage menu entries | `packaging/linux/AppRun` | An AppImage's first run removes the `ai.storyteller.solvecraft.desktop` entry and icons that an AppImage up to 0.7 installed in `~/.local/share`. |
+| `flatpak_twin` / `legacy_flatpak_path` | `crates/io/src/legacy_dir.rs` | No longer called: recovery adopts nothing. Test: `flatpak_twin_maps_our_sandbox_data_to_the_old_app_id`. |
 
 ## macOS
 

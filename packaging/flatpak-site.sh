@@ -6,7 +6,7 @@ trap 'echo "flatpak-site.sh: line $LINENO: \"$BASH_COMMAND\" failed (exit $?)" >
 
 site="${1:?site directory required}"
 tag="${RELEASE_TAG:-}"
-app_id=ai.storyteller.solidcraft
+app_id=com.tcicad.TciCad
 # Compatibility shim (docs/compatibility.md): releases before 0.8 used this app id. Its refs stay
 # in the repository, marked end-of-life with a rebase to $app_id once a release under $app_id
 # has been imported. Until then (the latest release is still from before the rename), the

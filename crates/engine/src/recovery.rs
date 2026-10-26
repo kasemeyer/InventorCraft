@@ -37,38 +37,35 @@ pub fn default_dir() -> Option<PathBuf> {
     } else {
         env("XDG_DATA_HOME").or_else(|| env("HOME").map(|h| h.join(".local/share")))?
     };
-    let (dir, legacy) = dirs_under(&long_names(&root), cfg!(windows) || cfg!(target_os = "macos"));
-    // Compatibility shim (docs/compatibility.md): autosaves made before the rename (or, in the
-    // Flatpak sandbox, under the old app id) are copied to the new folder on first launch; the
-    // old folder is left as it was.
-    for old in solidcraft_io::legacy_flatpak_path(&dir).into_iter().chain([legacy]) {
-        if let Err(e) = solidcraft_io::adopt_legacy_dir(&dir, &old) {
-            log::warn!("recovery: could not copy {} to {}: {e}", old.display(), dir.display());
-        }
-    }
-    Some(dir)
+    // TCI-CAD starts fresh: autosaves of SolidCraft or SolveCraft, which may be installed side
+    // by side, are never adopted (docs/compatibility.md).
+    Some(dirs_under(&long_names(&root), cfg!(windows) || cfg!(target_os = "macos")))
 }
 
-/// SolidCraft's per-user data folder (the recovery folder's parent unless
-/// `SOLIDCRAFT_RECOVERY_DIR` moves that): `%LOCALAPPDATA%\SolidCraft`,
-/// `~/Library/Application Support/SolidCraft`, or `$XDG_DATA_HOME/solidcraft`
-/// (`~/.local/share/solidcraft`).
+/// TCI-CAD's per-user data folder (the recovery folder's parent unless
+/// `SOLIDCRAFT_RECOVERY_DIR` moves that): `%LOCALAPPDATA%\TCI-CAD`,
+/// `~/Library/Application Support/TCI-CAD`, or `$XDG_DATA_HOME/tci-cad`
+/// (`~/.local/share/tci-cad`). It also holds the control channel's token folder.
 pub fn data_dir() -> Option<PathBuf> {
     let env = |k: &str| std::env::var_os(k).filter(|d| !d.is_empty()).map(PathBuf::from);
     if cfg!(windows) {
-        Some(env("LOCALAPPDATA")?.join("SolidCraft"))
+        Some(data_folder_under(&env("LOCALAPPDATA")?, true))
     } else if cfg!(target_os = "macos") {
-        Some(env("HOME")?.join("Library/Application Support/SolidCraft"))
+        Some(data_folder_under(&env("HOME")?.join("Library/Application Support"), true))
     } else {
-        Some(env("XDG_DATA_HOME").or_else(|| env("HOME").map(|h| h.join(".local/share")))?.join("solidcraft"))
+        Some(data_folder_under(&env("XDG_DATA_HOME").or_else(|| env("HOME").map(|h| h.join(".local/share")))?, false))
     }
 }
 
-/// The recovery folder under the per-user data `root`, and the folder earlier releases used.
-/// Windows and macOS name the app's folder in title case, other systems in lower case.
-fn dirs_under(root: &Path, title_case: bool) -> (PathBuf, PathBuf) {
-    let (name, legacy) = if title_case { ("SolidCraft", "SolveCraft") } else { ("solidcraft", "solvecraft") };
-    (root.join(name).join("recovery"), root.join(legacy).join("recovery"))
+/// The app's folder under the per-user data `root`: Windows and macOS name it in title case
+/// ("TCI-CAD"), other systems in lower case ("tci-cad").
+fn data_folder_under(root: &Path, title_case: bool) -> PathBuf {
+    root.join(if title_case { "TCI-CAD" } else { "tci-cad" })
+}
+
+/// The recovery folder under the per-user data `root`.
+fn dirs_under(root: &Path, title_case: bool) -> PathBuf {
+    data_folder_under(root, title_case).join("recovery")
 }
 
 /// What an entry's `<id>.json` holds.
@@ -407,11 +404,14 @@ mod tests {
     }
 
     #[test]
-    fn recovery_dirs_and_their_legacy_names() {
-        let (dir, legacy) = super::dirs_under(Path::new("/data"), false);
-        assert_eq!((dir.as_path(), legacy.as_path()), (Path::new("/data/solidcraft/recovery"), Path::new("/data/solvecraft/recovery")));
-        let (dir, legacy) = super::dirs_under(Path::new("/data"), true);
-        assert_eq!((dir.as_path(), legacy.as_path()), (Path::new("/data/SolidCraft/recovery"), Path::new("/data/SolveCraft/recovery")));
+    fn recovery_and_data_folders_are_tci_cads() {
+        assert_eq!(super::dirs_under(Path::new("/data"), false), Path::new("/data/tci-cad/recovery"));
+        assert_eq!(super::dirs_under(Path::new("/data"), true), Path::new("/data/TCI-CAD/recovery"));
+        assert_eq!(super::data_folder_under(Path::new("/data"), true), Path::new("/data/TCI-CAD"));
+        if let Some(data) = super::data_dir() {
+            let name = if cfg!(windows) || cfg!(target_os = "macos") { "TCI-CAD" } else { "tci-cad" };
+            assert_eq!(data.file_name(), Some(std::ffi::OsStr::new(name)), "{}", data.display());
+        }
     }
 
     use super::*;

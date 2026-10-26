@@ -135,14 +135,14 @@
 
           postInstall = ''
             ${pkgs.lib.optionalString pkgs.stdenv.isLinux ''
-              install -Dm644 assets/platforms/linux/ai.storyteller.solidcraft.desktop \
-                $out/share/applications/ai.storyteller.solidcraft.desktop
-              install -Dm644 assets/platforms/linux/ai.storyteller.solidcraft.mime.xml \
-                $out/share/mime/packages/ai.storyteller.solidcraft.xml
+              install -Dm644 assets/platforms/linux/com.tcicad.TciCad.desktop \
+                $out/share/applications/com.tcicad.TciCad.desktop
+              install -Dm644 assets/platforms/linux/com.tcicad.TciCad.mime.xml \
+                $out/share/mime/packages/com.tcicad.TciCad.xml
               for size in 16 24 32 48 64 128 256 512; do
-                icon=$out/share/icons/hicolor/''${size}x''${size}/apps/ai.storyteller.solidcraft.png
+                icon=$out/share/icons/hicolor/''${size}x''${size}/apps/com.tcicad.TciCad.png
                 mkdir -p "$(dirname "$icon")"
-                cp assets/icons/app/linux/exports/hicolor/''${size}x''${size}/apps/ai.storyteller.solidcraft.png "$icon" >/dev/null
+                cp assets/icons/app/linux/exports/hicolor/''${size}x''${size}/apps/com.tcicad.TciCad.png "$icon" >/dev/null
               done
             ''}
           '';

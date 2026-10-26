@@ -261,6 +261,8 @@ pub mod tools;
 pub mod ui_kit;
 #[cfg(test)]
 mod ui_kit_guard_tests;
+/// The product name: the window title, the process name and the app bar's wordmark.
+pub const APP_NAME: &str = "TCI-CAD";
 pub mod update;
 pub mod view_pick;
 pub mod viewport;

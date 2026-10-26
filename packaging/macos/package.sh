@@ -14,7 +14,7 @@ set -euo pipefail
 # shellcheck source=../env.sh
 . "$(dirname "${BASH_SOURCE[0]}")/../env.sh"
 # The same reverse-DNS id as the Linux APP_ID.
-MACOS_BUNDLE_ID=ai.storyteller.solidcraft
+MACOS_BUNDLE_ID=com.tcicad.TciCad
 
 ARCH=universal
 SKIP_BUILD=0

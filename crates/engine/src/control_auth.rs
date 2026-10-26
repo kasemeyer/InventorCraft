@@ -59,8 +59,13 @@ pub fn bind_with_fallback(first: u16, tries: u16) -> Result<std::net::TcpListene
 fn control_dir() -> Option<PathBuf> {
     match solidcraft_geom::env::var_os("CONTROL_DIR").filter(|d| !d.is_empty()) {
         Some(d) => Some(PathBuf::from(d)),
-        None => Some(crate::recovery::data_dir()?.join("control")),
+        None => default_control_dir(),
     }
+}
+
+/// The token folder when no `SOLIDCRAFT_CONTROL_DIR` replaces it: TCI-CAD's data folder's `control`.
+fn default_control_dir() -> Option<PathBuf> {
+    Some(crate::recovery::data_dir()?.join("control"))
 }
 
 /// The token file of the app listening on `port`: `<data folder>/control/<port>.token`
@@ -150,7 +155,7 @@ impl ClientToken {
         let path = src.path.display();
         match src.writer.filter(|(pid, start)| writer_exited(*pid, *start)) {
             Some((pid, _)) => format!(
-                "{error}; stale token file from an instance that exited (process {pid}): {path}, written {written}{age}; delete that file or restart SolidCraft"
+                "{error}; stale token file from an instance that exited (process {pid}): {path}, written {written}{age}; delete that file or restart TCI-CAD"
             ),
             None => format!("{error}; token from {path}, written {written}{age}; if SolidCraft was force-quit, restart it or delete that file"),
         }
@@ -324,6 +329,14 @@ impl Drop for TokenFile {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_control_folder_is_under_tci_cads_data_folder() {
+        let dir = default_control_dir().expect("the test machine has a data folder");
+        let parent = if cfg!(windows) || cfg!(target_os = "macos") { "TCI-CAD" } else { "tci-cad" };
+        let names: Vec<_> = dir.iter().rev().take(2).map(|c| c.to_string_lossy().into_owned()).collect();
+        assert_eq!(names, ["control", parent], "{}", dir.display());
+    }
 
     #[test]
     fn tokens_compare_whole() {
