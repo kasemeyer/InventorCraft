@@ -56,11 +56,11 @@ impl HoleThreadDraft {
     }
 }
 
-/// Tapped holes use a shared, finite catalogue; the engine derives the physical drill.
-/// Custom remains a dialog mode even when its current values match a catalogue size.
 /// The Hole panel's thread profiles, in combo order.
 pub(crate) const THREAD_PROFILES: [&str; 5] = ["ISO metric", "UNC", "UNF", "G / BSPP", "Rp"];
 
+/// Tapped holes use a shared, finite catalogue; the engine derives the physical drill.
+/// Custom remains a dialog mode even when its current values match a catalogue size.
 pub(crate) fn hole_rows(ui: &mut egui::Ui, doc: &Document, designation: &mut String, custom: &mut Option<HoleThreadDraft>) -> bool {
     let designation_id = ui.make_persistent_id("hole_thread_designation");
     let families = [TappedThreadFamily::Metric, TappedThreadFamily::Unc, TappedThreadFamily::Unf, TappedThreadFamily::G, TappedThreadFamily::Rp];
