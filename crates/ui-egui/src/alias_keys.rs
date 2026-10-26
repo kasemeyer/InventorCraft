@@ -194,6 +194,20 @@ fn fire_exact(app: &mut SolveApp) {
 
 fn fire(app: &mut SolveApp, id: &str, scope: AliasScope) {
     app.alias.fired = Some(id.to_string());
+    if run_ui_action(app, id) {
+        return;
+    }
+    // Ruling 9: the registry's own `&'static str`.
+    let Some(id) = solidcraft_engine::find_command(id).map(|c| c.id) else { return };
+    // Ruling A: an alias starts exactly the tool it names (REC is the two-point rectangle
+    // whatever variant was used last); variant memory belongs to the single-key shortcuts of
+    // `keymap::press`.
+    let open_sketch_first = scope == AliasScope::SketchWrapper && app.session.active_sketch.is_none();
+    crate::keymap::start_shortcut(app, id, open_sketch_first);
+}
+
+/// Run one of `profile::UI_ACTIONS`; false when `id` is none of them.
+pub(crate) fn run_ui_action(app: &mut SolveApp, id: &str) -> bool {
     match id {
         "ui.preferences" => crate::prefs::open_at(app, 0),
         "ui.view_cube" => {
@@ -201,16 +215,16 @@ fn fire(app: &mut SolveApp, id: &str, scope: AliasScope) {
             let style = &mut app.preferences.navigator_style;
             *style = if *style == NavigatorStyle::Cube { NavigatorStyle::Axes } else { NavigatorStyle::Cube };
         }
-        _ => {
-            // Ruling 9: the registry's own `&'static str`.
-            let Some(id) = solidcraft_engine::find_command(id).map(|c| c.id) else { return };
-            // Ruling A: an alias starts exactly the tool it names (REC is the two-point
-            // rectangle whatever variant was used last); variant memory belongs to the single-key
-            // shortcuts of `keymap::press`.
-            let open_sketch_first = scope == AliasScope::SketchWrapper && app.session.active_sketch.is_none();
-            crate::keymap::start_shortcut(app, id, open_sketch_first);
-        }
+        "ui.view_home" => app.animate_view("home"),
+        "ui.view_fit" => app.animate_view("fit"),
+        _ => return false,
     }
+    true
+}
+
+/// The UI action the active profile maps a function key to (`Profile::function_keys`).
+pub(crate) fn function_key_action(app: &SolveApp, key: egui::Key) -> Option<&'static str> {
+    crate::profile::active(app).function_keys.get(key.name()).map(String::as_str)
 }
 
 /// The label the hint shows for an alias target.

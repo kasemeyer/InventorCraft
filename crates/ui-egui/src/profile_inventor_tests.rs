@@ -572,3 +572,9 @@ fn inventor_maps_46_aliases_without_conflicts() {
     assert_eq!(inventor().alias_wait_ms, 750);
     assert_eq!(validate(inventor()), Vec::<String>::new());
 }
+
+/// Ruling B: Inventor's F6 is Home View, carried by the profile's data.
+#[test]
+fn inventor_f6_is_home_view() {
+    assert_eq!(inventor().function_keys.get("F6").map(String::as_str), Some("ui.view_home"));
+}

@@ -2201,6 +2201,12 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
         if alias {
             continue;
         }
+        // The profile's function keys (Ruling B): F6 is Fit under SolidCraft, Home View under
+        // Inventor.
+        if let Some(action) = crate::alias_keys::function_key_action(app, k) {
+            crate::alias_keys::run_ui_action(app, action);
+            continue;
+        }
         match k {
             Key::Escape => {
                 app.esc_handled = true;
@@ -2260,8 +2266,6 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 let at = ctx.input(|i| i.pointer.latest_pos()).unwrap_or(ctx.content_rect().center());
                 crate::context_menu::rename_selection(app, at);
             }
-            // Inventor's F6 is Home View (Ruling B); SolidCraft's is Fit.
-            Key::F6 => app.animate_view(if crate::profile::active(app).id == crate::profile::INVENTOR { "home" } else { "fit" }),
             Key::Delete | Key::Backspace => {
                 if !crate::timeline_left::delete_selected_folders(app) {
                     crate::viewport::delete_selection(app);

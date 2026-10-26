@@ -295,3 +295,19 @@ fn validate_checks_group_commands() {
     assert!(has(&problems, "group Solids: solid.chamfer is not in the panel"), "{problems:?}");
     assert!(!has(&problems, "registry"), "{problems:?}");
 }
+
+/// Ruling B as data: function keys map to UI actions per profile. SolidCraft's F6 fits; a data
+/// profile that names none inherits the base's; bad keys and targets are reported.
+#[test]
+fn function_keys_are_profile_data() {
+    assert_eq!(solidcraft().function_keys.get("F6").map(String::as_str), Some("ui.view_fit"));
+    assert_eq!(fixture().function_keys, solidcraft().function_keys);
+    let p = parse(&with(|v| v["function_keys"] = json!({"F6": "ui.view_home"})), &solidcraft()).unwrap();
+    assert_eq!(p.function_keys.get("F6").map(String::as_str), Some("ui.view_home"));
+    assert_eq!(validate(&p), Vec::<String>::new());
+    let check = |keys: serde_json::Value| validate(&parse(&with(|v| v["function_keys"] = keys), &solidcraft()).unwrap());
+    assert!(has(&check(json!({"F13": "ui.view_fit"})), "F13"));
+    assert!(has(&check(json!({"G6": "ui.view_fit"})), "G6"));
+    assert!(has(&check(json!({"F2": "ui.view_fit"})), "F2"));
+    assert!(has(&check(json!({"F5": "solid.extrude"})), "solid.extrude"));
+}

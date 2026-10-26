@@ -18,8 +18,9 @@ pub const SOLIDCRAFT: &str = "solidcraft";
 pub const INVENTOR: &str = "inventor";
 /// The profile a fresh install starts with (`first_run`, Task 4).
 pub const SHIPPED: &str = INVENTOR;
-/// Alias targets that are UI actions rather than registry commands (Task 6 runs them).
-pub const UI_ACTIONS: &[&str] = &["ui.preferences", "ui.view_cube"];
+/// Alias and function-key targets that are UI actions rather than registry commands
+/// (`alias_keys::run_ui_action` runs them).
+pub const UI_ACTIONS: &[&str] = &["ui.preferences", "ui.view_cube", "ui.view_home", "ui.view_fit"];
 /// The one-key alias wait when a profile names none (Ruling 4).
 pub const DEFAULT_ALIAS_WAIT_MS: u32 = 750;
 
@@ -37,6 +38,8 @@ pub struct Profile {
     pub aliases: Vec<Alias>,
     /// How long a typed alias that begins a longer one waits before it runs (Task 6).
     pub alias_wait_ms: u32,
+    /// Function key (`F1`–`F12`) → UI action (`UI_ACTIONS`), as the shortcut loop runs it.
+    pub function_keys: BTreeMap<String, String>,
     /// Draw the Quick Access Toolbar in the app bar (Task 4c, C2).
     pub quick_access: bool,
     /// Command id → compact English button text (resolved with `tr_label`).
@@ -363,6 +366,7 @@ pub fn solidcraft() -> Profile {
         letter_keys: LetterKeys::Registry,
         aliases: Vec::new(),
         alias_wait_ms: DEFAULT_ALIAS_WAIT_MS,
+        function_keys: BTreeMap::from([("F6".to_string(), "ui.view_fit".to_string())]),
         quick_access: false,
         button_labels: workspace::RIBBON_LABELS.iter().map(|(id, label)| (id.to_string(), label.to_string())).collect(),
         browser: BrowserLayout::default(),
@@ -388,6 +392,9 @@ struct ProfileJson {
     aliases: Vec<Alias>,
     #[serde(default)]
     alias_wait_ms: Option<u32>,
+    /// None: the base profile's.
+    #[serde(default)]
+    function_keys: Option<BTreeMap<String, String>>,
     #[serde(default)]
     quick_access: bool,
     #[serde(default)]
@@ -534,6 +541,7 @@ pub fn parse(text: &str, base: &Profile) -> Result<Profile, String> {
         letter_keys: json.letter_keys,
         aliases: json.aliases,
         alias_wait_ms: json.alias_wait_ms.unwrap_or(DEFAULT_ALIAS_WAIT_MS),
+        function_keys: json.function_keys.unwrap_or_else(|| base.function_keys.clone()),
         quick_access: json.quick_access,
         button_labels: json.button_labels,
         browser: json.browser,
@@ -631,6 +639,17 @@ pub fn validate(profile: &Profile) -> Vec<String> {
         }
         for b in profile.aliases[..i].iter().filter(|b| b.keys == a.keys && b.scope.overlaps(a.scope)) {
             out.push(format!("alias \"{}\": conflict between {} ({:?}) and {} ({:?})", a.keys, b.command, b.scope, a.command, a.scope));
+        }
+    }
+    for (key, action) in &profile.function_keys {
+        let n = key.strip_prefix('F').and_then(|n| n.parse::<u8>().ok()).filter(|n| n.to_string() == key[1..]);
+        if !n.is_some_and(|n| (1..=12).contains(&n)) {
+            out.push(format!("function key \"{key}\": must be F1 to F12"));
+        } else if key == "F2" {
+            out.push(format!("function key \"{key}\": F2 is the shell's Rename"));
+        }
+        if !UI_ACTIONS.contains(&action.as_str()) {
+            out.push(format!("function key \"{key}\": {action} is not a UI action"));
         }
     }
     for (what, map) in [("button_labels", &profile.button_labels), ("omitted", &profile.omitted)] {
