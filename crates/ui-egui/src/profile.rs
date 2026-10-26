@@ -652,6 +652,9 @@ pub fn validate(profile: &Profile) -> Vec<String> {
             out.push(format!("function key \"{key}\": {action} is not a UI action"));
         }
     }
+    if profile.defaults.new_document == Some(DocumentKind::Drawing) {
+        out.push("defaults.new_document: drawing is not offered; New makes a part or an assembly".into());
+    }
     for (what, map) in [("button_labels", &profile.button_labels), ("omitted", &profile.omitted)] {
         for id in map.keys().filter(|id| find_command(id).is_none()) {
             out.push(format!("{what}: {id} is not a registry command"));

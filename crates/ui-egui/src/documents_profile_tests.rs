@@ -129,3 +129,49 @@ fn fields_accept_any_unit_in_an_inch_part() {
     near("50 mm", 50.0);
     near("1 in + 2 mm", 27.4);
 }
+
+/// A project written by `project.new` (`tag` keeps the tests' files apart).
+fn project_path(tag: &str) -> String {
+    let dir = std::env::temp_dir().join(format!("tci-app-project-{tag}-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir.join("job.tciproj").to_string_lossy().into_owned()
+}
+
+/// Two open tabs: A (index 0, a feature) and B (index 1, active).
+fn two_tabs() -> Harness {
+    let mut h = inventor(Part);
+    first_feature(&mut h);
+    new_document(&mut h.app, Part, None);
+    assert_eq!((h.app.docs.count(), h.app.docs.active), (2, 1));
+    h
+}
+
+#[test]
+fn a_project_made_in_one_tab_is_open_in_the_others() {
+    let mut h = two_tabs();
+    let path = project_path("new");
+    h.app.run("project.new", json!({"name": "Job", "workspace": ".", "path": path, "overwrite": true})).unwrap();
+    let project = h.app.session.project_file.clone().expect("project.new opens the project");
+    switch(&mut h.app, 0);
+    assert_eq!(h.app.docs.active, 0);
+    assert!(Arc::ptr_eq(h.app.session.project_file.as_ref().expect("tab A has the project"), &project));
+    switch(&mut h.app, 1);
+    assert!(Arc::ptr_eq(h.app.session.project_file.as_ref().unwrap(), &project));
+}
+
+#[test]
+fn a_project_opened_in_a_background_tab_replaces_the_old_one_everywhere() {
+    let mut h = two_tabs();
+    let (old, new) = (project_path("old"), project_path("opened"));
+    h.app.run("project.new", json!({"name": "Old", "workspace": ".", "path": old, "overwrite": true})).unwrap();
+    switch(&mut h.app, 0);
+    h.app.run("project.new", json!({"name": "New", "workspace": ".", "path": new, "overwrite": true})).unwrap();
+    h.app.run("project.open", json!({"path": new})).unwrap();
+    let opened = h.app.session.project_file.clone().unwrap();
+    assert_eq!(opened.name, "New");
+    // B was left holding Old: on activation it shows the project opened in A.
+    switch(&mut h.app, 1);
+    let b = h.app.session.project_file.as_ref().expect("tab B has the project");
+    assert!(Arc::ptr_eq(b, &opened));
+    assert_eq!(b.name, "New");
+}

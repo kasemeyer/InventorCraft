@@ -127,6 +127,10 @@ fn swap_in(app: &mut SolveApp, slot: DocSlot) -> DocSlot {
     put_view(app, slot.view);
     // Preferences the session holds go with the user, not the tab (#680).
     app.session.auto_project = out.session.auto_project;
+    // The open project is the application's, one for every tab (as in Inventor). The active
+    // design holds it (`project.open` / `project.new` run there); the one coming in takes it, so
+    // a tab left in the background can never bring back the project it had.
+    app.session.project_file = out.session.project_file.clone();
     // Views cache by revision: the incoming design must not look unchanged.
     app.session.invalidate_view(out_rev);
     app.ui.ribbon_context = None;
@@ -180,12 +184,8 @@ pub fn switch(app: &mut SolveApp, i: usize) {
 }
 
 /// Open `session` in a new tab after the active one and switch to it (`fit`: frame its model).
-/// The open project is the application's (one active project, as in Inventor): a tab opened
-/// without one of its own keeps it.
-pub fn open_tab(app: &mut SolveApp, mut session: Session) -> Result<(), String> {
-    if session.project_file.is_none() {
-        session.project_file = app.session.project_file.clone();
-    }
+/// The new tab takes the application's open project as it becomes active ([`swap_in`]).
+pub fn open_tab(app: &mut SolveApp, session: Session) -> Result<(), String> {
     if app.docs.slots.is_empty() {
         app.docs.slots.push(None);
         app.docs.active = 0;

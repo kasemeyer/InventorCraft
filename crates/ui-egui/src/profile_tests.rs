@@ -311,3 +311,13 @@ fn function_keys_are_profile_data() {
     assert!(has(&check(json!({"F2": "ui.view_fit"})), "F2"));
     assert!(has(&check(json!({"F5": "solid.extrude"})), "solid.extrude"));
 }
+
+/// New (Ctrl+N) makes a part or an assembly: a profile whose default is a drawing is refused,
+/// rather than leaving New doing nothing.
+#[test]
+fn a_drawing_is_not_a_new_document_default() {
+    let check = |kind: &str| validate(&parse(&with(|v| v["defaults"] = json!({"new_document": kind})), &solidcraft()).unwrap());
+    assert_eq!(check("drawing"), ["defaults.new_document: drawing is not offered; New makes a part or an assembly"]);
+    assert_eq!(check("part"), Vec::<String>::new());
+    assert_eq!(check("assembly"), Vec::<String>::new());
+}
