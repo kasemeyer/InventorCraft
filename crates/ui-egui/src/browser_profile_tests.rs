@@ -168,3 +168,28 @@ fn inventor_document_settings_is_the_last_root_row_and_opens() {
     let labels = super::drawn_rows().into_iter().map(|(label, ..)| label).collect::<Vec<_>>();
     assert!(position(&labels, &units) > position(&labels, "Document Settings"), "{labels:?}");
 }
+
+#[test]
+fn inventor_history_work_planes_keep_their_eye_and_select_as_planes() {
+    let mut h = inventor(Part);
+    let name = sketch_and_extrude(&mut h);
+    h.app.run("construct.plane.offset", json!({"base": "XY", "offset": 25, "name": "Lid"})).unwrap();
+    h.frames(2);
+    let labels = labels();
+    assert!(position(&labels, "Lid") > position(&labels, name.as_str()), "the plane sits in the flat history: {labels:?}");
+    assert!(crate::scenario::handle_at("eye:Lid").is_some(), "the work plane's history row has a visibility eye");
+    assert!(crate::scenario::handle_at(&format!("eye:{name}")).is_none(), "an ordinary feature row keeps no eye");
+
+    click(&mut h, "eye:Lid");
+    h.frames(2);
+    assert!(h.app.session.visibility.hidden_origin.iter().any(|n| n == "Lid"), "the eye hides the plane");
+    assert!(crate::scenario::handle_at("eye:Lid").is_some(), "the hidden plane's row keeps its eye to show it again");
+
+    click(&mut h, "row:Lid");
+    h.frames(2);
+    assert_eq!(h.app.session.selection, [Sel::Plane { name: "Lid".into() }], "clicking selects it as a plane");
+    click(&mut h, &format!("row:{name}"));
+    h.frames(2);
+    let id = h.app.session.doc.features.iter().find(|f| f.name == name).unwrap().id;
+    assert_eq!(h.app.session.selection, [Sel::Feature { id }], "ordinary features still select as features");
+}

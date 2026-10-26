@@ -1193,11 +1193,14 @@ fn root_always(app: &SolveApp, node: crate::profile::RootNode) -> bool {
 }
 
 /// The design's sketches and features flat at the root, in timeline order, without Sketches or
-/// Features folders: each sketch is drawn as its Sketches-folder row, each feature as its
+/// Features folders: each sketch is drawn as its Sketches-folder row, each work feature as its
+/// Construction-folder row (its eye, selected as a plane), each other feature as its
 /// Features-folder row.
 fn history_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut Actions) {
     let sketches = entries(app, 0, "sketches");
     let sketch_keys: Vec<String> = sketches.iter().map(|e| e.key.clone()).collect();
+    let work = entries(app, 0, "construction");
+    let work_keys: Vec<String> = work.iter().map(|e| e.key.clone()).collect();
     let timeline: Vec<(usize, u64, bool)> = app
         .session
         .doc
@@ -1208,7 +1211,9 @@ fn history_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut 
         .map(|(i, f)| (i, f.id, matches!(f.kind, FeatureKind::Sketch { .. })))
         .collect();
     for (index, id, sketch) in timeline {
-        if !sketch {
+        if let Some(e) = work.iter().find(|e| !sketch && e.key == id.to_string()) {
+            entry_row(app, ui, 0, None, "construction", e, depth, None, &work_keys, false, acts);
+        } else if !sketch {
             features::row(app, ui, 0, &[], "c0", index, depth, acts);
         } else if let Some(e) = sketches.iter().find(|e| e.key == id.to_string()) {
             entry_row(app, ui, 0, None, "sketches", e, depth, None, &sketch_keys, false, acts);
