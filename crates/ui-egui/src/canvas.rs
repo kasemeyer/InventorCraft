@@ -386,9 +386,100 @@ pub(crate) fn along(proj: &Proj, pos: Pos2, base: Vec3, dir: Vec3) -> Option<f64
 }
 
 pub(crate) fn format_len(v: f64) -> String {
+    format_len_in(v, "mm")
+}
+
+/// `v` (in `unit`) to three decimals at most, trailing zeros dropped, the unit written out.
+fn format_len_in(v: f64, unit: &str) -> String {
     let s = format!("{v:.3}");
     let s = s.trim_end_matches('0').trim_end_matches('.');
-    format!("{} mm", if s == "-0" { "0" } else { s })
+    format!("{} {unit}", if s == "-0" { "0" } else { s })
+}
+
+/// The unit a dragged length is written in, and its size in millimetres. Upstream's arrows write
+/// millimetres; a profile's plane drag writes the design unit. The unit is always written out:
+/// a bare stored length is millimetres.
+struct DragUnit {
+    name: String,
+    mm: f64,
+}
+
+impl DragUnit {
+    fn mm() -> Self {
+        DragUnit { name: "mm".into(), mm: 1.0 }
+    }
+
+    /// The design's length unit (millimetres when it has none).
+    fn design(app: &SolveApp) -> Self {
+        let name = solidcraft_engine::doc::expr::length_unit_or_mm(&app.session.doc.units).to_string();
+        match app.session.doc.eval(&format!("1 {name}"), ValueKind::Length) {
+            Ok(mm) if mm.is_finite() && mm > 0.0 => DragUnit { name, mm },
+            _ => DragUnit::mm(),
+        }
+    }
+
+    /// A dragged length `v` (mm) in this unit: snapped to a round step of the unit at this zoom
+    /// unless `free`, kept positive unless `signed`. The text written, and its length in mm.
+    fn snap(&self, v: f64, half_height: f64, free: bool, signed: bool) -> (String, f64) {
+        let step = snap_step(half_height / self.mm);
+        let u = v / self.mm;
+        let mut u = if free { u } else { (u / step).round() * step };
+        if !signed {
+            u = u.max(if free { 1e-3 } else { step });
+        }
+        (format_len_in(u, &self.name), u * self.mm)
+    }
+}
+
+/// Where the view ray through `p` meets the plane through `c` square to `n`.
+fn on_plane(proj: &Proj, p: Pos2, c: Vec3, n: Vec3) -> Option<Vec3> {
+    let (o, r) = proj.ray(p);
+    let den = r.dot(n);
+    if den.abs() < 1e-9 {
+        return None;
+    }
+    Some(o + r * ((c - o).dot(n) / den))
+}
+
+/// The offset plane's preview square as a drag handle (the profile's `workflow.plane_drag`): a
+/// press inside the square of half side `h` takes it, and the point pressed follows the pointer
+/// along `n`, writing the distance from `base` in `unit` (snapped as the arrow snaps; Alt/Ctrl
+/// for a free drag). The arrow, interacted after this, wins where the two overlap. Whether the
+/// drag changed `offset`.
+#[allow(clippy::too_many_arguments)]
+fn plane_grip(ui: &mut egui::Ui, proj: &Proj, base: Vec3, n: Vec3, off: f64, h: f64, half_height: f64, unit: &DragUnit, offset: &mut String) -> bool {
+    let id = egui::Id::new("sc_offset_plane_grip");
+    let line = id.with("line");
+    let Some(q) = offset_plane_quad(proj, base + n * off, n, h) else { return false };
+    let q: solidcraft_engine::geom::Ring<Pos2> = q.into_iter().collect();
+    let dragging = ui.ctx().is_being_dragged(id);
+    let pointer = ui.input(|i| i.pointer.hover_pos());
+    let Some(p) = pointer.filter(|p| dragging || crate::gizmo::in_quad(*p, &q)) else { return false };
+    let r = ui.interact(egui::Rect::from_center_size(p, vec2(2.0 * ARROW_STEM_REACH, 2.0 * ARROW_STEM_REACH)), id, egui::Sense::drag());
+    if r.drag_started() {
+        // The line the drag runs along: through the point pressed, back at offset zero.
+        let pressed = ui.input(|i| i.pointer.press_origin()).and_then(|p| on_plane(proj, p, base + n * off, n));
+        ui.data_mut(|d| {
+            if let Some(at) = pressed {
+                d.insert_temp(line, at - n * off);
+            } else {
+                d.remove::<Vec3>(line);
+            }
+        });
+    }
+    let before = offset.clone();
+    if r.dragged()
+        && let Some(p) = r.interact_pointer_pos()
+        && let Some(from) = ui.data(|d| d.get_temp::<Vec3>(line))
+        && let Some(v) = along(proj, p, from, n)
+    {
+        crate::tool_modifiers::set_manipulator_dragging(true);
+        *offset = unit.snap(v, half_height, crate::tool_modifiers::manipulator_free(), true).0;
+    }
+    if r.hovered() || r.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+    }
+    *offset != before
 }
 
 /// The offset plane preview: a square of half side `h` around `c`, square to `n`.
@@ -490,12 +581,27 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             drag_arrow(ui, painter, proj, base, bs, n2, l2, false, egui::Id::new("sc_manipulator2"), half_height, spacing2);
         }
     }
-    // An offset plane shows where it will be.
-    if let (Kind::OffsetPlane { offset }, Some(n)) = (&d.kind, dir)
-        && let Ok(off) = app.session.doc.eval(offset, ValueKind::Length)
-        && let Some(q) = offset_plane_quad(proj, base + n * off, n, half_height * 0.25)
-    {
-        painter.extend(projected_polygon(&q, t.construction_plane, Stroke::new(1.2, t.origin_plane_edge)));
+    // An offset plane shows where it will be. Under the profile's plane drag, a press on it pulls
+    // it along its normal as the arrow does, and both write the design unit.
+    let plane_drag = matches!(d.kind, Kind::OffsetPlane { .. }) && crate::profile::active(app).workflow.plane_drag;
+    if let (Kind::OffsetPlane { offset }, Some(n)) = (&mut d.kind, dir) {
+        let side = half_height * 0.25;
+        if plane_drag
+            && let Ok(off) = app.session.doc.eval(offset, ValueKind::Length)
+            && off.is_finite()
+            && plane_grip(ui, proj, base, n, off, side, half_height, &DragUnit::design(app), offset)
+        {
+            // Keep the whole changing text selected, as an arrow drag does.
+            focus = true;
+        }
+        if let Ok(off) = app.session.doc.eval(offset, ValueKind::Length)
+            && let Some(q) = offset_plane_quad(proj, base + n * off, n, side)
+        {
+            painter.extend(projected_polygon(&q, t.construction_plane, Stroke::new(1.2, t.origin_plane_edge)));
+            if plane_drag && let Some(c) = proj.to_screen(base + n * off) {
+                crate::scenario::publish_handle("offset_plane", c);
+            }
+        }
     }
     // Holes: the depth arrow points into the material (empty depth: through all); the
     // diameter is typed in the box.
@@ -566,7 +672,9 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         let mut shown_value = format_len(half + baseline);
         let original_shown = shown_value.clone();
         let dragged = if to_span.is_some() || symmetric_scale != 1.0 { &mut shown_value } else { &mut *value };
-        if let Some(ts) = drag_arrow(ui, painter, proj, base, bs, n, half + baseline, signed, egui::Id::new("sc_manipulator"), half_height, dragged) {
+        let unit = if plane_drag { DragUnit::design(app) } else { DragUnit::mm() };
+        let id = egui::Id::new("sc_manipulator");
+        if let Some(ts) = drag_arrow_in(ui, painter, proj, base, bs, n, half + baseline, signed, id, half_height, dragged, &unit) {
             if (to_span.is_some() || symmetric_scale != 1.0)
                 && shown_value != original_shown
                 && let Ok(v) = app.session.doc.eval(&shown_value, ValueKind::Length)
@@ -690,6 +798,25 @@ fn drag_arrow(
     half_height: f64,
     value: &mut String,
 ) -> Option<Pos2> {
+    drag_arrow_in(ui, painter, proj, base, bs, n, l, signed, id, half_height, value, &DragUnit::mm())
+}
+
+/// [`drag_arrow`] writing the dragged length in `unit` (snapped to a round step of it).
+#[allow(clippy::too_many_arguments)]
+fn drag_arrow_in(
+    ui: &mut egui::Ui,
+    painter: &egui::Painter,
+    proj: &Proj,
+    base: Vec3,
+    bs: Pos2,
+    n: Vec3,
+    l: f64,
+    signed: bool,
+    id: egui::Id,
+    half_height: f64,
+    value: &mut String,
+    unit: &DragUnit,
+) -> Option<Pos2> {
     let t = Tokens::get();
     let min = 40.0 * 2.0 * half_height / f64::from(proj.rect.height().max(1.0));
     let tip = |length: f64| {
@@ -720,13 +847,8 @@ fn drag_arrow(
     {
         crate::tool_modifiers::set_manipulator_dragging(true);
         let v = v - ui.data(|d| d.get_temp::<f64>(grab)).unwrap_or(0.0);
-        let free = crate::tool_modifiers::manipulator_free();
-        let step = snap_step(half_height);
-        let mut v = if free { v } else { (v / step).round() * step };
-        if !signed {
-            v = v.max(if free { 1e-3 } else { step });
-        }
-        *value = format_len(v);
+        let (text, v) = unit.snap(v, half_height, crate::tool_modifiers::manipulator_free(), signed);
+        *value = text;
         ts = tip(v)?;
     }
     // Paint the value just read from this frame's pointer, including the value box anchor.
@@ -1511,3 +1633,7 @@ mod taper_limit_tests {
         assert_eq!(taper_limits(&[&rect], 0.0), (-89.0, 89.0));
     }
 }
+
+#[cfg(test)]
+#[path = "offset_plane_drag_tests.rs"]
+mod offset_plane_drag_tests;

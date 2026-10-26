@@ -121,7 +121,7 @@ fn seg_dist(p: Pos2, a: Pos2, b: Pos2) -> f32 {
     (a + ab * t).distance(p)
 }
 
-fn in_quad(p: Pos2, q: &Ring<Pos2>) -> bool {
+pub(crate) fn in_quad(p: Pos2, q: &Ring<Pos2>) -> bool {
     if q.len() < 3 {
         return false;
     }
