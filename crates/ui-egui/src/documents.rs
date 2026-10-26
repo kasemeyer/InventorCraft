@@ -8,6 +8,7 @@ use crate::ui_kit::{Container, Surface};
 use egui::{FontId, Rect, Sense, pos2, vec2};
 use serde_json::{Value, json};
 use solidcraft_engine::Session;
+use solidcraft_engine::doc::DocumentKind;
 use solidcraft_engine::render::Camera;
 
 use crate::SolveApp;
@@ -179,7 +180,12 @@ pub fn switch(app: &mut SolveApp, i: usize) {
 }
 
 /// Open `session` in a new tab after the active one and switch to it (`fit`: frame its model).
-pub fn open_tab(app: &mut SolveApp, session: Session) -> Result<(), String> {
+/// The open project is the application's (one active project, as in Inventor): a tab opened
+/// without one of its own keeps it.
+pub fn open_tab(app: &mut SolveApp, mut session: Session) -> Result<(), String> {
+    if session.project_file.is_none() {
+        session.project_file = app.session.project_file.clone();
+    }
     if app.docs.slots.is_empty() {
         app.docs.slots.push(None);
         app.docs.active = 0;
@@ -224,6 +230,10 @@ pub fn adopt(app: &mut SolveApp, session: Session) {
 /// takes Units of new designs (#1205): a launch starts on that empty design, so returning
 /// here used to leave it in millimetres.
 pub fn new_design(app: &mut SolveApp) {
+    if let Some(kind) = crate::profile::active(app).defaults.new_document {
+        new_document(app, kind, None);
+        return;
+    }
     if app.file_picker_busy() {
         return;
     }
@@ -237,6 +247,29 @@ pub fn new_design(app: &mut SolveApp) {
     } else {
         crate::prefs::apply_new_design(app);
     }
+}
+
+/// A new Part or Assembly from a template: `units` is the template's ("mm", "in"); `None` takes
+/// Units of new designs. It replaces a blank active design (keeping its project), otherwise it
+/// opens in its own tab; either way it starts clean. A drawing is not offered here.
+pub fn new_document(app: &mut SolveApp, kind: DocumentKind, units: Option<&str>) {
+    let command = match kind {
+        DocumentKind::Part => "document.new_part",
+        DocumentKind::Assembly => "document.new_assembly",
+        DocumentKind::Drawing => return,
+    };
+    if app.file_picker_busy() {
+        return;
+    }
+    let mut s = Session::default();
+    if let Err(e) = s.execute(command, &json!({})) {
+        app.set_status(e.to_string(), true);
+        return;
+    }
+    app.home.open = false;
+    adopt(app, s);
+    let units = units.map_or_else(|| app.preferences.default_units.clone(), str::to_string);
+    crate::prefs::apply_new_design_units(app, &units);
 }
 
 /// Create a new tab directly; the File view chooses units before using [`new_design`].
@@ -888,6 +921,10 @@ pub(crate) fn saved_for_close(app: &mut SolveApp) {
     quit_step(app);
     batch_step(app);
 }
+
+#[cfg(test)]
+#[path = "documents_profile_tests.rs"]
+mod documents_profile_tests;
 
 #[cfg(test)]
 mod tests {

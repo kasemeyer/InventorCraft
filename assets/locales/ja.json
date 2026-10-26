@@ -3058,6 +3058,8 @@
   "ui.tangent": "正接",
   "ui.taper_angle": "テーパ角度",
   "ui.tapped": "ねじ穴",
+  "ui.template_in": "標準 (in)",
+  "ui.template_mm": "標準 (mm)",
   "ui.text": "テキスト",
   "ui.theme": "テーマ",
   "ui.thickness": "厚さ",

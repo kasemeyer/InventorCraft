@@ -5,6 +5,7 @@ use crate::icons::glyphs::pin_icon;
 use crate::ui_kit::{Container, Edge, Surface};
 use egui::{Align2, Color32, FontId, Rect, Sense, Stroke, pos2, vec2};
 use serde_json::json;
+use solidcraft_engine::doc::DocumentKind;
 
 use crate::ribbon_face::{FaceItem, SMALL_ROWS, column_width, face_items};
 use crate::theme::Tokens;
@@ -549,6 +550,10 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
 pub enum FileAction {
     /// Create a design using the document lifecycle.
     New,
+    /// A new Part from a template's units ("mm", "in"; `None`: Units of new designs).
+    NewPart(Option<&'static str>),
+    /// A new Assembly from a template's units ("mm", "in"; `None`: Units of new designs).
+    NewAssembly(Option<&'static str>),
     /// Pick a design or an exchange file to open.
     Open,
     /// Save the active design, asking for a path when needed.
@@ -603,6 +608,8 @@ impl FileAction {
         }
         match self {
             Self::New => crate::documents::new_design(app),
+            Self::NewPart(units) => crate::documents::new_document(app, DocumentKind::Part, *units),
+            Self::NewAssembly(units) => crate::documents::new_document(app, DocumentKind::Assembly, *units),
             Self::Open => app.pick_open(|app, path| {
                 if let Some(path) = path {
                     app.open_path_async(&path);
@@ -661,6 +668,18 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
                 if item(ui, app.tr("ui.new_design"), "Ctrl+N", "new") {
                     FileAction::New.run(app);
                     close = true;
+                }
+                for (label, part) in [("New Part", true), ("New Assembly", false)] {
+                    crate::ui_kit::Menu::button(ui, app.tr_label(label), |ui| {
+                        for (key, units) in [("ui.template_mm", "mm"), ("ui.template_in", "in")] {
+                            if crate::context_menu::button(ui, app.tr(key), "new").clicked() {
+                                let action = if part { FileAction::NewPart(Some(units)) } else { FileAction::NewAssembly(Some(units)) };
+                                action.run(app);
+                                close = true;
+                                ui.close();
+                            }
+                        }
+                    });
                 }
                 if item(ui, &format!("{}…", app.tr("ui.open")), "Ctrl+O", "open") {
                     FileAction::Open.run(app);

@@ -3058,6 +3058,8 @@
   "ui.tangent": "Tangent",
   "ui.taper_angle": "Taper Angle",
   "ui.tapped": "Tapped",
+  "ui.template_in": "Standard (in)",
+  "ui.template_mm": "Standard (mm)",
   "ui.text": "Text",
   "ui.theme": "Theme",
   "ui.thickness": "Thickness",
