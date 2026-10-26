@@ -141,3 +141,39 @@ fn right_click_on_the_cube_offers_home_and_projection() {
     h.call("ui.click", json!({"x":p.x,"y":p.y,"button":"right"}));
     assert_ne!(h.app.menu.target, Target::ViewCube);
 }
+
+#[test]
+fn compass_letters_stay_clickable_in_top_and_bottom_views() {
+    let mut h = inventor(DocumentKind::Part);
+    h.app.preferences.look_at_anim = false;
+    for view in ["top", "bottom"] {
+        for (letter, dir) in [("n", Vec3::Y), ("e", Vec3::X), ("s", -Vec3::Y), ("w", -Vec3::X)] {
+            h.call("ui.view", json!({"view":view}));
+            h.frames(2);
+            let at = handle_at(&format!("navigation_cube:compass:{letter}")).unwrap_or_else(|| panic!("{view}: no {letter} letter"));
+            let scale = crate::scenario::rect_of("axis_view:outer").unwrap().width() / DESIGN_SIZE;
+            for arrow in ["up", "down", "left", "right"] {
+                let arrow_at = handle_at(&format!("navigation_cube:control:{arrow}")).unwrap();
+                let gap = (at - arrow_at).abs();
+                assert!(gap.x.max(gap.y) >= 18.0 * scale, "{view}: the {letter} letter overlaps the {arrow} arrow");
+            }
+            click(&mut h, &format!("navigation_cube:compass:{letter}"));
+            assert!(looks_along(&h, dir), "{view}: {letter} turns to its side, not an orbit: {:?}", h.app.cam.back());
+        }
+    }
+}
+
+#[test]
+fn the_front_letter_leaves_the_cubes_lower_edge_clickable() {
+    let mut h = inventor(DocumentKind::Part);
+    h.app.preferences.look_at_anim = false;
+    h.call("ui.view", json!({"view":"front"}));
+    h.frames(2);
+    let outer = crate::scenario::rect_of("axis_view:outer").unwrap();
+    let half = HALF * f64::from(outer.width() / DESIGN_SIZE);
+    let faces = facets(&h.app.cam, outer.center(), half, true);
+    let s = handle_at("navigation_cube:compass:s").expect("the S letter is drawn in the Front view");
+    assert!(hit(&faces, s).is_none(), "the S letter sits outside the cube's silhouette");
+    click(&mut h, "navigation_cube:bottom_front");
+    assert!(looks_along(&h, -Vec3::Y - Vec3::Z), "the lower edge strip turns to the bottom-front edge: {:?}", h.app.cam.back());
+}

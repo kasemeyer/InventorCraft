@@ -8,8 +8,9 @@ pub(super) const SIZE: f32 = 112.0;
 // Paint and picking use the same original coordinate space, scaled as a group.
 pub(super) const DESIGN_SIZE: f32 = 164.0;
 const HALF: f64 = 40.0;
-// Corner squares lie on the six flat faces, preserving a sharp cube silhouette.
-// The remaining regions belong to the face, including the middle of each edge.
+// Corner squares lie on the six flat faces, preserving a sharp cube silhouette. Without edge
+// targets the remaining regions belong to the face, including the middle of each edge; with them
+// (a profile option) the bands between INSET and the rim are the edges' own strips.
 const INSET: f64 = 0.68;
 // The compass ring (a profile option) lies flat under the cube, in cube half-widths.
 const RING_RADIUS: f64 = 56.0 / HALF;
@@ -17,6 +18,10 @@ const RING_DROP: f64 = 0.9;
 const RING_STEPS: u32 = 72;
 /// How near the ring a press or right-click counts as on it, in points.
 const RING_REACH: f32 = 6.0;
+/// How far from the cube's centre a compass letter is moved, in design points, when it would sit
+/// on the cube or under an orbit arrow (square-on views put the arrows at 54, 20 wide): clear of
+/// both, so the letter keeps its click.
+const LETTER_CLEAR: f64 = 74.0;
 /// The compass letters: handle suffix, message id and the side they turn the view to.
 const COMPASS: [(&str, &str, Vec3); 4] = [
     ("n", "viewcube.north", Vec3::Y),
@@ -151,11 +156,22 @@ fn near_ring(cam: &Camera, c: Pos2, half: f64, p: Pos2) -> bool {
     })
 }
 
-/// A compass letter's screen point, or `None` while it is behind the cube and hidden by it.
-fn compass_letter(cam: &Camera, c: Pos2, half: f64, faces: &[Facet], side: Vec3) -> Option<Pos2> {
+/// A compass letter's screen point, or `None` while it is behind the cube and hidden by it. In a
+/// square-on view (where the orbit arrows close in) or over the cube's silhouette, the letter moves
+/// out along its direction to [`LETTER_CLEAR`], so neither an arrow nor an edge strip sits under it.
+fn compass_letter(cam: &Camera, c: Pos2, half: f64, faces: &[Facet], side: Vec3, square_on: bool) -> Option<Pos2> {
     let at = c + project(cam, side * RING_RADIUS - Vec3::Z * RING_DROP, half);
+    let on_cube = hit(faces, at).is_some();
     let behind = cam.from_frame(side).dot(cam.back()) < 0.0;
-    (!behind || hit(faces, at).is_none()).then_some(at)
+    if behind && on_cube {
+        return None;
+    }
+    let out = at - c;
+    let clear = (LETTER_CLEAR / HALF * half) as f32;
+    if (square_on || on_cube) && out.length() > 1e-3 && out.length() < clear {
+        return Some(c + out.normalized() * clear);
+    }
+    Some(at)
 }
 
 /// Where a press starts an axis-view orbit: `Some(false)` on the cube, `Some(true)` on the
@@ -209,11 +225,14 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     let style = crate::profile::active(app).view_cube;
     let half = HALF * f64::from(scale);
     let faces = facets(&app.cam, c, half, style.edges);
+    // One face seen square on: the orbit arrows close in on the cube.
+    let square_on = faces.iter().filter(|f| f.text_axes.is_some()).count() == 1;
     let letters: Vec<_> = if style.compass {
         COMPASS
             .iter()
             .filter_map(|(key, id, side)| {
-                compass_letter(&app.cam, c, half, &faces, *side).map(|at| (*key, *id, *side, Rect::from_center_size(at, vec2(16.0, 16.0) * scale)))
+                compass_letter(&app.cam, c, half, &faces, *side, square_on)
+                    .map(|at| (*key, *id, *side, Rect::from_center_size(at, vec2(16.0, 16.0) * scale)))
             })
             .collect()
     } else {
@@ -282,13 +301,12 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
             navigate(app, None, Some(face.direction));
         }
     }
-    // Letters before the arrows: where an arrow overlaps a letter (square-on views) it keeps its click.
+    // The letters sit clear of the arrows (compass_letter), so each keeps its own click.
     for (key, _, side, r) in &letters {
         if ui.interact(*r, ui.id().with(("navigation_cube_compass", *key)), Sense::click()).clicked() {
             navigate(app, None, Some(*side));
         }
     }
-    let square_on = faces.iter().filter(|f| f.text_axes.is_some()).count() == 1;
     let (distance, button_size) = if square_on { (54.0, 20.0) } else { (74.0, 16.0) };
     for (action, offset, direction, tooltip) in [
         ("left", vec2(-distance, 0.0), vec2(1.0, 0.0), "Orbit left 90°"),
