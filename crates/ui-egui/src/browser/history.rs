@@ -40,7 +40,11 @@ pub(crate) fn parents(doc: &Document, marker: Option<usize>) -> BTreeMap<u64, u6
 
 /// The top-level rows in history order: (feature index, feature id), children excluded.
 pub(crate) fn top_rows(doc: &Document) -> Vec<(usize, u64)> {
-    let adopted = parents(doc, doc.marker);
+    top_rows_of(doc, &parents(doc, doc.marker))
+}
+
+/// [`top_rows`] with the frame's [`parents`] already worked out.
+fn top_rows_of(doc: &Document, adopted: &BTreeMap<u64, u64>) -> Vec<(usize, u64)> {
     doc.features.iter().enumerate().filter(|(_, f)| f.component == 0 && !adopted.contains_key(&f.id)).map(|(i, f)| (i, f.id)).collect()
 }
 
@@ -75,7 +79,7 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &m
             children.entry(*parent).or_default().push(i);
         }
     }
-    let top = top_rows(doc);
+    let top = top_rows_of(doc, &adopted);
     let ctx = Ctx { children, marker, sketches: entries(app, 0, "sketches"), planes: entries(app, 0, "construction") };
     let mut end = None;
     let mut centres = Vec::new();

@@ -33,7 +33,7 @@ fn sketch_and_extrude(h: &mut Harness) -> String {
 }
 
 #[test]
-fn inventor_part_root_is_flat_history_between_origin_and_end_of_part() {
+fn inventor_part_root_nests_consumed_sketches_in_history_between_origin_and_end_of_part() {
     let mut h = inventor(Part);
     let name = sketch_and_extrude(&mut h);
     // Folded, so its body row does not sit between the root rows.

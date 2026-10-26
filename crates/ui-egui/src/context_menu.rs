@@ -491,10 +491,10 @@ fn picked_face_feature(app: &SolveApp) -> Option<u64> {
 /// in Timeline is left out, there being no timeline panel; otherwise the menu is upstream's.
 fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let exists = app.session.doc.feature(id).is_some();
-    let history = crate::profile::active(app).defaults.history == Some(crate::profile::History::Browser);
+    let history = !timeline_offered(app);
     let mut v = Vec::new();
     if history && let (_, Some(s)) = feature_and_sketch(app, Some(id)) {
-        v.push(act("ui.editSketch", "Edit Sketch", "sketch").with(json!({"sketch": s})));
+        v.push(act("ui.editSketch", "Edit Sketch", "sketch").with(json!({"sketch": s})).on(app.session.doc.feature(s).is_some()));
     }
     v.extend([
         act("ui.editFeature", "Edit Feature", "edit").with(json!({"feature":id})).on(exists),
@@ -506,6 +506,12 @@ fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
         v.push(act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({"feature":id})).on(exists));
     }
     v
+}
+
+/// Whether the menus offer Find in Timeline: not when the browser is the history (profile data),
+/// there being no timeline panel to find in.
+fn timeline_offered(app: &SolveApp) -> bool {
+    crate::profile::active(app).defaults.history != Some(crate::profile::History::Browser)
 }
 
 /// A feature and its profile sketch, if it has one.
@@ -577,7 +583,9 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(act(if hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": [face] })));
         v.push(Item::sep());
         v.push(act("ui.findBrowser", "Find in Browser", "list").with(json!({ "body": face })));
-        v.push(act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({ "feature": feature, "body": face })).on(feature.is_some()));
+        if timeline_offered(app) {
+            v.push(act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({ "feature": feature, "body": face })).on(feature.is_some()));
+        }
         v.push(Item::sep());
         v.push(cmd(app, "solid.press_pull", "Press Pull"));
         v.push(cmd(app, "inspect.measure", "Measure"));
@@ -675,11 +683,16 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
         if let Some(component) = crate::dialogs_part_size::component_for_bodies(app, bodies) {
             v.push(cmd(app, "parts.resize", "Change Part Size").with(json!({"component":component})));
         }
-        v.push(Item::sep());
+        let timeline = timeline_offered(app);
+        if !browser || timeline {
+            v.push(Item::sep());
+        }
         if !browser {
             v.push(act("ui.findBrowser", "Find in Browser", "list").with(json!({ "body": b })));
         }
-        v.push(act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({ "body": b })));
+        if timeline {
+            v.push(act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({ "body": b })));
+        }
     }
     v
 }
@@ -690,7 +703,7 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let dims = app.session.visibility.shown_dimensions.contains(&id);
     let editing = app.session.active_sketch == Some(id);
     let has_profiles = app.session.world_state().sketch(id).is_some_and(|s| !s.profiles.is_empty());
-    vec![
+    let mut v = vec![
         act("ui.extrudeSketch", "Extrude", "extrude").key("E").with(json!({ "sketch": id })).on(has_profiles && !editing),
         Item::sep(),
         act("ui.editSketch", "Edit Sketch", "sketch").with(json!({ "sketch": id })).on(!editing),
@@ -704,16 +717,19 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
         act("ui.sketchProfile", if profiles { "Hide Profile" } else { "Show Profile" }, "sketch").with(json!({ "sketch": id })),
         act("ui.sketchDims", if dims { "Hide Dimension" } else { "Show Dimension" }, "dimension").with(json!({ "sketch": id })),
         act(if visible { "ui.hideSketch" } else { "ui.showSketch" }, "Show/Hide", "eye").key("V").with(json!({ "sketch": id })),
-        Item::sep(),
-        act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({ "feature": id })),
-    ]
+    ];
+    if timeline_offered(app) {
+        v.push(Item::sep());
+        v.push(act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({ "feature": id })));
+    }
+    v
 }
 
 /// A construction plane's row in the browser: sketch on it, edit, delete, rename, show or hide.
 fn plane_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let Some(f) = app.session.doc.feature(id) else { return Vec::new() };
     let visible = !app.session.visibility.hidden_origin.contains(&f.name);
-    vec![
+    let mut v = vec![
         cmd(app, "sketch.create", "Create Sketch").with(json!({ "plane": f.name })),
         Item::sep(),
         act("ui.editFeature", "Edit Feature", "plane").with(json!({ "feature": id })),
@@ -722,9 +738,12 @@ fn plane_items(app: &SolveApp, id: u64) -> Vec<Item> {
         act("ui.rename", "Rename", "rename").with(json!({ "feature": id })),
         Item::sep(),
         act("ui.originPart", "Show/Hide", "eye").key("V").with(json!({ "keys": [f.name], "show": !visible })),
-        Item::sep(),
-        act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({ "feature": id })),
-    ]
+    ];
+    if timeline_offered(app) {
+        v.push(Item::sep());
+        v.push(act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({ "feature": id })));
+    }
+    v
 }
 
 /// An origin plane's row in the browser: sketch on it, show or hide.

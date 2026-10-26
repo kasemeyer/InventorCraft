@@ -176,7 +176,7 @@ fn floating_bounds(app: &SolveApp, available: Rect, left: bool) -> Rect {
     let mut bounds = available.shrink(gap);
     // The ribbon already supplies the top gap shared by browser and history cards.
     bounds.min.y = available.top();
-    if let Some(history) = app.shell.history.filter(|_| app.ui.show_timeline && !app.preferences.timeline_left) {
+    if let Some(history) = app.shell.history.filter(|_| crate::timeline::shown(app) && !app.preferences.timeline_left) {
         bounds.max.y = (history.top() - gap).min(bounds.bottom()).max(bounds.top());
     }
     // Assistant owns the outside edge on either side. Tool sheets reserve space beside it.

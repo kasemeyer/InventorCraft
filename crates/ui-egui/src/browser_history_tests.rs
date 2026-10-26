@@ -191,3 +191,52 @@ fn dragging_end_of_part_rolls_the_history_to_where_it_lands() {
     h.frames(3);
     assert_eq!(h.app.session.doc.marker, None);
 }
+
+/// History part plus an unused work plane WP: (harness, S1, WP, body name).
+fn find_targets(mut h: Harness) -> (Harness, u64, u64, String) {
+    h.app.run("sketch.create", json!({"plane":"XY","name":"S1"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[20,15]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    extrude(&mut h, 10.0, "E1");
+    h.app.run("construct.plane.offset", json!({"base":"XY","offset":30,"name":"WP"})).unwrap();
+    let body = h.app.session.model.state().bodies[0].name.clone();
+    let (s1, wp) = (id_of(&h, "S1"), id_of(&h, "WP"));
+    (h, s1, wp, body)
+}
+
+fn menus(h: &Harness, s1: u64, wp: u64, body: &str) -> Vec<(&'static str, Vec<Item>)> {
+    vec![
+        ("sketch", crate::context_menu::items(&h.app, &Target::Sketch { id: s1 })),
+        ("plane", crate::context_menu::items(&h.app, &Target::Plane { id: wp })),
+        ("body", crate::context_menu::items(&h.app, &Target::Body { name: body.into() })),
+    ]
+}
+
+#[test]
+fn find_in_timeline_is_offered_only_where_there_is_a_timeline() {
+    let (h, s1, wp, body) = find_targets(inventor(Part));
+    for (what, items) in menus(&h, s1, wp, &body) {
+        assert!(!items.is_empty(), "{what} has a menu");
+        assert!(!items.iter().any(|i| i.id == "ui.findTimeline"), "Inventor's {what} menu has no Find in Timeline");
+        assert_ne!(items.last().map(|i| i.id.as_str()), Some("-"), "the {what} menu does not end on a separator");
+    }
+    let (h, s1, wp, body) = find_targets(Harness::new());
+    for (what, items) in menus(&h, s1, wp, &body) {
+        assert!(items.iter().any(|i| i.id == "ui.findTimeline"), "SolidCraft's {what} menu keeps Find in Timeline");
+    }
+}
+
+#[test]
+fn f2_on_a_history_plane_row_renames_the_plane() {
+    let (mut h, _, wp, _) = find_targets(inventor(Part));
+    h.app.home.open = false;
+    h.frames(2);
+    h.step(&json!({"click":{"handle": format!("row:history:{wp}")}})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.session.selection, [Sel::Plane { name: "WP".into() }]);
+    h.step(&json!({"key": "F2"})).unwrap();
+    h.frames(2);
+    let rename = h.app.menu.rename.as_ref().expect("F2 opens the Rename box");
+    assert_eq!(rename.what, crate::context_menu::RenameWhat::Feature(wp));
+    assert_eq!(rename.text, "WP");
+}
