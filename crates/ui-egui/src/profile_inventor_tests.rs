@@ -175,6 +175,7 @@ const PART_FACES: &[(&str, &str, &[(&str, bool)])] = &[
     ("VIEW", "APPEARANCE", &[("view.graphics_preset", S), ("view.ambient_occlusion", S)]),
     ("VIEW", "WINDOWS", &[("view.layout", S), ("view.history_layout", S)]),
     ("VIEW", "NAVIGATE", &[("view.normal_to", S), ("view.isometric", S)]),
+    ("ENVIRONMENTS", "BEGIN", &[("render.start", L)]),
     ("ENVIRONMENTS", "CONVERT", &[("sheet.convert", L)]),
 ];
 
@@ -224,7 +225,7 @@ fn inventor_part_panels_follow_the_capture() {
         ("TOOLS", &["MEASURE", "MATERIAL AND APPEARANCE", "OPTIONS", "CLIPBOARD", "FIND"]),
         ("MANAGE", &["UPDATE", "PARAMETERS", "STYLES AND STANDARDS", "INSERT", "AUTHOR"]),
         ("VIEW", &["VISIBILITY", "APPEARANCE", "WINDOWS", "NAVIGATE"]),
-        ("ENVIRONMENTS", &["CONVERT"]),
+        ("ENVIRONMENTS", &["BEGIN", "CONVERT"]),
     ];
     for (tab, ids) in want {
         assert_eq!(panels(Part, tab), *ids, "{tab}");
@@ -427,7 +428,7 @@ const ASSEMBLY_FACES: &[(&str, &str, &[(&str, bool)])] = &[
     ("INSPECT", "INTERFERENCE", &[("inspect.interference", L), ("contact.enable_sets", L)]),
     ("INSPECT", "MEASURE", &[("inspect.measure", L), ("inspect.center_of_mass", L)]),
     ("MANAGE", "UPDATE", &[("timeline.compute_all", L)]),
-    ("ENVIRONMENTS", "BEGIN", &[("motion.study", L)]),
+    ("ENVIRONMENTS", "BEGIN", &[("render.start", L), ("motion.study", L)]),
     ("ENVIRONMENTS", "3D PRINT", &[("file.save_mesh", L)]),
 ];
 
@@ -577,4 +578,22 @@ fn inventor_maps_46_aliases_without_conflicts() {
 #[test]
 fn inventor_f6_is_home_view() {
     assert_eq!(inventor().function_keys.get("F6").map(String::as_str), Some("ui.view_home"));
+}
+
+/// Inventor Studio's slot: ENVIRONMENTS › BEGIN carries the Render entry on Part and Assembly
+/// (the workspace switcher that used to provide it is not drawn under Inventor). Starting it from
+/// the design enters the Render workspace.
+#[test]
+fn environments_begin_enters_the_render_workspace() {
+    for kind in [Part, Assembly] {
+        let begin = inventor().ribbon(kind).tab("ENVIRONMENTS").unwrap().panel("BEGIN").unwrap();
+        assert!(!begin.hidden, "{kind:?}: BEGIN is on the tab's face");
+        assert!(face(kind, "ENVIRONMENTS", "BEGIN").contains(&("render.start", L)), "{kind:?}");
+        let mut h = crate::test_support::inventor(kind);
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        assert!(!crate::render_workspace::active(&h.app));
+        h.app.start("render.start");
+        assert!(crate::render_workspace::active(&h.app), "{kind:?}: {:?}", h.app.status);
+        assert_eq!(h.app.ui.tab, "RENDER");
+    }
 }
