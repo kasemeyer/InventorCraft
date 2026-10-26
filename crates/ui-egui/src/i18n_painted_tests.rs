@@ -50,8 +50,9 @@ fn painted(h: &mut Harness) -> BTreeSet<String> {
 }
 
 /// Names the design holds (its own name, features, bodies, components, occurrences), and the
-/// keyboard shortcuts' key names. They are shown as typed or as printed on the key in every
-/// language, even when one matches a label ("Boss", "Holes", the Delete key).
+/// keyboard shortcuts' key names, the application's own keys included (the command search's
+/// "S" cap). They are shown as typed or as printed on the key in every language, even when one
+/// matches a label ("Boss", "Holes", the Delete key, the ViewCube compass's "S").
 fn design_names(app: &SolveApp) -> BTreeSet<String> {
     let doc = &app.session.doc;
     let mut names: BTreeSet<String> = [doc.name.clone()].into();
@@ -60,6 +61,7 @@ fn design_names(app: &SolveApp) -> BTreeSet<String> {
     names.extend(doc.occurrences.iter().map(|o| o.name.clone()));
     names.extend(app.session.model.state().bodies.iter().map(|b| b.name.clone()));
     names.extend(solidcraft_engine::command_specs().iter().filter_map(|c| crate::keymap::effective(app, c.id)));
+    names.extend(crate::keymap::RESERVED.iter().map(|k| (*k).to_string()));
     names
 }
 
@@ -140,6 +142,9 @@ fn no_english_is_painted_where_the_language_has_a_translation() {
     let mut h = sample();
     let names = design_names(&h.app);
     assert!(names.contains("Boss") && names.len() > 5, "{names:?}");
+    // The command search's key cap is the S key, printed as on the key in every language; the
+    // catalog's "S" is the ViewCube compass's South (translated there), not this key.
+    assert!(names.contains("S") && names.contains("Escape"), "the application's own keys are key names: {names:?}");
     let mut leaks = Vec::new();
     for catalog in crate::i18n::LOCALES.iter().filter(|c| c.id != "en") {
         for (surface, texts) in sweep(&mut h, catalog.id) {

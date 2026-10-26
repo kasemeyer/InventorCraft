@@ -412,6 +412,13 @@ const ELEMENTS: &[Element] = &[
         crate::theme::TabAccent::publish(&app, ui.ctx());
         radial_menu(ui, r.center(), &crate::context_menu::radial_items(&app), Some(3));
     }),
+    element!("marking_bounds", |ui, _| {
+        // The bounds are the sample's allocation: the ring must paint inside them.
+        marking_sample(ui);
+    }),
+    element!("marking_ring", |ui, _| {
+        marking_sample(ui);
+    }),
     element!("workspace_menu", |ui, _| {
         let app = crate::test_support::sample_app();
         workspace_menu(ui, &crate::context_menu::items(&app, &crate::context_menu::Target::Workspace), None, 550.0);
@@ -1416,6 +1423,18 @@ fn gallery_covers_every_inline_element() {
             }
         }
     }
+}
+
+/// A marking ring of four short pills (N, NE, E, SE), allocated exactly its `marking_bounds`.
+fn marking_sample(ui: &mut Ui) {
+    let items: Vec<_> = [("solid.extrude", "Extrude"), ("solid.revolve", "Revolve"), ("solid.fillet", "Fillet"), ("solid.hole", "Hole")]
+        .into_iter()
+        .map(|(id, label)| crate::context_menu::Item::action(id, label, "extrude"))
+        .collect();
+    let offsets = &crate::marking_menu::PILL_OFFSETS;
+    let bounds = marking_bounds(ui.ctx(), egui::Pos2::ZERO, &items, offsets);
+    let (rect, _) = ui.allocate_exact_size(bounds.size(), egui::Sense::hover());
+    marking_ring(ui, rect.min - bounds.min.to_vec2(), &items, offsets);
 }
 
 #[cfg(test)]
