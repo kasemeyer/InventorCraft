@@ -161,8 +161,15 @@ fn typing_after_a_drag_replaces_the_dragged_value() {
 #[test]
 fn enter_creates_the_plane_at_the_dragged_offset() {
     let mut h = offset_plane_on_top_face(true);
-    drag_arrow_to(&mut h, 0.737);
+    // Pulled by the preview plane itself (the grip), not the arrow.
+    let press = on_the_plane(&h, 0.0);
+    let from = screen(&mut h, press);
+    let tip = handle_at("arrow").unwrap();
+    assert!(from.distance(tip) > 20.0, "the press is on the plane, away from the arrow's tip");
+    let to = screen(&mut h, press + Vec3::new(0.0, 0.0, 0.737 * MM_PER_IN));
+    drag(&mut h, from, to);
     let want = inch_text(snapped_in(&h, 0.737));
+    assert_eq!(offset(&h), want, "the plane drag wrote the distance");
     h.step(&json!({"key": "Enter"})).unwrap();
     h.settle();
     assert!(h.app.dialog.is_none(), "Enter is OK");

@@ -397,8 +397,8 @@ fn format_len_in(v: f64, unit: &str) -> String {
 }
 
 /// The unit a dragged length is written in, and its size in millimetres. Upstream's arrows write
-/// millimetres; a profile's plane drag writes the design unit. The unit is always written out:
-/// a bare stored length is millimetres.
+/// millimetres; under a profile's `workflow.plane_drag` every drag arrow writes the design unit.
+/// The unit is always written out: a bare stored length is millimetres.
 struct DragUnit {
     name: String,
     mm: f64,
@@ -416,6 +416,17 @@ impl DragUnit {
             Ok(mm) if mm.is_finite() && mm > 0.0 => DragUnit { name, mm },
             _ => DragUnit::mm(),
         }
+    }
+
+    /// The unit the drag arrows write: the design unit under the profile's `workflow.plane_drag`
+    /// (an inch Part drags inches), millimetres otherwise (upstream).
+    fn arrows(app: &SolveApp) -> Self {
+        if crate::profile::active(app).workflow.plane_drag { DragUnit::design(app) } else { DragUnit::mm() }
+    }
+
+    /// A length `v` (mm) written in this unit, unrounded.
+    fn text(&self, v: f64) -> String {
+        format_len_in(v / self.mm, &self.name)
     }
 
     /// A dragged length `v` (mm) in this unit: snapped to a round step of the unit at this zoom
@@ -455,6 +466,11 @@ fn plane_grip(ui: &mut egui::Ui, proj: &Proj, base: Vec3, n: Vec3, off: f64, h: 
     let dragging = ui.ctx().is_being_dragged(id);
     let pointer = ui.input(|i| i.pointer.hover_pos());
     let Some(p) = pointer.filter(|p| dragging || crate::gizmo::in_quad(*p, &q)) else { return false };
+    // Seen edge-on, the view ray never meets the plane: there is no point to pull, so leave the
+    // press to the arrow and the viewport instead of claiming a drag that writes nothing.
+    if !dragging && on_plane(proj, p, base + n * off, n).is_none() {
+        return false;
+    }
     let r = ui.interact(egui::Rect::from_center_size(p, vec2(2.0 * ARROW_STEM_REACH, 2.0 * ARROW_STEM_REACH)), id, egui::Sense::drag());
     if r.drag_started() {
         // The line the drag runs along: through the point pressed, back at offset zero.
@@ -548,6 +564,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     );
     let mut focus = std::mem::take(&mut d.focus);
     let half_height = app.cam.half_height();
+    let unit = DragUnit::arrows(app);
     let axis = revolve_axis(app, d);
     if matches!(d.kind, Kind::Revolve { .. }) {
         if let Some(axis) = axis {
@@ -559,14 +576,14 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     if let (Kind::Extrude { direction: crate::dialogs::TWO_SIDES | crate::dialogs::TWO_SIDES_REVERSED, distance2, .. }, Some(n)) = (&mut d.kind, dir)
         && let Some(l2) = app.session.doc.eval(distance2, ValueKind::Length).ok().filter(|v| v.is_finite())
     {
-        drag_arrow(ui, painter, proj, base, bs, -(n * sign), l2, true, egui::Id::new("sc_manipulator2"), half_height, distance2);
+        drag_arrow(ui, painter, proj, base, bs, -(n * sign), l2, true, egui::Id::new("sc_manipulator2"), half_height, distance2, &unit);
     }
     // A chamfer of two distances: Distance 2 gets its own arrow along the other face.
     let faces = chamfer_face_dirs(app, d, base);
     if let (Kind::Fillet { distance2, .. }, Some((_, t2))) = (&mut d.kind, faces)
         && let Some(l2) = app.session.doc.eval(distance2, ValueKind::Length).ok().filter(|v| v.is_finite())
     {
-        drag_arrow(ui, painter, proj, base, bs, t2, l2, false, egui::Id::new("sc_manipulator2"), half_height, distance2);
+        drag_arrow(ui, painter, proj, base, bs, t2, l2, false, egui::Id::new("sc_manipulator2"), half_height, distance2, &unit);
     }
     // A rectangular pattern's second direction gets its own arrow for Spacing 2 (#2462), as the
     // first direction's arrow sets Spacing.
@@ -578,7 +595,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         if let Some(spacing2) = spacing2
             && let Some(l2) = app.session.doc.eval(spacing2, ValueKind::Length).ok().filter(|v| v.is_finite())
         {
-            drag_arrow(ui, painter, proj, base, bs, n2, l2, false, egui::Id::new("sc_manipulator2"), half_height, spacing2);
+            drag_arrow(ui, painter, proj, base, bs, n2, l2, false, egui::Id::new("sc_manipulator2"), half_height, spacing2, &unit);
         }
     }
     // An offset plane shows where it will be. Under the profile's plane drag, a press on it pulls
@@ -589,7 +606,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         if plane_drag
             && let Ok(off) = app.session.doc.eval(offset, ValueKind::Length)
             && off.is_finite()
-            && plane_grip(ui, proj, base, n, off, side, half_height, &DragUnit::design(app), offset)
+            && plane_grip(ui, proj, base, n, off, side, half_height, &unit, offset)
         {
             // Keep the whole changing text selected, as an arrow drag does.
             focus = true;
@@ -641,7 +658,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     if let (Kind::Hole { depth, opts, .. }, Some(n)) = (&mut d.kind, dir) {
         let l = if opts.all { 0.0 } else { app.session.doc.eval(depth, ValueKind::Length).ok().filter(|v| v.is_finite()).unwrap_or(0.0) };
         let before = depth.clone();
-        drag_arrow(ui, painter, proj, base, bs, -n, l, false, egui::Id::new("sc_manipulator_depth"), half_height, depth);
+        drag_arrow(ui, painter, proj, base, bs, -n, l, false, egui::Id::new("sc_manipulator_depth"), half_height, depth, &unit);
         // Dragging the depth turns "through all" into a distance.
         if *depth != before {
             opts.all = false;
@@ -672,14 +689,13 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         let mut shown_value = format_len(half + baseline);
         let original_shown = shown_value.clone();
         let dragged = if to_span.is_some() || symmetric_scale != 1.0 { &mut shown_value } else { &mut *value };
-        let unit = if plane_drag { DragUnit::design(app) } else { DragUnit::mm() };
         let id = egui::Id::new("sc_manipulator");
-        if let Some(ts) = drag_arrow_in(ui, painter, proj, base, bs, n, half + baseline, signed, id, half_height, dragged, &unit) {
+        if let Some(ts) = drag_arrow(ui, painter, proj, base, bs, n, half + baseline, signed, id, half_height, dragged, &unit) {
             if (to_span.is_some() || symmetric_scale != 1.0)
                 && shown_value != original_shown
                 && let Ok(v) = app.session.doc.eval(&shown_value, ValueKind::Length)
             {
-                *value = format_len((v - baseline) / symmetric_scale);
+                *value = unit.text((v - baseline) / symmetric_scale);
             }
             if symmetric && let Some(bt) = proj.to_screen(base - n * half) {
                 arrow(painter, bs, bt, t.manipulator);
@@ -781,29 +797,11 @@ fn to_segment(p: Pos2, a: Pos2, b: Pos2) -> f32 {
 }
 
 /// A draggable arrow from `base` along `n` showing `l` (at least a short stub); dragging writes
-/// the snapped length into `value`. The tip and the stem take the drag (#1740): pressed on the
-/// stem, the arrow keeps its length until the pointer moves, and then moves with it as far as the
-/// pointer does. Returns the tip's screen position.
+/// the length, snapped to a round step of `unit`, into `value` in that unit. The tip and the stem
+/// take the drag (#1740): pressed on the stem, the arrow keeps its length until the pointer
+/// moves, and then moves with it as far as the pointer does. Returns the tip's screen position.
 #[allow(clippy::too_many_arguments)]
 fn drag_arrow(
-    ui: &mut egui::Ui,
-    painter: &egui::Painter,
-    proj: &Proj,
-    base: Vec3,
-    bs: Pos2,
-    n: Vec3,
-    l: f64,
-    signed: bool,
-    id: egui::Id,
-    half_height: f64,
-    value: &mut String,
-) -> Option<Pos2> {
-    drag_arrow_in(ui, painter, proj, base, bs, n, l, signed, id, half_height, value, &DragUnit::mm())
-}
-
-/// [`drag_arrow`] writing the dragged length in `unit` (snapped to a round step of it).
-#[allow(clippy::too_many_arguments)]
-fn drag_arrow_in(
     ui: &mut egui::Ui,
     painter: &egui::Painter,
     proj: &Proj,
@@ -1637,3 +1635,7 @@ mod taper_limit_tests {
 #[cfg(test)]
 #[path = "offset_plane_drag_tests.rs"]
 mod offset_plane_drag_tests;
+
+#[cfg(test)]
+#[path = "drag_unit_tests.rs"]
+mod drag_unit_tests;

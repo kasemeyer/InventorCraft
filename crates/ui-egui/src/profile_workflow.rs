@@ -38,7 +38,8 @@ pub struct Workflow {
     /// The ribbon's own menu offers Show Panels (the current tab's panels to show or hide).
     pub show_panels_menu: bool,
     /// Offset Plane's preview plane is a drag handle (a press on it pulls the plane along its
-    /// normal, as the arrow does), and dragging writes the distance in the design unit.
+    /// normal, as the arrow does), and every drag arrow (Extrude's distances, Hole's depth, a
+    /// pattern's spacings, a chamfer's distances, the plane's distance) writes the design unit.
     pub plane_drag: bool,
 }
 
