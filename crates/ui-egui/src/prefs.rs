@@ -7,15 +7,14 @@ use serde_json::json;
 pub use solidcraft_engine::doc::display_units::{format_length, length_number, length_precision, unit_scale};
 use solidcraft_engine::geom::Vec3;
 
-/// The key the apps keep the preferences under in eframe's storage.
-pub const STORAGE_KEY: &str = "solidcraft.prefs";
-/// The key earlier releases used. Compatibility shim (docs/compatibility.md): read when the
-/// current key is missing, never written.
-pub const LEGACY_STORAGE_KEY: &str = "solvecraft.prefs";
+/// The key the apps keep the preferences under in eframe's storage: TCI-CAD's own, so a machine
+/// that also runs SolidCraft never shares (or clobbers) its preferences.
+pub const STORAGE_KEY: &str = "tci-cad.prefs";
 
-/// The stored preferences, from the current key or else the legacy one.
+/// The stored preferences. SolidCraft's keys are never read: TCI-CAD's first run is a fresh
+/// install, which is when a profile's defaults apply.
 pub fn stored(get: impl Fn(&str) -> Option<String>) -> Option<String> {
-    get(STORAGE_KEY).or_else(|| get(LEGACY_STORAGE_KEY))
+    get(STORAGE_KEY)
 }
 
 mod design;
@@ -3512,11 +3511,12 @@ mod tests {
     }
 
     #[test]
-    fn stored_prefs_fall_back_to_the_legacy_key() {
-        let only_old = |k: &str| (k == super::LEGACY_STORAGE_KEY).then(|| "old".to_string());
-        assert_eq!(super::stored(only_old).as_deref(), Some("old"));
-        let both = |k: &str| Some(if k == super::STORAGE_KEY { "new" } else { "old" }.to_string());
-        assert_eq!(super::stored(both).as_deref(), Some("new"));
+    fn tci_cad_reads_only_its_own_prefs_key() {
+        assert_eq!(super::STORAGE_KEY, "tci-cad.prefs");
+        let upstream = |k: &str| ["solidcraft.prefs", "solvecraft.prefs"].contains(&k).then(|| "upstream".to_string());
+        assert_eq!(super::stored(upstream), None);
+        let both = |k: &str| Some(if k == super::STORAGE_KEY { "ours" } else { "upstream" }.to_string());
+        assert_eq!(super::stored(both).as_deref(), Some("ours"));
         assert_eq!(super::stored(|_| None), None);
     }
 

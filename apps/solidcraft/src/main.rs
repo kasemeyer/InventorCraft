@@ -8,7 +8,8 @@
 //! A `.step`/`.stp` file opens as a new design holding the file's bodies (an Import feature); a
 //! `.3mf`/`.stl`/`.obj`/`.glb`/`.gltf` file as a new design holding mesh bodies.
 //!
-//! `SOLIDCRAFT_SETTINGS_DIR` selects an explicit absolute settings directory without legacy adoption.
+//! `SOLIDCRAFT_SETTINGS_DIR` selects an explicit absolute settings directory. Without it TCI-CAD keeps
+//! its settings in its own folder (`SETTINGS_FOLDER`), never SolidCraft's, and adopts none of theirs.
 //! `--control <port>` (or `SOLIDCRAFT_CONTROL_PORT`) starts a localhost JSON-lines control
 //! server: `{"id":1,"method":"engine.execute","params":{"command":"solid.box","params":{…}}}`.
 //! Without them the channel still opens, on the default port, unless Preferences turns it off.
@@ -462,7 +463,7 @@ fn http_call(url: &str, timeout: std::time::Duration) -> Result<ureq::http::Resp
 /// The per-user settings folder: eframe's storage (`app.ron`) and the anti-aliasing preference.
 fn settings_dir() -> Result<Option<std::path::PathBuf>, String> {
     let selected = std::env::var_os("SOLIDCRAFT_SETTINGS_DIR");
-    startup::settings_directory(selected.as_deref(), eframe::storage_dir("SolidCraft"))
+    startup::settings_directory(selected.as_deref(), eframe::storage_dir(SETTINGS_FOLDER))
 }
 
 /// The anti-aliasing preference, kept next to eframe's storage (it is needed before the
@@ -471,41 +472,9 @@ fn graphics_path() -> Option<std::path::PathBuf> {
     settings_dir().ok().flatten().map(|d| d.join("graphics.json"))
 }
 
-/// Compatibility shim (docs/compatibility.md): on the first launch after the rename, copy the
-/// settings of earlier releases into the new folder. They kept `graphics.json` (and, on Linux
-/// and macOS, the recovery folder) under the old product name, and eframe's `app.ron` under the
-/// window's old app id. In the Flatpak sandbox, releases before 0.8 kept everything under the
-/// old app id's `~/.var/app` folder; that copy comes first, as it is the newest. The old folders
-/// are never changed.
-fn adopt_legacy_settings() {
-    let (Some(current), Some(legacy)) = (settings_dir().ok().flatten(), eframe::storage_dir("SolveCraft")) else { return };
-    let legacy_eframe = eframe::storage_dir(solidcraft_engine::io::LEGACY_APP_ID);
-    let old_flatpak = solidcraft_engine::io::legacy_flatpak_path(&current);
-    if let Err(e) = adopt_settings(&current, old_flatpak.as_deref(), &legacy, legacy_eframe.as_deref()) {
-        log::warn!("settings: could not copy the previous release's settings into {}: {e}", current.display());
-    }
-}
-
-fn adopt_settings(
-    current: &std::path::Path,
-    old_flatpak: Option<&std::path::Path>,
-    legacy: &std::path::Path,
-    legacy_eframe: Option<&std::path::Path>,
-) -> std::io::Result<()> {
-    let fresh = !current.exists();
-    if let Some(old) = old_flatpak {
-        solidcraft_engine::io::adopt_legacy_dir(current, old)?;
-    }
-    solidcraft_engine::io::adopt_legacy_dir(current, legacy)?;
-    if let Some(old) = legacy_eframe.map(|d| d.join("app.ron")).filter(|p| fresh && p.is_file()) {
-        std::fs::create_dir_all(current)?;
-        let new = current.join("app.ron");
-        if !new.exists() {
-            std::fs::copy(old, new)?;
-        }
-    }
-    Ok(())
-}
+/// TCI-CAD's settings folder: its own, so a machine that also runs SolidCraft never shares (or
+/// clobbers) its settings. SolidCraft's are not adopted: TCI-CAD's first run is a fresh install.
+const SETTINGS_FOLDER: &str = "TCI-CAD";
 
 /// `graphics.json`, read before the window opens.
 fn graphics() -> Option<serde_json::Value> {
@@ -572,17 +541,15 @@ fn app_viewport() -> Result<egui::ViewportBuilder, eframe::Error> {
 }
 
 /// The window's app id: it names the desktop entry, so it is the packages' reverse-DNS id.
-const APP_ID: &str = solidcraft_engine::io::APP_ID;
+/// TCI-CAD's own, not SolidCraft's, so the two never share a desktop entry or window identity.
+const APP_ID: &str = "com.tcicad.TciCad";
 
 fn main() -> eframe::Result {
     #[cfg(target_os = "macos")]
     objc2_foundation::NSProcessInfo::processInfo().setProcessName(objc2_foundation::ns_string!("SolidCraft"));
     mark("main");
-    // Validate before legacy adoption, crash markers or any user preference read.
+    // Validate before crash markers or any user preference read.
     let settings = settings_dir().map_err(|error| eframe::Error::AppCreation(error.into()))?;
-    if std::env::var_os("SOLIDCRAFT_SETTINGS_DIR").is_none() {
-        adopt_legacy_settings();
-    }
     let mut safe_mode = startup::env_on(std::env::var(startup::SAFE_MODE_ENV).ok().as_deref());
     let mut control_port: Option<u16> = solidcraft_engine::geom::env::var("CONTROL_PORT").and_then(|p| p.parse().ok());
     let mut files = Vec::new();
@@ -622,7 +589,7 @@ fn main() -> eframe::Result {
     let mut notes: Vec<String> = Vec::new();
     let mut failed_starts = 0;
     if let Some(dir) = &settings {
-        notes.extend(startup::check_settings(dir, &[solidcraft_ui_egui::prefs::STORAGE_KEY, solidcraft_ui_egui::prefs::LEGACY_STORAGE_KEY]));
+        notes.extend(startup::check_settings(dir, &[solidcraft_ui_egui::prefs::STORAGE_KEY]));
         failed_starts = startup::begin(dir);
     }
     if failed_starts >= startup::FAILED_STARTS_FOR_SAFE_MODE && !safe_mode {
@@ -1022,26 +989,15 @@ mod icon_tests {
 
 #[cfg(test)]
 mod msaa_tests {
+    /// TCI-CAD and SolidCraft installed side by side keep apart: their own app id and their own
+    /// settings folder.
     #[test]
-    fn first_launch_adopts_the_previous_release_settings() {
-        let d = std::env::temp_dir().join(format!("solidcraft-adopt-settings-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        let (current, legacy, legacy_eframe) = (d.join("solidcraft"), d.join("solvecraft"), d.join("ai.storyteller.solvecraft"));
-        std::fs::create_dir_all(&legacy).unwrap();
-        std::fs::create_dir_all(&legacy_eframe).unwrap();
-        std::fs::write(legacy.join("graphics.json"), r#"{"msaa":8}"#).unwrap();
-        std::fs::write(legacy_eframe.join("app.ron"), "(prefs)").unwrap();
-        super::adopt_settings(&current, None, &legacy, Some(&legacy_eframe)).unwrap();
-        assert_eq!(std::fs::read_to_string(current.join("graphics.json")).unwrap(), r#"{"msaa":8}"#);
-        assert_eq!(std::fs::read_to_string(current.join("app.ron")).unwrap(), "(prefs)");
-        assert!(legacy.join("graphics.json").is_file() && legacy_eframe.join("app.ron").is_file());
-        // Later launches leave the current settings alone.
-        std::fs::write(current.join("app.ron"), "(mine)").unwrap();
-        std::fs::remove_file(current.join("graphics.json")).unwrap();
-        super::adopt_settings(&current, None, &legacy, Some(&legacy_eframe)).unwrap();
-        assert_eq!(std::fs::read_to_string(current.join("app.ron")).unwrap(), "(mine)");
-        assert!(!current.join("graphics.json").exists());
-        let _ = std::fs::remove_dir_all(&d);
+    fn tci_cad_has_its_own_app_id_and_settings_folder() {
+        assert_eq!(super::APP_ID, "com.tcicad.TciCad");
+        assert_ne!(super::APP_ID, solidcraft_engine::io::APP_ID);
+        assert_ne!(super::APP_ID, solidcraft_engine::io::LEGACY_APP_ID);
+        assert_eq!(super::SETTINGS_FOLDER, "TCI-CAD");
+        assert!(!["SolidCraft", "SolveCraft"].contains(&super::SETTINGS_FOLDER));
     }
 
     #[test]
