@@ -327,7 +327,8 @@ fn inventor_defaults_follow_inventor() {
     let d = &inventor().defaults;
     assert_eq!(d.nav.as_deref(), Some("inventor"));
     assert_eq!(d.navigator, Some(NavigatorStyle::Cube));
-    assert_eq!(d.history, Some(History::UnderBrowser));
+    assert_eq!(d.history, Some(History::Browser));
+    assert_eq!(d.units.as_deref(), Some("in"));
 }
 
 #[test]

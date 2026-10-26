@@ -186,6 +186,7 @@ pub mod preview;
 #[cfg(test)]
 mod primitive_units_tests;
 pub mod profile;
+pub mod profile_workflow;
 mod quick_access;
 pub mod recovery_ui;
 pub mod ref_images;

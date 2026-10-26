@@ -49,6 +49,8 @@ pub struct Profile {
     pub browser: BrowserLayout,
     /// Commands the SolidCraft ribbon places that this profile deliberately leaves off, and why.
     pub omitted: BTreeMap<String, String>,
+    /// Part-workflow switches and marking-menu layouts (Plan B-2).
+    pub workflow: crate::profile_workflow::Workflow,
     ribbons: [Ribbon; 3], // in `DocumentKind::ALL` order
     /// Per kind, the index of the first kind with the same ribbon (`ribbon_identity`).
     shared: [usize; 3],
@@ -222,6 +224,10 @@ pub struct Defaults {
     pub navigator: Option<crate::prefs::NavigatorStyle>,
     pub theme: Option<String>,
     pub history: Option<History>,
+    /// The preferred units template (`prefs.default_units`), applied by [`first_run`] on a fresh
+    /// install only. Units are a per-document template choice at New Part / New Assembly, so this
+    /// is never re-applied: not by `choose`, and not by a newer defaults version.
+    pub units: Option<String>,
     pub new_document: Option<DocumentKind>,
 }
 
@@ -251,6 +257,8 @@ pub enum History {
     Bottom,
     Left,
     UnderBrowser,
+    /// The history is the browser tree; no timeline panel is drawn (Plan B-2 Task 7).
+    Browser,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
@@ -463,6 +471,7 @@ pub fn solidcraft() -> Profile {
             navigator: Some(crate::prefs::NavigatorStyle::Axes),
             theme: Some("dark".into()),
             history: Some(History::Bottom),
+            units: None,
             new_document: None,
         },
         view_cube: ViewCubeStyle::default(),
@@ -475,6 +484,7 @@ pub fn solidcraft() -> Profile {
         button_labels: workspace::RIBBON_LABELS.iter().map(|(id, label)| (id.to_string(), label.to_string())).collect(),
         browser: BrowserLayout::default(),
         omitted: BTreeMap::new(),
+        workflow: crate::profile_workflow::Workflow::default(),
         ribbons: [ribbon.clone(), ribbon.clone(), ribbon],
         shared: [0, 0, 0],
     }
@@ -509,6 +519,8 @@ struct ProfileJson {
     browser: BrowserLayout,
     #[serde(default)]
     omitted: BTreeMap<String, String>,
+    #[serde(default)]
+    workflow: crate::profile_workflow::Workflow,
     #[serde(default)]
     home: HomeJson,
     panels: BTreeMap<String, PanelJson>,
@@ -653,6 +665,7 @@ pub fn parse(text: &str, base: &Profile) -> Result<Profile, String> {
         button_labels: json.button_labels,
         browser: json.browser,
         omitted: json.omitted,
+        workflow: json.workflow,
         shared: shared(&ribbons),
         ribbons,
     })
@@ -772,6 +785,7 @@ pub fn validate(profile: &Profile) -> Vec<String> {
             out.push(format!("{what}: {id} is not a registry command"));
         }
     }
+    out.extend(crate::profile_workflow::validate_workflow(&profile.workflow));
     out
 }
 
@@ -845,7 +859,9 @@ fn apply_look(app: &mut SolveApp, d: &Defaults) {
         let (left, under) = match history {
             History::Bottom => (false, false),
             History::Left => (true, false),
-            History::UnderBrowser => (true, true),
+            // The browser is the history (Task 7 hides the panel); the timeline preferences stay
+            // "under the browser" until then.
+            History::UnderBrowser | History::Browser => (true, true),
         };
         app.preferences.timeline_left = left;
         app.preferences.timeline_under_browser = under;
@@ -855,9 +871,15 @@ fn apply_look(app: &mut SolveApp, d: &Defaults) {
 /// The apps call this once after loading preferences: an empty choice becomes `SHIPPED`. When the
 /// active profile's defaults are newer than the version last applied (absent = 1), its theme and
 /// layout defaults are re-applied, never units or input settings, and the version is recorded.
+/// A fresh install also adopts the profile's preferred units (`Defaults::units`).
 pub fn first_run(app: &mut SolveApp) {
     if app.preferences.ui_profile.is_empty() {
         let _ = choose(app, SHIPPED);
+        // Fresh install only: the profile's preferred units template (never re-applied).
+        if let Some(units) = &active(app).defaults.units {
+            app.preferences.default_units = units.clone();
+            crate::prefs::default_units_changed(app);
+        }
         return;
     }
     let Some(profile) = get(&app.preferences.ui_profile) else { return };
