@@ -2,7 +2,7 @@
   "format": "tci-ui-profile/1",
   "id": "inventor",
   "name": "profile.inventor",
-  "defaults": {"nav": "inventor", "navigator": "cube", "theme": "tci-dark", "history": "under_browser", "new_document": "part"},
+  "defaults": {"version": 2, "nav": "inventor", "navigator": "cube", "theme": "tci-dark", "history": "under_browser", "new_document": "part"},
   "home": {"part": "MODEL"},
   "quick_access": true,
   "view_cube": {"edges": true, "compass": true},

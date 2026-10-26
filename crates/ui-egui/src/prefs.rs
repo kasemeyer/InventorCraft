@@ -545,6 +545,8 @@ preference_settings! {
     /// The interface profile (`profile.rs`): empty until the app's first run picks
     /// `profile::SHIPPED`; tests and headless use leave it empty, which reads as SolidCraft.
     ui_profile: String = String::new();
+    /// Per profile id, the defaults version last applied (`profile::first_run`); absent = 1.
+    profile_defaults: std::collections::BTreeMap<String, u32> = Default::default();
     /// Interface language (a registered locale ID).
     language: String = "en".into(), 0;
     /// Shared workspace composition; system windows and popups retain their purpose.

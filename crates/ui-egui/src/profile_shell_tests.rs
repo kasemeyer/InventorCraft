@@ -432,3 +432,54 @@ fn tci_dark_derives_its_unmeasured_keys_from_the_measured_base() {
     assert!(contrast_ratio(t.selected_ink, t.selected_bg) >= 4.5);
     assert!(contrast_ratio(t.selected_ink, t.accent_soft) >= 4.5);
 }
+
+#[test]
+fn profile_defaults_carry_a_version() {
+    assert_eq!(get(INVENTOR).unwrap().defaults.version(), 2);
+    assert_eq!(get(SOLIDCRAFT).unwrap().defaults.version(), 1);
+}
+
+#[test]
+fn newer_profile_defaults_reapply_theme_and_layout_but_never_units() {
+    // Prefs saved under Inventor defaults version 1: the old theme, a docked history, inch units,
+    // and no record of the version applied (version 1 predates the record).
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.preferences.ui_profile = INVENTOR.into();
+    app.preferences.theme = "dark".into();
+    app.preferences.timeline_left = false;
+    app.preferences.timeline_under_browser = false;
+    app.preferences.default_units = "in".into();
+    app.preferences.nav = "fusion".into();
+    first_run(&mut app);
+    assert_eq!(app.preferences.theme, "tci-dark", "the newer defaults bring TCI Dark");
+    assert!(app.preferences.timeline_left && app.preferences.timeline_under_browser, "and the history under the browser");
+    assert_eq!(app.preferences.default_units, "in", "units are never re-applied");
+    assert_eq!(app.preferences.nav, "fusion", "only theme and layout are re-applied");
+    assert_eq!(app.preferences.profile_defaults.get(INVENTOR), Some(&2), "the version applied is recorded");
+
+    // Same version: a later load changes nothing.
+    app.preferences.theme = "nord".into();
+    first_run(&mut app);
+    assert_eq!(app.preferences.theme, "nord");
+}
+
+#[test]
+fn a_fresh_install_applies_the_defaults_once() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    first_run(&mut app);
+    assert_eq!(app.preferences.theme, "tci-dark");
+    assert_eq!(app.preferences.profile_defaults.get(INVENTOR), Some(&2));
+    app.preferences.theme = "nord".into();
+    first_run(&mut app);
+    assert_eq!(app.preferences.theme, "nord", "the second load does not re-apply");
+}
+
+#[test]
+fn solidcraft_prefs_at_version_one_are_left_alone() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.preferences.ui_profile = SOLIDCRAFT.into();
+    app.preferences.theme = "nord".into();
+    first_run(&mut app);
+    assert_eq!(app.preferences.theme, "nord");
+    assert_eq!(app.preferences.profile_defaults.get(SOLIDCRAFT), None, "nothing to record at version 1");
+}

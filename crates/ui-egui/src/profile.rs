@@ -213,11 +213,21 @@ pub enum Shown {
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Defaults {
+    /// The defaults' version (absent = 1). When it is newer than the version recorded in the
+    /// preferences, [`first_run`] re-applies the theme and layout defaults (never units).
+    pub version: Option<u32>,
     pub nav: Option<String>,
     pub navigator: Option<crate::prefs::NavigatorStyle>,
     pub theme: Option<String>,
     pub history: Option<History>,
     pub new_document: Option<DocumentKind>,
+}
+
+impl Defaults {
+    /// The defaults' version; a profile that names none is at version 1.
+    pub fn version(&self) -> u32 {
+        self.version.unwrap_or(1)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
@@ -433,6 +443,7 @@ pub fn solidcraft() -> Profile {
         id: SOLIDCRAFT.into(),
         name: "profile.solidcraft".into(),
         defaults: Defaults {
+            version: Some(1),
             nav: Some("fusion".into()),
             navigator: Some(crate::prefs::NavigatorStyle::Axes),
             theme: Some("dark".into()),
@@ -800,6 +811,14 @@ pub fn choose(app: &mut SolveApp, id: &str) -> Result<(), String> {
     if let Some(navigator) = d.navigator {
         app.preferences.navigator_style = navigator;
     }
+    apply_look(app, d);
+    app.preferences.profile_defaults.insert(profile.id.clone(), d.version());
+    app.ui.ribbon_key = None;
+    Ok(())
+}
+
+/// The theme and layout (history dock) defaults: what a newer defaults version re-applies.
+fn apply_look(app: &mut SolveApp, d: &Defaults) {
     if let Some(theme) = &d.theme {
         crate::prefs::select_theme(app, theme);
     }
@@ -812,14 +831,21 @@ pub fn choose(app: &mut SolveApp, id: &str) -> Result<(), String> {
         app.preferences.timeline_left = left;
         app.preferences.timeline_under_browser = under;
     }
-    app.ui.ribbon_key = None;
-    Ok(())
 }
 
-/// The apps call this once after loading preferences: an empty choice becomes `SHIPPED`.
+/// The apps call this once after loading preferences: an empty choice becomes `SHIPPED`. When the
+/// active profile's defaults are newer than the version last applied (absent = 1), its theme and
+/// layout defaults are re-applied, never units or input settings, and the version is recorded.
 pub fn first_run(app: &mut SolveApp) {
     if app.preferences.ui_profile.is_empty() {
         let _ = choose(app, SHIPPED);
+        return;
+    }
+    let Some(profile) = get(&app.preferences.ui_profile) else { return };
+    let applied = app.preferences.profile_defaults.get(&profile.id).copied().unwrap_or(1);
+    if profile.defaults.version() > applied {
+        apply_look(app, &profile.defaults);
+        app.preferences.profile_defaults.insert(profile.id.clone(), profile.defaults.version());
     }
 }
 
