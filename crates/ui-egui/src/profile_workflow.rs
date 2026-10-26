@@ -35,6 +35,8 @@ pub struct Workflow {
     pub status_bar: bool,
     /// Extrude's panel in sections: Behavior, Output, Advanced.
     pub sectioned_extrude: bool,
+    /// The ribbon's own menu offers Show Panels (the current tab's panels to show or hide).
+    pub show_panels_menu: bool,
 }
 
 impl Default for Workflow {
@@ -52,6 +54,7 @@ impl Default for Workflow {
             apply_and_continue: false,
             status_bar: false,
             sectioned_extrude: false,
+            show_panels_menu: false,
         }
     }
 }

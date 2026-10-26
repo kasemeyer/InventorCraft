@@ -13,6 +13,7 @@
     "mm_length_decimals": 2,
     "apply_and_continue": true,
     "status_bar": true,
+    "show_panels_menu": true,
     "sectioned_extrude": true,
     "marking_menu": {
       "face":   {"ring": ["ui.lookAt", "solid.extrude", "ui.selectOther", "", "sketch.create", "construct.plane.offset", "edit.undo", "inspect.measure"],

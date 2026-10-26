@@ -326,8 +326,11 @@ pub fn toolbar_items(app: &SolveApp) -> Vec<Item> {
 }
 
 /// Show Panels (Inventor's panel menu): every panel of the current tab, the shown ones checked;
-/// choosing one shows or hides it. None when the tab has no panels.
+/// choosing one shows or hides it. None when the profile leaves it off or the tab has no panels.
 fn panels_menu(app: &SolveApp) -> Option<Item> {
+    if !crate::profile::active(app).workflow.show_panels_menu {
+        return None;
+    }
     let tab = app.ui.tab.as_str();
     let all = panel_lists_of(crate::profile::ribbon(app), tab, app.session.active_sketch.is_some());
     if all.is_empty() {

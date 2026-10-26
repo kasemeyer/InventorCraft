@@ -43,6 +43,12 @@ fn the_ribbon_menu_lists_this_tabs_panels() {
 }
 
 #[test]
+fn solidcraft_offers_no_show_panels() {
+    let h = Harness::new();
+    assert!(!toolbar_items(&h.app).iter().any(|i| i.id == "ui.toolbarPanels"), "SolidCraft's ribbon menu is unchanged");
+}
+
+#[test]
 fn showing_a_hidden_panel_draws_it() {
     let mut h = sketch_tab();
     assert!(!shown(&h.app, "SKETCH", "PARAMETERS"));

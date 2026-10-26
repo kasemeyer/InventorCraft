@@ -38,16 +38,32 @@ fn solidcraft_workflow_is_upstream() {
     assert_eq!(w.inch_length_decimals, None);
     assert_eq!(w.mm_length_decimals, None);
     assert!(w.escape_twice_finishes_sketch && w.sketch_palette);
-    let others = [w.look_at_on_sketch, w.restore_view_after_sketch, w.template_values, w.apply_and_continue, w.status_bar, w.sectioned_extrude];
-    assert_eq!(others, [false; 6]);
+    let others = [
+        w.look_at_on_sketch,
+        w.restore_view_after_sketch,
+        w.template_values,
+        w.apply_and_continue,
+        w.status_bar,
+        w.sectioned_extrude,
+        w.show_panels_menu,
+    ];
+    assert_eq!(others, [false; 7]);
 }
 
 #[test]
 fn inventor_turns_the_workflow_on() {
     let p = inventor();
     let w = &p.workflow;
-    let on = [w.look_at_on_sketch, w.restore_view_after_sketch, w.template_values, w.apply_and_continue, w.status_bar, w.sectioned_extrude];
-    assert_eq!(on, [true; 6]);
+    let on = [
+        w.look_at_on_sketch,
+        w.restore_view_after_sketch,
+        w.template_values,
+        w.apply_and_continue,
+        w.status_bar,
+        w.sectioned_extrude,
+        w.show_panels_menu,
+    ];
+    assert_eq!(on, [true; 7]);
     assert!(!w.escape_twice_finishes_sketch);
     assert!(!w.sketch_palette);
     assert_eq!(w.inch_length_decimals, Some(3));
