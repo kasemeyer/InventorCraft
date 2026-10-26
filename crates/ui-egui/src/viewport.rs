@@ -144,6 +144,8 @@ pub struct ViewportState {
     pub(crate) trackpad_gesture: bool,
     /// A primary press on the axis gizmo: the pointer position used by its last orbit step.
     pub axis_drag: Option<Pos2>,
+    /// That press began on the view cube's compass ring: the drag turns about up only.
+    pub axis_drag_ring: bool,
     /// Unsnapped camera while Shift-orbit previews a standard or diagonal view.
     pub orbit_free: Option<Camera>,
     pub build_ms: f64,
@@ -4535,24 +4537,35 @@ fn axis_view_orbit(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) -> bool {
         (p.primary_pressed(), p.primary_down(), p.is_decidedly_dragging(), p.press_origin(), p.interact_pos(), i.modifiers.shift)
     });
     if pressed && ui.is_enabled() && ui.rect_contains_pointer(rect) && !pos.is_some_and(|p| crate::shell::covered(app, p)) {
-        app.viewport.axis_drag = origin.filter(|p| match app.preferences.navigator_style {
-            crate::prefs::NavigatorStyle::Axes => axis_rect(app, rect).contains(*p),
-            crate::prefs::NavigatorStyle::Cube => {
-                navigation_cube::drag_origin(&app.cam, axis_center(app, rect), *p, axis_rect(app, rect).width() / navigation_cube::DESIGN_SIZE)
-            }
+        // `Some(true)`: the press is on the cube's compass ring.
+        let hit = origin.and_then(|p| match app.preferences.navigator_style {
+            crate::prefs::NavigatorStyle::Axes => axis_rect(app, rect).contains(p).then_some(false),
+            crate::prefs::NavigatorStyle::Cube => navigation_cube::drag_origin(
+                &app.cam,
+                axis_center(app, rect),
+                p,
+                axis_rect(app, rect).width() / navigation_cube::DESIGN_SIZE,
+                crate::profile::active(app).view_cube,
+            ),
         });
+        app.viewport.axis_drag = origin.filter(|_| hit.is_some());
+        app.viewport.axis_drag_ring = matches!(hit, Some(true));
         if app.viewport.axis_drag.is_some() {
             app.viewport.orbit_free = None;
         }
     }
     if !down && app.viewport.axis_drag.take().is_some() {
         app.viewport.orbit_free = None;
+        app.viewport.axis_drag_ring = false;
     }
     let Some(last) = app.viewport.axis_drag.filter(|_| decided) else { return false };
     ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
     if let Some(p) = pos {
         app.cancel_view_animation();
-        orbit_drag(app, rect, f64::from(p.x - last.x), f64::from(p.y - last.y), None, shift, false);
+        // The compass ring turns about up only: no tilt, and no snap that would change it.
+        let ring = app.viewport.axis_drag_ring;
+        let dy = if ring { 0.0 } else { f64::from(p.y - last.y) };
+        orbit_drag(app, rect, f64::from(p.x - last.x), dy, None, shift && !ring, false);
         app.viewport.axis_drag = Some(p);
         ui.ctx().request_repaint();
     }

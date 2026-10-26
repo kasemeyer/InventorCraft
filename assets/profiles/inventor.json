@@ -5,6 +5,7 @@
   "defaults": {"nav": "inventor", "navigator": "cube", "theme": "tci-dark", "history": "under_browser", "new_document": "part"},
   "home": {"part": "MODEL"},
   "quick_access": true,
+  "view_cube": {"edges": true, "compass": true},
   "letter_keys": "aliases",
   "alias_wait_ms": 750,
   "function_keys": {"F6": "ui.view_home"},

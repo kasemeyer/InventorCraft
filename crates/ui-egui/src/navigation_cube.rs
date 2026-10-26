@@ -1,6 +1,7 @@
 //! Original, code-drawn navigation cube. Flat faces share invisible picking regions.
 use super::*;
 use crate::icons::navigation::{Facet, arrow, curved_arrow, paint_cube};
+use crate::profile::ViewCubeStyle;
 use solidcraft_engine::geom::Ring;
 
 pub(super) const SIZE: f32 = 112.0;
@@ -10,6 +11,19 @@ const HALF: f64 = 40.0;
 // Corner squares lie on the six flat faces, preserving a sharp cube silhouette.
 // The remaining regions belong to the face, including the middle of each edge.
 const INSET: f64 = 0.68;
+// The compass ring (a profile option) lies flat under the cube, in cube half-widths.
+const RING_RADIUS: f64 = 56.0 / HALF;
+const RING_DROP: f64 = 0.9;
+const RING_STEPS: u32 = 72;
+/// How near the ring a press or right-click counts as on it, in points.
+const RING_REACH: f32 = 6.0;
+/// The compass letters: handle suffix, message id and the side they turn the view to.
+const COMPASS: [(&str, &str, Vec3); 4] = [
+    ("n", "viewcube.north", Vec3::Y),
+    ("e", "viewcube.east", Vec3::X),
+    ("s", "viewcube.south", Vec3::new(0.0, -1.0, 0.0)),
+    ("w", "viewcube.west", Vec3::new(-1.0, 0.0, 0.0)),
+];
 
 fn project(cam: &Camera, v: Vec3, scale: f64) -> egui::Vec2 {
     let (r, u, _) = cam.basis();
@@ -33,7 +47,9 @@ fn direction_label(d: Vec3) -> String {
         .join(" · ")
 }
 
-fn facets(cam: &Camera, c: Pos2, half: f64) -> Vec<Facet> {
+/// With `edges` (a profile option) the middle of each cube edge is its own edge-view target;
+/// otherwise it belongs to its face.
+fn facets(cam: &Camera, c: Pos2, half: f64, edges: bool) -> Vec<Facet> {
     if !cam.is_valid() {
         return Vec::new();
     }
@@ -80,7 +96,7 @@ fn facets(cam: &Camera, c: Pos2, half: f64) -> Vec<Facet> {
         for (x0, x1, sx) in bands {
             for (y0, y1, sy) in bands {
                 add(
-                    if sx != 0.0 && sy != 0.0 { n + r * sx + u * sy } else { n },
+                    if sx != 0.0 && sy != 0.0 || edges && (sx != 0.0 || sy != 0.0) { n + r * sx + u * sy } else { n },
                     n,
                     [(x0, y0), (x1, y0), (x1, y1), (x0, y1)].into_iter().map(|(x, y)| n + r * x + u * y).collect(),
                     if sx == 0.0 && sy == 0.0 { Some((r, u)) } else { None },
@@ -115,8 +131,44 @@ fn hit(faces: &[Facet], p: Pos2) -> Option<usize> {
     faces.iter().enumerate().rev().find(|(_, f)| contains(&f.points, p)).map(|(i, _)| i)
 }
 
-pub(super) fn drag_origin(cam: &Camera, centre: Pos2, pointer: Pos2, scale: f32) -> bool {
-    hit(&facets(cam, centre, HALF * f64::from(scale)), pointer).is_some()
+/// The compass ring's screen points (frame up is +Z, so it lies under the cube in either up axis).
+fn ring(cam: &Camera, c: Pos2, half: f64) -> Vec<(Pos2, f64)> {
+    (0..RING_STEPS)
+        .map(|i| {
+            let a = std::f64::consts::TAU * f64::from(i) / f64::from(RING_STEPS);
+            let v = Vec3::new(RING_RADIUS * a.cos(), RING_RADIUS * a.sin(), -RING_DROP);
+            (c + project(cam, v, half), cam.from_frame(v).dot(cam.back()))
+        })
+        .collect()
+}
+
+fn near_ring(cam: &Camera, c: Pos2, half: f64, p: Pos2) -> bool {
+    let points = ring(cam, c, half);
+    points.iter().zip(points.iter().cycle().skip(1)).any(|((a, _), (b, _))| {
+        let ab = *b - *a;
+        let t = if ab.length_sq() > 0.0 { ((p - *a).dot(ab) / ab.length_sq()).clamp(0.0, 1.0) } else { 0.0 };
+        p.distance(*a + ab * t) <= RING_REACH
+    })
+}
+
+/// A compass letter's screen point, or `None` while it is behind the cube and hidden by it.
+fn compass_letter(cam: &Camera, c: Pos2, half: f64, faces: &[Facet], side: Vec3) -> Option<Pos2> {
+    let at = c + project(cam, side * RING_RADIUS - Vec3::Z * RING_DROP, half);
+    let behind = cam.from_frame(side).dot(cam.back()) < 0.0;
+    (!behind || hit(faces, at).is_none()).then_some(at)
+}
+
+/// Where a press starts an axis-view orbit: `Some(false)` on the cube, `Some(true)` on the
+/// compass ring (when the profile shows it), `None` elsewhere.
+pub(super) fn drag_origin(cam: &Camera, centre: Pos2, pointer: Pos2, scale: f32, style: ViewCubeStyle) -> Option<bool> {
+    let half = HALF * f64::from(scale);
+    if hit(&facets(cam, centre, half, style.edges), pointer).is_some() {
+        Some(false)
+    } else if style.compass && near_ring(cam, centre, half, pointer) {
+        Some(true)
+    } else {
+        None
+    }
 }
 
 fn navigate(app: &mut SolveApp, action: Option<&str>, dir: Option<Vec3>) {
@@ -154,11 +206,51 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     let active = orbiting || ui.rect_contains_pointer(outer);
     let t = Tokens::get().navigation_cube(active);
     crate::scenario::publish_count("navigation_cube:active", f64::from(u8::from(active)));
-    let faces = facets(&app.cam, c, HALF * f64::from(scale));
+    let style = crate::profile::active(app).view_cube;
+    let half = HALF * f64::from(scale);
+    let faces = facets(&app.cam, c, half, style.edges);
+    let letters: Vec<_> = if style.compass {
+        COMPASS
+            .iter()
+            .filter_map(|(key, id, side)| {
+                compass_letter(&app.cam, c, half, &faces, *side).map(|at| (*key, *id, *side, Rect::from_center_size(at, vec2(16.0, 16.0) * scale)))
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     let hover = ui.input(|i| i.pointer.hover_pos()).filter(|p| ui.is_enabled() && ui.rect_contains_pointer(rect) && !crate::shell::covered(app, *p));
-    let hovered = if orbiting { None } else { hover.and_then(|p| hit(&faces, p)) };
+    let on_letter = |p: Pos2| letters.iter().any(|(.., r)| r.contains(p));
+    let hovered = if orbiting { None } else { hover.filter(|p| !on_letter(*p)).and_then(|p| hit(&faces, p)) };
     let painter = ui.painter_at(outer);
+    if style.compass {
+        let ring = ring(&app.cam, c, half);
+        painter.add(Shape::closed_line(ring.iter().map(|(p, _)| *p).collect(), Stroke::new(1.0, t.cube_border)));
+        // A handle on the ring's front, clear of the cube that hides part of it.
+        let front = ring.iter().filter(|(p, _)| hit(&faces, *p).is_none() && !on_letter(*p)).max_by(|a, b| a.1.total_cmp(&b.1));
+        if let Some((p, _)) = front {
+            crate::scenario::publish_handle("navigation_cube:compass:ring", *p);
+        }
+    }
     paint_cube(&painter, &faces, hovered, t, true, scale);
+    for (key, id, _, r) in &letters {
+        crate::scenario::publish_handle(&format!("navigation_cube:compass:{key}"), r.center());
+        painter.text(
+            r.center(),
+            Align2::CENTER_CENTER,
+            crate::i18n::tr(id),
+            FontId::proportional(crate::theme::Tokens::get().font_triad),
+            t.cube_text,
+        );
+    }
+    // The profile's cube has its own menu: Home and the projection.
+    if (style.edges || style.compass)
+        && ui.input(|i| i.pointer.secondary_clicked())
+        && let Some(p) = hover
+        && (hit(&faces, p).is_some() || style.compass && near_ring(&app.cam, c, half, p))
+    {
+        crate::context_menu::open_for(app, p, crate::context_menu::Target::ViewCube);
+    }
     for (i, face) in faces.iter().enumerate() {
         if faces.iter().take(i).any(|f| f.direction == face.direction) {
             continue;
@@ -188,6 +280,12 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
             .on_hover_text(format!("{} view. Drag to orbit{}.", face.label, if app.preferences.free_orbit { "" } else { "; hold Shift to snap" }));
         if ui.input(|i| i.pointer.primary_clicked()) {
             navigate(app, None, Some(face.direction));
+        }
+    }
+    // Letters before the arrows: where an arrow overlaps a letter (square-on views) it keeps its click.
+    for (key, _, side, r) in &letters {
+        if ui.interact(*r, ui.id().with(("navigation_cube_compass", *key)), Sense::click()).clicked() {
+            navigate(app, None, Some(*side));
         }
     }
     let square_on = faces.iter().filter(|f| f.text_axes.is_some()).count() == 1;
@@ -255,7 +353,7 @@ mod tests {
             for view in [StandardView::Front, StandardView::Back, StandardView::Top, StandardView::Bottom, StandardView::Left, StandardView::Right] {
                 let mut cam = Camera { up, ..Default::default() };
                 cam.set_view(view);
-                for facet in facets(&cam, Pos2::ZERO, HALF) {
+                for facet in facets(&cam, Pos2::ZERO, HALF, false) {
                     let axes = [facet.direction.x, facet.direction.y, facet.direction.z].into_iter().filter(|v| *v != 0.0).count();
                     assert!(axes == 1 || axes == 3, "cube edges must not be independent targets: {}", facet.label);
                     if !directions.contains(&facet.direction) {
@@ -279,7 +377,7 @@ mod tests {
             let camera = h.app.cam;
             let outer = crate::scenario::rect_of("axis_view:outer").unwrap();
             let half = HALF * f64::from(outer.width() / DESIGN_SIZE);
-            let faces = facets(&camera, outer.center(), half);
+            let faces = facets(&camera, outer.center(), half, false);
             assert!(crate::scenario::handle_at("navigation_cube:front_right").is_none());
             assert!(crate::scenario::handle_at("navigation_cube:top_front").is_none());
             for direction in [Vec3::X, -Vec3::X, Vec3::Z, -Vec3::Z] {
@@ -337,7 +435,7 @@ mod tests {
     #[test]
     fn hovered_face_and_corner_have_a_pale_blue_opaque_fill_in_both_themes() {
         let ctx = crate::fonts::test_context();
-        let faces = facets(&Camera::default(), pos2(100.0, 100.0), HALF);
+        let faces = facets(&Camera::default(), pos2(100.0, 100.0), HALF, false);
         for t in [Tokens::light(), Tokens::dark()] {
             assert_ne!(t.navigation_cube(false).cube_face, t.cube_face);
             for name in ["FRONT", "RIGHT", "TOP · FRONT · RIGHT"] {
@@ -368,7 +466,7 @@ mod tests {
                 let mut cam = Camera { up, ..Default::default() };
                 cam.set_view(view);
                 let centre = pos2(100.0, 100.0);
-                let faces = facets(&cam, centre, HALF);
+                let faces = facets(&cam, centre, HALF, false);
                 assert_eq!(faces.len(), 9, "one square face partitioned into nine coplanar picking regions");
                 let bounds = Rect::from_points(&faces.iter().flat_map(|f| f.points.iter().copied()).collect::<Vec<_>>());
                 let expected = Rect::from_center_size(centre, vec2(80.0, 80.0));
@@ -413,7 +511,7 @@ mod tests {
                 cam.set_view(view);
                 for roll in [0.0, 0.7, std::f64::consts::FRAC_PI_2] {
                     cam.roll = roll;
-                    let faces = facets(&cam, Pos2::ZERO, HALF);
+                    let faces = facets(&cam, Pos2::ZERO, HALF, false);
                     assert!(!faces.is_empty());
                     for (i, face) in faces.iter().enumerate() {
                         assert_eq!(hit(&faces, face.centre), Some(i), "{up:?} {view:?} {roll} {}", face.label);
@@ -428,7 +526,7 @@ mod tests {
     fn face_labels_use_normalized_font_atlas_coordinates() {
         let ctx = crate::fonts::test_context();
         let output = paint_frame(&ctx, |ui| {
-            let faces = facets(&Camera::default(), pos2(100.0, 100.0), HALF);
+            let faces = facets(&Camera::default(), pos2(100.0, 100.0), HALF, false);
             for face in &faces {
                 face_text(ui.painter(), face, Tokens::light().cube_text, Tokens::get().font_heading);
             }
@@ -450,7 +548,7 @@ mod tests {
         let output = paint_frame(&ctx, |ui| {
             let mut cam = Camera::default();
             cam.set_view(StandardView::Top);
-            let faces = facets(&cam, pos2(100.0, 100.0), HALF);
+            let faces = facets(&cam, pos2(100.0, 100.0), HALF, false);
             let face = faces.iter().find(|f| f.label == "TOP" && f.text_axes.is_some()).unwrap();
             let galley = ui.painter().layout_no_wrap(face.label.clone(), FontId::proportional(14.0), Tokens::light().cube_text);
             let (index, vertex) = galley.rows.first().unwrap().visuals.mesh.vertices.iter().enumerate().find(|(_, v)| v.uv.y > 1.0).unwrap();
@@ -480,7 +578,7 @@ mod tests {
                 to.set_view(view);
                 for step in 0..=60 {
                     let cam = Camera::interpolate(&from, &to, f64::from(step) / 60.0);
-                    let faces = facets(&cam, pos2(100.0, 100.0), HALF);
+                    let faces = facets(&cam, pos2(100.0, 100.0), HALF, false);
                     let bounds = Rect::from_points(&faces.iter().flat_map(|f| f.points.iter().copied()).collect::<Vec<_>>());
                     let output = paint_frame(&ctx, |ui| {
                         paint_cube(ui.painter(), &faces, Some(0), Tokens::light(), false, 1.0);
@@ -600,3 +698,7 @@ mod tests {
         assert!(h.app.session.undo.is_empty());
     }
 }
+
+#[cfg(test)]
+#[path = "navigation_cube_profile_tests.rs"]
+mod profile_tests;

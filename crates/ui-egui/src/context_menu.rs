@@ -59,6 +59,8 @@ pub enum Target {
     Origin,
     /// Document Settings › Units.
     Units,
+    /// The view cube (a profile option): Home and the projection.
+    ViewCube,
     /// An assembly joint.
     Joint {
         id: u64,
@@ -394,6 +396,14 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
             })
             .collect(),
         Target::NamedView { name } => crate::browser::view_items(app, name),
+        Target::ViewCube => {
+            let current = |on: bool| if on { "current" } else { "" };
+            vec![
+                act("ui.viewcube.home", "Go Home", "home"),
+                act("ui.viewcube.orthographic", "Orthographic", "camera").key(current(!app.ui.perspective)),
+                act("ui.viewcube.perspective", "Perspective", "perspective").key(current(app.ui.perspective)),
+            ]
+        }
     };
     // Several items of the folder selected: they can be grouped.
     if let Some(p) = crate::browser::selection_group(app, target) {
@@ -1203,7 +1213,9 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.editSection" => crate::dialogs::edit_section(app),
         "ui.sectionVisible" => crate::browser::set_section_shown(app, p.get("visible").and_then(Value::as_bool).unwrap_or(true)),
         "ui.fit" => app.animate_view("fit"),
-        "ui.home" => app.animate_view("home"),
+        "ui.home" | "ui.viewcube.home" => app.animate_view("home"),
+        "ui.viewcube.orthographic" => app.ui.perspective = false,
+        "ui.viewcube.perspective" => app.ui.perspective = true,
         // One command for the whole selection: all fixed unless all already are.
         "ui.fix" => drop(app.run("sketch.constraint.fix", json!({ "entities": strs(&p, "entities") }))),
         "ui.editSketch" => {
