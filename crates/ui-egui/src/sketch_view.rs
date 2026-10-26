@@ -37,6 +37,7 @@ pub(crate) fn tick(app: &mut SolveApp, busy: bool) {
             // that already landed (no animation) is not it yet.
             // While busy the settled view predates the gesture: take the camera (where a look-at
             // that just started is moving from).
+            // `anim.from` is right only because the running animation is the sketch's look-at.
             let current = app.cam_anim.as_ref().map_or(app.cam, |anim| anim.from);
             let before = if busy { current } else { crate::view_history::settled(app).unwrap_or(app.cam) };
             app.sketch_view.return_to = restore.then_some(before);
