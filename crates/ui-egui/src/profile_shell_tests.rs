@@ -394,3 +394,41 @@ fn collapsed_panels_and_the_customize_note_use_profile_labels() {
     let note = crate::i18n::format("toolbar.customize_note", &[("tab", "3D Model")]);
     assert!(h.widget(&note).is_some(), "{note}");
 }
+
+#[test]
+fn tci_dark_derives_its_unmeasured_keys_from_the_measured_base() {
+    use crate::theme::contrast_ratio;
+    let f = crate::theme_files::find("tci-dark", &[]).expect("tci-dark is built in");
+    let t = crate::theme_files::resolve(f);
+    let lum = |c: egui::Color32| contrast_ratio(c, egui::Color32::BLACK);
+    assert!(lum(t.cube_hover) > lum(t.cube_face), "hovering a cube face brightens it: {:?} vs {:?}", t.cube_hover, t.cube_face);
+    let ink = egui::Color32::from_rgb(0xf5, 0xf5, 0xf5);
+    for (key, color) in [
+        ("text", t.text),
+        ("icon", t.icon),
+        ("app_bar_text", t.app_bar_text),
+        ("cube_text", t.cube_text),
+        ("dialog_label", t.dialog_label),
+        ("selected_ink", t.selected_ink),
+        ("dimension", t.dimension),
+        ("sketch_point", t.sketch_point),
+        ("form_ink", t.form_ink),
+    ] {
+        assert_eq!(color, ink, "{key} is the measured ink");
+    }
+    // The shipped file, retired keys included: its app-bar icon ink is the measured ink, and no
+    // graphite ink survives in its colours at any alpha.
+    let raw: serde_json::Value = serde_json::from_str(include_str!("../../../assets/styles/ui/themes/tci-dark.json")).unwrap();
+    assert_eq!(raw["colors"]["app_bar_icon"][0], json!("#f5f5f5"));
+    let text = raw["colors"].to_string();
+    assert!(!text.contains("#e0e2e5"), "a graphite ink is left: {text}");
+    // The app bar's hovers are the measured ink over the bar, so hover brightens it.
+    for key in ["app_bar_hover", "app_bar_hover_button", "app_bar_hover_strong", "app_bar_hover_subtle"] {
+        assert!(f.colors[key].as_str().unwrap().starts_with("#f5f5f5"), "{key} is the ink at an alpha");
+    }
+    // The selection tints are the measured accent over the measured hover; ink stays readable.
+    assert_eq!(f.colors["accent_soft"], json!("#456a84"));
+    assert_eq!(f.colors["selected_bg"], json!("#437290"));
+    assert!(contrast_ratio(t.selected_ink, t.selected_bg) >= 4.5);
+    assert!(contrast_ratio(t.selected_ink, t.accent_soft) >= 4.5);
+}
