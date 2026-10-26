@@ -1,7 +1,7 @@
 //! A ribbon panel's face: its large buttons and, as Inventor draws them, its small ones (a 16 px
 //! icon and a one-line label) stacked three high in columns between them.
 
-use egui::{Color32, FontId};
+use egui::FontId;
 use solidcraft_engine::CommandSpec;
 
 /// Small buttons in a column.
@@ -34,10 +34,10 @@ pub(crate) fn face_items<'a>(shown: &[&'a CommandSpec], small: impl Fn(&str) -> 
 
 /// A small column's width: 6 + 16 (icon) + 4 + its widest label + 8, at least 54.
 pub(crate) fn column_width(painter: &egui::Painter, labels: &[&str]) -> f32 {
-    let font = crate::theme::Tokens::get().font_button;
+    let t = crate::theme::Tokens::get();
     let widest = labels
         .iter()
-        .map(|label| painter.layout_no_wrap((*label).to_owned(), FontId::proportional(font), Color32::WHITE).size().x)
+        .map(|label| painter.layout_no_wrap((*label).to_owned(), FontId::proportional(t.font_button), t.text).size().x)
         .fold(0.0_f32, f32::max);
     (6.0 + 16.0 + 4.0 + widest + 8.0).max(54.0)
 }
