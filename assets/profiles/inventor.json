@@ -15,6 +15,7 @@
     "status_bar": true,
     "show_panels_menu": true,
     "sectioned_extrude": true,
+    "plane_drag": true,
     "marking_menu": {
       "face":   {"ring": ["ui.lookAt", "solid.extrude", "ui.selectOther", "", "sketch.create", "construct.plane.offset", "edit.undo", "inspect.measure"],
                  "overflow": ["ui.repeat", "-", "ui.previousView", "ui.home", "-", "ui.properties"],

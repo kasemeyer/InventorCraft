@@ -37,6 +37,9 @@ pub struct Workflow {
     pub sectioned_extrude: bool,
     /// The ribbon's own menu offers Show Panels (the current tab's panels to show or hide).
     pub show_panels_menu: bool,
+    /// Offset Plane's preview plane is a drag handle (a press on it pulls the plane along its
+    /// normal, as the arrow does), and dragging writes the distance in the design unit.
+    pub plane_drag: bool,
 }
 
 impl Default for Workflow {
@@ -55,6 +58,7 @@ impl Default for Workflow {
             status_bar: false,
             sectioned_extrude: false,
             show_panels_menu: false,
+            plane_drag: false,
         }
     }
 }

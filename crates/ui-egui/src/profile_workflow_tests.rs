@@ -46,8 +46,9 @@ fn solidcraft_workflow_is_upstream() {
         w.status_bar,
         w.sectioned_extrude,
         w.show_panels_menu,
+        w.plane_drag,
     ];
-    assert_eq!(others, [false; 7]);
+    assert_eq!(others, [false; 8]);
 }
 
 #[test]
@@ -62,8 +63,9 @@ fn inventor_turns_the_workflow_on() {
         w.status_bar,
         w.sectioned_extrude,
         w.show_panels_menu,
+        w.plane_drag,
     ];
-    assert_eq!(on, [true; 7]);
+    assert_eq!(on, [true; 8]);
     assert!(!w.escape_twice_finishes_sketch);
     assert!(!w.sketch_palette);
     assert_eq!(w.inch_length_decimals, Some(3));
