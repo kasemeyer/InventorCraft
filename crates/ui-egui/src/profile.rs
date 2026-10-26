@@ -687,6 +687,8 @@ pub fn choose(app: &mut SolveApp, id: &str) -> Result<(), String> {
         return Err(format!("no interface profile `{id}` ({})", ids.join(", ")));
     };
     app.preferences.ui_profile = profile.id.clone();
+    // A typed alias belongs to the profile it was typed under.
+    crate::alias_keys::cancel(app);
     let d = &profile.defaults;
     if let Some(nav) = &d.nav {
         app.preferences.nav = nav.clone();

@@ -385,10 +385,21 @@ pub fn press(app: &mut SolveApp, key: &str, repeat: bool) {
             }
             return;
         }
-        app.start(app.preferences.sketch_variants.resolve(id));
+        start_shortcut(app, app.preferences.sketch_variants.resolve(id), false);
     } else if let Some(id) = sketch_tool_for(app, key) {
         // A shortcut starts the family's remembered variant, as it does inside a sketch.
-        start_sketch_tool(app, app.preferences.sketch_variants.resolve(id));
+        start_shortcut(app, app.preferences.sketch_variants.resolve(id), true);
+    }
+}
+
+/// Start the command a shortcut or typed alias names, exactly: with `open_sketch_first`, in a
+/// new sketch (`start_sketch_tool`), else at once. Shared by `press` and `alias_keys::fire` so
+/// the two paths cannot drift apart; each caller decides the variant itself.
+pub(crate) fn start_shortcut(app: &mut SolveApp, id: &'static str, open_sketch_first: bool) {
+    if open_sketch_first {
+        start_sketch_tool(app, id);
+    } else {
+        app.start(id);
     }
 }
 

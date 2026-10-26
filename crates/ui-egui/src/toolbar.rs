@@ -2084,6 +2084,12 @@ pub(crate) fn selection_filter(app: &mut SolveApp, ui: &mut egui::Ui) {
 /// Two Esc presses within this many seconds finish the open sketch.
 pub const ESCAPE_TWICE_S: f64 = 0.4;
 
+/// Something other than the design has the keyboard: a popup, a focused widget (a text field),
+/// the inline dimension value editor or the Save Mesh popup.
+fn keyboard_taken(ctx: &egui::Context) -> bool {
+    egui::Popup::is_any_open(ctx) || ctx.egui_wants_keyboard_input() || crate::dim_view::editing() || crate::dialogs_save_mesh::popup_open(ctx)
+}
+
 /// Global keyboard shortcuts (when no text field has focus).
 pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
     if design_shown(app) {
@@ -2091,19 +2097,25 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
     } else {
         app.viewport.key_hold = None;
     }
+    let file_menu_id = egui::Id::new("sc_file_menu");
+    let file_open = !app.native_file_menu && ctx.data(|d| d.get_temp::<bool>(file_menu_id).unwrap_or(false));
+    let area_open = file_open || crate::quick_access::select_open(ctx);
+    // A typed alias waits only while the design has the keyboard: hidden behind Home, loading
+    // a file, recording a shortcut, or with File, a text field, popup or value editor taking
+    // the keys, it is dropped rather than run into whatever has the keyboard (Ruling C).
+    let now = ctx.input(|i| i.time);
+    if !design_shown(app) || app.file_load.busy() || crate::keymap::capturing(app) || area_open || keyboard_taken(ctx) {
+        crate::alias_keys::cancel(app);
+    } else {
+        crate::alias_keys::tick(app, now);
+    }
     if app.file_load.busy() {
         return;
-    }
-    let now = ctx.input(|i| i.time);
-    if design_shown(app) {
-        crate::alias_keys::tick(app, now);
     }
     // File and the Quick Access Select drop-down are custom Areas, so they must claim Escape
     // before the underlying editors and sketch shortcuts. Clear raw events too: egui may replay
     // them on a layout pass.
-    let file_menu_id = egui::Id::new("sc_file_menu");
-    let file_open = !app.native_file_menu && ctx.data(|d| d.get_temp::<bool>(file_menu_id).unwrap_or(false));
-    if (file_open || crate::quick_access::select_open(ctx)) && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+    if area_open && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
         ctx.data_mut(|d| d.insert_temp(file_menu_id, false));
         crate::quick_access::close_select(ctx);
         egui::Popup::close_all(ctx);
@@ -2128,7 +2140,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
     }
     // A dimension value that is taking the keyboard: letters belong to it (a parameter name
     // starting with L or D), even on the frame before its field holds the focus.
-    if egui::Popup::is_any_open(ctx) || ctx.egui_wants_keyboard_input() || crate::dim_view::editing() || crate::dialogs_save_mesh::popup_open(ctx) {
+    if keyboard_taken(ctx) {
         return;
     }
     let (keys, mods) = ctx.input(|i| {
@@ -2151,6 +2163,10 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
         // Only Esc pressed twice in a row finishes a sketch: any other key in between resets it.
         if k != Key::Escape {
             app.last_escape = None;
+        }
+        // Any key a typed alias does not use drops it, rather than leaving it to run later.
+        if !crate::alias_keys::keeps(app, k, mods) {
+            crate::alias_keys::cancel(app);
         }
         if shown && crate::navigation::view_key(app, ctx, k, mods, repeat) {
             continue;
@@ -2244,7 +2260,8 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 let at = ctx.input(|i| i.pointer.latest_pos()).unwrap_or(ctx.content_rect().center());
                 crate::context_menu::rename_selection(app, at);
             }
-            Key::F6 => app.animate_view("fit"),
+            // Inventor's F6 is Home View (Ruling B); SolidCraft's is Fit.
+            Key::F6 => app.animate_view(if crate::profile::active(app).id == crate::profile::INVENTOR { "home" } else { "fit" }),
             Key::Delete | Key::Backspace => {
                 if !crate::timeline_left::delete_selected_folders(app) {
                     crate::viewport::delete_selection(app);

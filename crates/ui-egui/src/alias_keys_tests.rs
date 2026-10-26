@@ -155,3 +155,106 @@ fn a_held_letter_repeats_nothing() {
     assert!(h.app.dialog.is_none());
     assert_eq!(h.app.alias.typed, "S");
 }
+
+/// Ruling A: a typed alias starts exactly the tool it names, whatever variant was used last.
+#[test]
+fn rec_starts_the_two_point_rectangle_whatever_variant_was_last() {
+    let mut h = inventor(Part);
+    h.app.preferences.sketch_variants.remember("sketch.rectangle.center");
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    for k in [Key::R, Key::E, Key::C, Key::Enter] {
+        h.frame_with(key(k));
+    }
+    assert_eq!(h.app.alias.fired.as_deref(), Some("sketch.rectangle.two_point"));
+    assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some("sketch.rectangle.two_point"));
+}
+
+/// Ruling B: under Inventor F6 is Home View (the isometric view); SolidCraft keeps Fit.
+#[test]
+fn f6_is_home_view_under_inventor_and_fit_under_solidcraft() {
+    let mut iso = Harness::new().app.cam;
+    iso.set_view(solidcraft_engine::render::StandardView::Iso);
+    for (mut h, home) in [(inventor(Part), true), (Harness::new(), false)] {
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length":20,"width":20,"height":10})).unwrap();
+        h.frames(2);
+        h.app.cam.yaw = iso.yaw + 0.7;
+        h.app.cam.pitch = 0.1;
+        let (yaw, pitch) = (h.app.cam.yaw, h.app.cam.pitch);
+        h.frame_with(key(Key::F6));
+        h.settle();
+        let (want_yaw, want_pitch) = if home { (iso.yaw, iso.pitch) } else { (yaw, pitch) };
+        assert!(
+            (h.app.cam.yaw - want_yaw).abs() < 1e-4 && (h.app.cam.pitch - want_pitch).abs() < 1e-4,
+            "home {home}: {:?}",
+            (h.app.cam.yaw, h.app.cam.pitch)
+        );
+    }
+}
+
+/// Ruling C: a waiting alias is dropped, not run, once a text field has the keyboard.
+#[test]
+fn a_focused_text_field_drops_a_waiting_alias() {
+    let mut h = inventor(Part);
+    h.frame_with(key(Key::L));
+    assert_eq!(h.app.alias.typed, "L");
+    for _ in 0..60 {
+        h.ctx.memory_mut(|m| m.request_focus(egui::Id::new("a text field")));
+        h.frame();
+    }
+    assert!(h.app.alias.fired.is_none());
+    assert!(h.app.alias.typed.is_empty());
+    assert!(h.app.dialog.is_none());
+}
+
+#[test]
+fn a_home_round_trip_drops_a_waiting_alias() {
+    let mut h = inventor(Part);
+    h.app.home.open = false;
+    h.frame_with(key(Key::L));
+    assert_eq!(h.app.alias.typed, "L");
+    h.app.home.open = true;
+    h.frames(2);
+    h.app.home.open = false;
+    h.frames(60);
+    assert!(h.app.alias.fired.is_none());
+    assert!(h.app.alias.typed.is_empty());
+    assert!(h.app.dialog.is_none());
+}
+
+#[test]
+fn a_document_switch_drops_a_waiting_alias() {
+    let mut h = inventor(Part);
+    h.app.home.open = false;
+    h.frame_with(key(Key::L));
+    assert_eq!(h.app.alias.typed, "L");
+    crate::documents::new_tab(&mut h.app);
+    assert_eq!(h.app.docs.active, 1, "a second tab is active");
+    h.frames(60);
+    assert!(h.app.alias.fired.is_none());
+    assert!(h.app.alias.typed.is_empty());
+    assert!(h.app.dialog.is_none());
+}
+
+#[test]
+fn a_profile_switch_drops_a_waiting_alias() {
+    let mut h = inventor(Part);
+    h.frame_with(key(Key::L));
+    assert_eq!(h.app.alias.typed, "L");
+    crate::profile::choose(&mut h.app, crate::profile::SOLIDCRAFT).unwrap();
+    assert!(h.app.alias.typed.is_empty());
+}
+
+/// A key the alias does not use (an arrow, Delete, an F-key) drops it rather than leaving it
+/// to run later.
+#[test]
+fn another_key_drops_a_waiting_alias() {
+    let mut h = inventor(Part);
+    h.frame_with(key(Key::L));
+    assert_eq!(h.app.alias.typed, "L");
+    h.frame_with(key(Key::Delete));
+    assert!(h.app.alias.typed.is_empty());
+    h.frames(60);
+    assert!(h.app.alias.fired.is_none());
+    assert!(h.app.dialog.is_none());
+}

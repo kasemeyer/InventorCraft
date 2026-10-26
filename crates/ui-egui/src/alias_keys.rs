@@ -6,7 +6,8 @@
 //!
 //! A typed alias that is no prefix of a longer live one runs at once. One that begins a longer
 //! one waits the profile's `alias_wait_ms` (Ruling 4) for the next letter; Enter or Space run it
-//! now, Escape drops it, Backspace takes back a letter.
+//! now, Escape drops it, Backspace takes back a letter. Any other key drops it too, as do the
+//! design losing the keyboard and a profile or document switch (`cancel`).
 
 use crate::SolveApp;
 use crate::profile::{AliasScope, LetterKeys};
@@ -121,6 +122,18 @@ pub fn owns(app: &SolveApp, key: egui::Key, mods: egui::Modifiers) -> bool {
         && alias_char(key).is_some_and(|c| c.is_ascii_uppercase() || !app.alias.typed.is_empty())
 }
 
+/// Whether a key press leaves a typed alias waiting: a key the buffer owns, or Enter, Space,
+/// Escape or Backspace (which act on it). Any other key drops it (`cancel`).
+pub fn keeps(app: &SolveApp, key: egui::Key, mods: egui::Modifiers) -> bool {
+    owns(app, key, mods) || (plain(mods) && matches!(key, egui::Key::Enter | egui::Key::Space | egui::Key::Escape | egui::Key::Backspace))
+}
+
+/// Drop a typed alias without running it, and with it the hint: the design lost the keyboard,
+/// or the profile or the document changed (Ruling C).
+pub fn cancel(app: &mut SolveApp) {
+    app.alias.typed.clear();
+}
+
 /// Feed one key press; true when it was consumed. False when the profile's `letter_keys` is
 /// `Registry`.
 pub fn feed(app: &mut SolveApp, key: egui::Key, mods: egui::Modifiers, now: f64) -> bool {
@@ -142,6 +155,10 @@ pub fn feed(app: &mut SolveApp, key: egui::Key, mods: egui::Modifiers, now: f64)
     if app.alias.typed.is_empty() {
         return false;
     }
+    if !keeps(app, key, mods) {
+        cancel(app);
+        return false;
+    }
     match key {
         egui::Key::Enter | egui::Key::Space => fire_exact(app),
         egui::Key::Escape => app.alias.typed.clear(),
@@ -150,7 +167,7 @@ pub fn feed(app: &mut SolveApp, key: egui::Key, mods: egui::Modifiers, now: f64)
             // The shorter alias waits afresh rather than running on the next frame.
             app.alias.last_key_at = now;
         }
-        _ => return false,
+        _ => {}
     }
     true
 }
@@ -187,13 +204,11 @@ fn fire(app: &mut SolveApp, id: &str, scope: AliasScope) {
         _ => {
             // Ruling 9: the registry's own `&'static str`.
             let Some(id) = solidcraft_engine::find_command(id).map(|c| c.id) else { return };
-            // A shortcut starts the family's remembered variant, as `keymap::press` does.
-            let id = app.preferences.sketch_variants.resolve(id);
-            if scope == AliasScope::SketchWrapper && app.session.active_sketch.is_none() {
-                crate::keymap::start_sketch_tool(app, id);
-            } else {
-                app.start(id);
-            }
+            // Ruling A: an alias starts exactly the tool it names (REC is the two-point
+            // rectangle whatever variant was used last); variant memory belongs to the single-key
+            // shortcuts of `keymap::press`.
+            let open_sketch_first = scope == AliasScope::SketchWrapper && app.session.active_sketch.is_none();
+            crate::keymap::start_shortcut(app, id, open_sketch_first);
         }
     }
 }
