@@ -52,6 +52,11 @@ impl TimelineKind {
     }
 }
 
+/// The timeline panel's history is drawn: shown, and the profile keeps the history out of the browser.
+pub(crate) fn shown(app: &SolveApp) -> bool {
+    app.ui.show_timeline && crate::profile::active(app).defaults.history != Some(crate::profile::History::Browser)
+}
+
 pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
     match k {
         FeatureKind::Sketch { .. } => "sketch",

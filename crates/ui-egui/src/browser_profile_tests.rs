@@ -42,7 +42,8 @@ fn inventor_part_root_is_flat_history_between_origin_and_end_of_part() {
     let labels = labels();
     assert_eq!(
         labels[1..],
-        ["Representations", "Solid Bodies", "Origin", "Profile", name.as_str(), "End of Part", "Document Settings"],
+        // The extrusion consumes Profile, which folds (closed) under it.
+        ["Representations", "Solid Bodies", "Origin", name.as_str(), "End of Part", "Document Settings"],
         "{labels:?}"
     );
     for folder in ["fold:Sketches", "fold:Features", "fold:Named Views", "fold:Bodies"] {
@@ -96,14 +97,14 @@ fn solidcraft_root_keeps_its_folders() {
 #[test]
 fn root_lists_parse_always_flags_and_reject_duplicates() {
     let inventor = crate::profile::get("inventor").unwrap();
-    assert_eq!(inventor.browser.part_root, [NamedViews, Bodies, Origin, History, EndOfPart, Canvases, Analyses, Components, DocSettings]);
+    assert_eq!(inventor.browser.part_root, [NamedViews, Bodies, Origin, History, Canvases, Analyses, Components, DocSettings]);
     assert_eq!(inventor.browser.assembly_always, [Joints]);
     assert!(inventor.browser.part_always.is_empty());
     assert!(crate::profile::get("solidcraft").unwrap().browser.assembly_always.is_empty());
     let mut twice = inventor.clone();
     twice.browser.part_root.push(Origin);
     let problems = crate::profile::validate(&twice);
-    assert_eq!(problems, ["browser.part_root: Origin appears twice (entry 9)"], "{problems:?}");
+    assert_eq!(problems, ["browser.part_root: Origin appears twice (entry 8)"], "{problems:?}");
 }
 
 #[test]

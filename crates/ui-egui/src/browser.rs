@@ -19,6 +19,7 @@ mod occurrence_gizmo_tests;
 mod model;
 
 mod features;
+pub(crate) mod history;
 
 pub(crate) fn reveal_feature(app: &mut SolveApp, id: u64, body: &str) {
     features::reveal(app, id, body);
@@ -794,7 +795,7 @@ pub fn browser(app: &mut SolveApp, ui: &mut egui::Ui) {
         Container::new(ui.ctx(), Surface::Panel).joined(crate::ui_kit::DockEdges { left: true, top: true, bottom: stacked, ..Default::default() });
     let gap = container.gap();
     let width = browser_width(app.preferences.browser_width);
-    let vertical = app.ui.show_timeline && app.preferences.timeline_left;
+    let vertical = crate::timeline::shown(app) && app.preferences.timeline_left;
     let mut available = available;
     if !stacked {
         available.min.x += crate::agent_chat::left_inset(app, available);
@@ -896,7 +897,7 @@ fn browser_contents(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions, c
             (app.preferences.timeline_left_browser_collapsed && app.shell.history_folding.is_none_or(|p| p[0] >= 1.0))
                 || ui.available_height() <= t.space_3
         } else {
-            app.tree.panel_collapsed && !(app.ui.show_timeline && app.preferences.timeline_left)
+            app.tree.panel_collapsed && !(crate::timeline::shown(app) && app.preferences.timeline_left)
         })
     {
         return;
@@ -920,7 +921,7 @@ fn browser_header(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), HEADER_H), Sense::hover());
     let response = ui.interact(rect, ui.id().with("browser_header"), if collapsible { Sense::click() } else { Sense::hover() });
     crate::scenario::publish_target("browser:header", rect);
-    let vertical = app.ui.show_timeline && app.preferences.timeline_left;
+    let vertical = crate::timeline::shown(app) && app.preferences.timeline_left;
     let stacked = crate::timeline_left::stacked(app);
     let collapsed = collapsible && if stacked { app.preferences.timeline_left_browser_collapsed } else { !vertical && app.tree.panel_collapsed };
     if vertical {
@@ -1162,8 +1163,7 @@ fn component_rows(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, depth: usize, 
                 Features => features::rows(app, ui, id, &[], d, acts),
                 Joints => crate::dialogs_assembly::browser_joints(app, ui, d, &folder_label(app, "joints"), root_always(app, *node)),
                 Components => component_children(app, ui, id, d, acts),
-                History => history_rows(app, ui, d, acts),
-                EndOfPart => end_of_part_row(app, ui, d),
+                History => history::rows(app, ui, d, acts),
             }
         }
         return;
@@ -1190,41 +1190,6 @@ fn root_always(app: &SolveApp, node: crate::profile::RootNode) -> bool {
         _ => &browser.part_always,
     };
     always.contains(&node)
-}
-
-/// The design's sketches and features flat at the root, in timeline order, without Sketches or
-/// Features folders: each sketch is drawn as its Sketches-folder row, each work feature as its
-/// Construction-folder row (its eye, selected as a plane), each other feature as its
-/// Features-folder row.
-fn history_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut Actions) {
-    let sketches = entries(app, 0, "sketches");
-    let sketch_keys: Vec<String> = sketches.iter().map(|e| e.key.clone()).collect();
-    let work = entries(app, 0, "construction");
-    let work_keys: Vec<String> = work.iter().map(|e| e.key.clone()).collect();
-    let timeline: Vec<(usize, u64, bool)> = app
-        .session
-        .doc
-        .features
-        .iter()
-        .enumerate()
-        .filter(|(_, f)| f.component == 0)
-        .map(|(i, f)| (i, f.id, matches!(f.kind, FeatureKind::Sketch { .. })))
-        .collect();
-    for (index, id, sketch) in timeline {
-        if let Some(e) = work.iter().find(|e| !sketch && e.key == id.to_string()) {
-            entry_row(app, ui, 0, None, "construction", e, depth, None, &work_keys, false, acts);
-        } else if !sketch {
-            features::row(app, ui, 0, &[], "c0", index, depth, acts);
-        } else if let Some(e) = sketches.iter().find(|e| e.key == id.to_string()) {
-            entry_row(app, ui, 0, None, "sketches", e, depth, None, &sketch_keys, false, acts);
-        }
-    }
-}
-
-/// The End of Part row: a label only (it neither selects, folds nor opens a menu).
-fn end_of_part_row(app: &SolveApp, ui: &mut egui::Ui, depth: usize) {
-    let label = folder_label(app, "end_of_part");
-    draw_row(ui, ui.id().with("end_of_part"), &Row { depth, icon: "error", label: &label, ..Default::default() });
 }
 
 /// The design's top-level browser nodes, in the active profile's order for the document's kind.
@@ -1963,7 +1928,6 @@ pub(crate) fn folder_label(app: &SolveApp, folder: &str) -> String {
         "sketches" => "Sketches",
         "joints" => "Joints",
         "named_views" => "Named Views",
-        "end_of_part" => "End of Part",
         _ => "Construction",
     }
     .to_string()
@@ -2552,3 +2516,7 @@ mod card_tests;
 #[cfg(test)]
 #[path = "browser_profile_tests.rs"]
 mod browser_profile_tests;
+
+#[cfg(test)]
+#[path = "browser_history_tests.rs"]
+mod browser_history_tests;

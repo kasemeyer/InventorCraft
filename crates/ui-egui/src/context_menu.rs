@@ -84,6 +84,8 @@ pub enum Target {
     },
     /// The Section Analysis in the browser's Analysis folder.
     Section,
+    /// The End of Part marker in a profile's history browser.
+    EndOfPart,
     /// A component's Bodies, Sketches or Construction folder, under the design (`scope` `c0`)
     /// or a placement (`o:<path>`).
     Folder {
@@ -355,17 +357,8 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::Viewport => crate::marking_menu::overflow(app).unwrap_or_else(|| viewport_items(app)),
         Target::Body { name } => body_items(app, std::slice::from_ref(name), true),
         Target::Sketch { id } => sketch_items(app, *id),
-        Target::Feature { id } => vec![
-            act("ui.editFeature", "Edit Feature", "edit").with(json!({"feature":id})).on(app.session.doc.feature(*id).is_some()),
-            act("ui.rename", "Rename", "rename").with(json!({"feature":id})).on(app.session.doc.feature(*id).is_some()),
-            act("ui.delete", "Delete", "delete").key("Del").with(json!({"items": [{"type": "feature", "id": id}]})).on(app
-                .session
-                .doc
-                .feature(*id)
-                .is_some()),
-            Item::sep(),
-            act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({"feature":id})).on(app.session.doc.feature(*id).is_some()),
-        ],
+        Target::Feature { id } => feature_items(app, *id),
+        Target::EndOfPart => vec![act("ui.eopTop", "Move End of Part to Top", "rollback"), act("ui.eopEnd", "Move End of Part to End", "rollback")],
         Target::Plane { id } => plane_items(app, *id),
         Target::OriginPlane { name } => origin_plane_items(app, name),
         Target::Component { id } => component_items(app, *id),
@@ -491,6 +484,28 @@ fn picked_face_feature(app: &SolveApp) -> Option<u64> {
         return None;
     }
     app.session.doc.feature(id).filter(|f| f.component == app.session.doc.model_body_component(body)).map(|f| f.id)
+}
+
+/// A feature row's menu. When the browser is the history (profile data), Edit Sketch opens the
+/// sketch the feature consumes (above Edit Feature, as the Inventor capture lists them) and Find
+/// in Timeline is left out, there being no timeline panel; otherwise the menu is upstream's.
+fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
+    let exists = app.session.doc.feature(id).is_some();
+    let history = crate::profile::active(app).defaults.history == Some(crate::profile::History::Browser);
+    let mut v = Vec::new();
+    if history && let (_, Some(s)) = feature_and_sketch(app, Some(id)) {
+        v.push(act("ui.editSketch", "Edit Sketch", "sketch").with(json!({"sketch": s})));
+    }
+    v.extend([
+        act("ui.editFeature", "Edit Feature", "edit").with(json!({"feature":id})).on(exists),
+        act("ui.rename", "Rename", "rename").with(json!({"feature":id})).on(exists),
+        act("ui.delete", "Delete", "delete").key("Del").with(json!({"items": [{"type": "feature", "id": id}]})).on(exists),
+    ]);
+    if !history {
+        v.push(Item::sep());
+        v.push(act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({"feature":id})).on(exists));
+    }
+    v
 }
 
 /// A feature and its profile sketch, if it has one.
@@ -1264,6 +1279,8 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.viewcube.perspective" => app.ui.perspective = true,
         // One command for the whole selection: all fixed unless all already are.
         "ui.fix" => drop(app.run("sketch.constraint.fix", json!({ "entities": strs(&p, "entities") }))),
+        "ui.eopTop" => crate::browser::history::move_end_of_part(app, Some(0)),
+        "ui.eopEnd" => crate::browser::history::move_end_of_part(app, None),
         "ui.editSketch" => {
             if let Some(id) = id_of(&p, "sketch") {
                 app.edit_sketch(id);

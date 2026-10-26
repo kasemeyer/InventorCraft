@@ -120,8 +120,8 @@ pub(crate) fn covered_rects(app: &SolveApp) -> Vec<Rect> {
             rects.extend(app.agent_chat.panel_rect);
         }
     }
-    rects.extend(app.shell.history.filter(|_| app.ui.show_timeline));
-    if app.ui.show_timeline && app.preferences.timeline_left {
+    rects.extend(app.shell.history.filter(|_| crate::timeline::shown(app)));
+    if crate::timeline::shown(app) && app.preferences.timeline_left {
         rects.extend(app.shell.history.map(|card| crate::ui_kit::HistorySeam::new(card).pill));
     }
     rects.extend(app.shell.browser.filter(|_| app.ui.show_browser));
@@ -139,7 +139,7 @@ pub(crate) fn covered(app: &SolveApp, p: egui::Pos2) -> bool {
 /// the viewport is painted, so showing or hiding History takes effect in the same frame. History
 /// docked as the left sidebar sits beside the viewport, not below it, so it reserves nothing.
 pub(crate) fn viewport_bottom_inset(app: &SolveApp, viewport: Rect) -> f32 {
-    if app.ui.layout != LayoutMode::Floating || (app.ui.show_timeline && app.preferences.timeline_left) {
+    if app.ui.layout != LayoutMode::Floating || (crate::timeline::shown(app) && app.preferences.timeline_left) {
         return 0.0;
     }
     app.shell

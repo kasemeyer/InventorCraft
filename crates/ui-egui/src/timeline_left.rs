@@ -67,7 +67,7 @@ pub(crate) fn strip_width(app: &SolveApp) -> f32 {
 }
 
 pub(crate) fn stacked(app: &SolveApp) -> bool {
-    app.ui.show_timeline && app.preferences.timeline_left && app.preferences.timeline_under_browser
+    crate::timeline::shown(app) && app.preferences.timeline_left && app.preferences.timeline_under_browser
 }
 
 fn header_outer_height() -> f32 {

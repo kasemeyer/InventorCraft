@@ -414,10 +414,9 @@ pub enum RootNode {
     Features,
     Joints,
     Components,
-    /// The design's sketches and features flat at the root, in timeline order (no folders).
+    /// The design's history: features in order, each consumed sketch and work feature folded
+    /// under its consumer, and the End of Part marker (`browser::history`).
     History,
-    /// The End of Part row.
-    EndOfPart,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
@@ -777,6 +776,12 @@ pub fn validate(profile: &Profile) -> Vec<String> {
             out.push(format!("{what}: {node:?} appears twice (entry {i})"));
         }
     }
+    // The history draws End of Part under the profile's own label (no upstream fallback).
+    for (kind, root) in [("part", &profile.browser.part_root), ("assembly", &profile.browser.assembly_root)] {
+        if root.contains(&RootNode::History) && !profile.browser.folder_labels.contains_key("end_of_part") {
+            out.push(format!("{kind} browser: history needs folder_labels.end_of_part"));
+        }
+    }
     if profile.defaults.new_document == Some(DocumentKind::Drawing) {
         out.push("defaults.new_document: drawing is not offered; New makes a part or an assembly".into());
     }
@@ -859,8 +864,8 @@ fn apply_look(app: &mut SolveApp, d: &Defaults) {
         let (left, under) = match history {
             History::Bottom => (false, false),
             History::Left => (true, false),
-            // The browser is the history (Task 7 hides the panel); the timeline preferences stay
-            // "under the browser" until then.
+            // The browser is the history and the panel is hidden (`timeline::shown`); the
+            // timeline preferences stay "under the browser" for a profile switch.
             History::UnderBrowser | History::Browser => (true, true),
         };
         app.preferences.timeline_left = left;
