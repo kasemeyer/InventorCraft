@@ -42,6 +42,8 @@ pub struct Profile {
     pub function_keys: BTreeMap<String, String>,
     /// Draw the Quick Access Toolbar in the app bar (Task 4c, C2).
     pub quick_access: bool,
+    /// How a ribbon too narrow for its panels gives way.
+    pub ribbon_overflow: RibbonOverflow,
     /// Command id → compact English button text (resolved with `tr_label`).
     pub button_labels: BTreeMap<String, String>,
     pub browser: BrowserLayout,
@@ -228,6 +230,19 @@ impl Defaults {
     pub fn version(&self) -> u32 {
         self.version.unwrap_or(1)
     }
+}
+
+/// How a ribbon too narrow for its panels gives way.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RibbonOverflow {
+    /// Buttons narrow (labels wrap and truncate), then panels hand buttons to their drop-downs
+    /// one at a time, then the last panels go into the » menu (`toolbar::fit`).
+    #[default]
+    Buttons,
+    /// Buttons keep their widths (a small column is as wide as its widest label) and whole panels
+    /// collapse into one button, rightmost first (`toolbar::fit_whole`).
+    WholePanels,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
@@ -456,6 +471,7 @@ pub fn solidcraft() -> Profile {
         alias_wait_ms: DEFAULT_ALIAS_WAIT_MS,
         function_keys: BTreeMap::from([("F6".to_string(), "ui.view_fit".to_string())]),
         quick_access: false,
+        ribbon_overflow: RibbonOverflow::Buttons,
         button_labels: workspace::RIBBON_LABELS.iter().map(|(id, label)| (id.to_string(), label.to_string())).collect(),
         browser: BrowserLayout::default(),
         omitted: BTreeMap::new(),
@@ -485,6 +501,8 @@ struct ProfileJson {
     function_keys: Option<BTreeMap<String, String>>,
     #[serde(default)]
     quick_access: bool,
+    #[serde(default)]
+    ribbon_overflow: RibbonOverflow,
     #[serde(default)]
     button_labels: BTreeMap<String, String>,
     #[serde(default)]
@@ -631,6 +649,7 @@ pub fn parse(text: &str, base: &Profile) -> Result<Profile, String> {
         alias_wait_ms: json.alias_wait_ms.unwrap_or(DEFAULT_ALIAS_WAIT_MS),
         function_keys: json.function_keys.unwrap_or_else(|| base.function_keys.clone()),
         quick_access: json.quick_access,
+        ribbon_overflow: json.ribbon_overflow,
         button_labels: json.button_labels,
         browser: json.browser,
         omitted: json.omitted,

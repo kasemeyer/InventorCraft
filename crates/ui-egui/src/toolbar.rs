@@ -110,6 +110,9 @@ const BUTTON_MAX_WIDTH: f32 = 76.0;
 const BUTTON_LABEL_PADDING: f32 = 10.0;
 const SECTION_HEIGHT: f32 = 20.0;
 
+/// The widest a small-button column grows to fit its widest label, under whole-panel overflow.
+const COLUMN_MAX_WIDTH: f32 = 220.0;
+
 /// The » button's room at the end of the panels, kept only while some panel is in it.
 pub const MORE_ROOM: f32 = 40.0;
 
@@ -136,6 +139,35 @@ pub fn fit(panels: &[PanelSize], room: f32) -> Vec<Plan> {
         }
     }
     panels.iter().map(|_| Plan::more()).collect()
+}
+
+/// [`fit`] as Inventor gives way: no button narrows (a small column stays as wide as its widest
+/// label, so no label is truncated); whole panels collapse into one button each, rightmost first,
+/// and only when every panel that can collapse has, the last panels go into the » menu.
+pub fn fit_whole(panels: &[PanelSize], room: f32) -> Vec<Plan> {
+    let room = if room.is_finite() { room } else { 0.0 };
+    let mut plans: Vec<Plan> = panels.iter().map(Plan::full).collect();
+    for i in (0..plans.len()).rev() {
+        if used(&plans) <= room {
+            return plans;
+        }
+        if let Some(p) = plans.get_mut(i)
+            && p.width() > COLLAPSED_WIDTH
+        {
+            p.fit = Fit::Collapsed;
+            p.shown = 1;
+        }
+    }
+    for i in (0..plans.len()).rev() {
+        let more = if plans.iter().any(|p| p.fit == Fit::More) { MORE_ROOM } else { 0.0 };
+        if used(&plans) + more <= room {
+            return plans;
+        }
+        if let Some(p) = plans.get_mut(i) {
+            *p = Plan::more();
+        }
+    }
+    plans
 }
 
 /// The room plans take on the toolbar (each panel and its separator).
@@ -1219,6 +1251,9 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 (panel, cmds, shown, items)
             })
             .collect();
+        // Inventor's ribbon never narrows a button: whole panels collapse instead (profile data).
+        let whole = crate::profile::active(app).ribbon_overflow == crate::profile::RibbonOverflow::WholePanels;
+        let fitter: fn(&[PanelSize], f32) -> Vec<Plan> = if whole { fit_whole } else { fit };
         let sizes: Vec<PanelSize> = lists
             .iter()
             .map(|(panel, _, shown, items)| {
@@ -1229,14 +1264,21 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                             FaceItem::Large(c) => c,
                             FaceItem::Column(column) => {
                                 let labels: Vec<&str> = column.iter().map(|c| app.tr_label(crate::profile::button_label(app, c))).collect();
-                                return ButtonSize { width: column_width(&painter, &labels), min_width: 40.0 };
+                                let width = column_width(&painter, &labels);
+                                return if whole {
+                                    let width = width.min(COLUMN_MAX_WIDTH);
+                                    ButtonSize { width, min_width: width }
+                                } else {
+                                    ButtonSize { width, min_width: 40.0 }
+                                };
                             }
                         };
                         let family = crate::sketch_families::family(c.id)
                             .filter(|f| tab == "SKETCH" && *panel == "CREATE" && f.commands.first().copied() == Some(c.id));
                         let label = family.map_or_else(|| crate::profile::button_label(app, c), |f| f.label);
                         if labels {
-                            ButtonSize { width: ribbon_button_width(&painter, app.tr_label(label)), min_width: BUTTON_MIN_WIDTH }
+                            let width = ribbon_button_width(&painter, app.tr_label(label));
+                            ButtonSize { width, min_width: if whole { width } else { BUTTON_MIN_WIDTH } }
                         } else {
                             let width = if family.is_some() { 50.0 } else { 40.0 };
                             ButtonSize { width, min_width: width }
@@ -1260,14 +1302,14 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             } else if tab == "RENDER" {
                 // Personal pins remain uncapped: extra Image actions use the same
                 // trimming/menu policy rather than overflowing a fixed reservation.
-                fit(std::slice::from_ref(size), (right - 4.0 - px).clamp(0.0, 240.0)).pop()
+                fitter(std::slice::from_ref(size), (right - 4.0 - px).clamp(0.0, 240.0)).pop()
             } else {
                 None
             }
         });
         let finish_width = finish_plan.as_ref().map_or(0.0, |p| p.width().max(80.0));
         let normal_count = sizes.len().saturating_sub(usize::from(finish_plan.is_some()));
-        let mut plans = fit(sizes.get(..normal_count).unwrap_or_default(), right - 4.0 - px - finish_width);
+        let mut plans = fitter(sizes.get(..normal_count).unwrap_or_default(), right - 4.0 - px - finish_width);
         let finish_right = plans.iter().any(|p| p.fit == Fit::More);
         plans.extend(finish_plan);
         crate::scenario::publish_count("toolbar_collapsed", plans.iter().filter(|p| p.fit == Fit::Collapsed).count() as f64);
@@ -1276,6 +1318,9 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             "toolbar_trimmed",
             plans.iter().zip(&sizes).filter(|(p, s)| p.fit == Fit::Buttons && p.shown < s.buttons.len()).count() as f64,
         );
+        // Small-button labels cut short to fit their column (never, under whole-panel overflow).
+        let mut truncated_labels = 0_u32;
+        crate::scenario::publish_count("toolbar_truncated_labels", 0.0);
         for ((panel, cmds, shown, items), plan) in lists.into_iter().zip(plans) {
             let panel: &&str = &panel;
             if plan.fit == Fit::More {
@@ -1317,13 +1362,17 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 if fresp.hovered() && enabled_panel {
                     painter.rect_filled(br, t.radius_sm, t.hover);
                 }
+                // Under whole-panel overflow the button is Inventor's: the icon over the panel's
+                // name, as a large button draws its label.
+                let icon_centre = if whole && labels { pos2(br.center().x, br.top() + 16.0) } else { br.center() - vec2(0.0, 3.0) };
                 if let Some(c) = shown.first().or(cmds.first()) {
-                    icons::paint_icon(
-                        &painter,
-                        Rect::from_center_size(br.center() - vec2(0.0, 3.0), vec2(26.0, 26.0)),
-                        c.icon,
-                        f32::from(t.icon.a()) / 255.0,
-                    );
+                    icons::paint_icon(&painter, Rect::from_center_size(icon_centre, vec2(26.0, 26.0)), c.icon, f32::from(t.icon.a()) / 255.0);
+                }
+                if whole && labels {
+                    let name = crate::profile::panel_label(app, &tab, panel);
+                    let galley = ribbon_button_galley(&painter, &name, br.width() - BUTTON_LABEL_PADDING, t.text);
+                    painter.galley(pos2(br.center().x, br.top() + 32.0), galley, t.text);
+                    fresp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled_panel, &name));
                 }
                 dropdown_arrow(&painter, pos2(br.center().x, br.bottom() - 3.0), t.text_dim);
                 let tip = collapsed_tip(app, &tab, panel, shown.len().max(cmds.len()));
@@ -1362,6 +1411,10 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                             let mut job = egui::text::LayoutJob::simple_singleline(label.to_owned(), FontId::proportional(t.font_button), color);
                             job.wrap = egui::text::TextWrapping::truncate_at_width((rect.right() - 4.0 - text_left).max(0.0));
                             let galley = painter.layout_job(job);
+                            if galley.elided {
+                                truncated_labels += 1;
+                                crate::scenario::publish_count("toolbar_truncated_labels", f64::from(truncated_labels));
+                            }
                             painter.galley(pos2(text_left, rect.center().y - galley.size().y / 2.0), galley, color);
                             let name = app.tr_label(c.label).to_string();
                             resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled() && info.enabled, &name));

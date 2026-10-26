@@ -97,13 +97,70 @@ fn the_solidcraft_ribbon_draws_no_small_buttons() {
     }
 }
 
+/// The MODEL tab's panels on the toolbar, left to right.
+fn model_panels(app: &crate::SolveApp) -> Vec<&'static str> {
+    crate::toolbar_custom::panel_lists(app, "MODEL").into_iter().map(|(p, ..)| p).collect()
+}
+
 #[test]
-fn a_narrow_window_trims_small_columns_whole() {
-    let _h = on_model(inventor(Part), 1100.0);
-    let trimmed = count_of("toolbar_trimmed");
-    assert!(trimmed.is_some_and(|n| n > 0.0), "{trimmed:?}");
+fn a_narrow_inventor_ribbon_collapses_whole_panels_from_the_right() {
+    let h = on_model(inventor(Part), 1100.0);
+    let panels = model_panels(&h.app);
+    let last = *panels.last().unwrap();
+    assert!(count_of("toolbar_collapsed").is_some_and(|n| n > 0.0), "the tab does not fit at 1100 px");
+    let button = crate::scenario::handle_at(&format!("collapsed:MODEL:{last}")).unwrap_or_else(|| panic!("{last} is not one collapsed button"));
+    let label = crate::profile::panel_label(&h.app, "MODEL", last);
+    let [x, y] = h.widget(&label).unwrap_or_else(|| panic!("no widget labelled {label}"));
+    assert!((x as f32 - button.x).abs() < 30.0 && (y as f32 - button.y).abs() < 30.0, "the collapsed button is labelled {label}");
+    assert_eq!(count_of("toolbar_trimmed"), Some(0.0), "panels collapse whole, never trimmed");
+    assert_eq!(count_of("toolbar_truncated_labels"), Some(0.0), "no small-button label is truncated");
+    // A panel left of a drawn panel is never collapsed: collapse runs from the right.
+    let collapsed: Vec<bool> = panels.iter().map(|p| crate::scenario::handle_at(&format!("collapsed:MODEL:{p}")).is_some()).collect();
+    assert!(collapsed.windows(2).all(|w| !w[0] || w[1]), "{panels:?} {collapsed:?}");
     let column = ["solid.chamfer", "solid.shell", "solid.draft"].map(|id| rect_of(&format!("button:{id}")).is_some());
     assert!(column.iter().all(|&drawn| drawn) || column.iter().all(|&drawn| !drawn), "{column:?}");
+}
+
+#[test]
+fn a_wide_inventor_ribbon_collapses_nothing() {
+    let _h = on_model(inventor(Part), 3200.0);
+    assert_eq!(count_of("toolbar_collapsed"), Some(0.0));
+    assert_eq!(count_of("toolbar_more"), Some(0.0));
+    assert_eq!(count_of("toolbar_trimmed"), Some(0.0));
+    assert_eq!(count_of("toolbar_truncated_labels"), Some(0.0));
+}
+
+#[test]
+fn small_columns_are_as_wide_as_their_widest_label() {
+    let _h = on_model(inventor(Part), 3200.0);
+    let wide = rect_of("button:solid.chamfer").unwrap().width();
+    let painter = egui::Painter::new(_h.ctx.clone(), egui::LayerId::background(), egui::Rect::EVERYTHING);
+    let labels: Vec<&str> = ["solid.chamfer", "solid.shell", "solid.draft"]
+        .iter()
+        .map(|id| _h.app.tr_label(crate::profile::button_label(&_h.app, solidcraft_engine::find_command(id).unwrap())))
+        .collect();
+    assert_eq!(wide, column_width(&painter, &labels), "the column is as wide as its widest label");
+    // Narrower, a panel collapses whole; a column still drawn keeps that width.
+    for width in [1600.0, 1300.0] {
+        let _h = on_model(inventor(Part), width);
+        if let Some(r) = rect_of("button:solid.chamfer") {
+            assert_eq!(r.width(), wide, "at {width} px");
+        }
+    }
+}
+
+#[test]
+fn fit_whole_collapses_rightmost_panels_first() {
+    let b = |w: f32| crate::toolbar::ButtonSize { width: w, min_width: w };
+    let panels: Vec<crate::toolbar::PanelSize> =
+        [3, 2, 2].iter().map(|n| crate::toolbar::PanelSize { buttons: (0..*n).map(|_| b(60.0)).collect() }).collect();
+    let full = crate::toolbar::fit_whole(&panels, 10_000.0);
+    assert!(full.iter().all(|p| p.fit == crate::toolbar::Fit::Buttons && p.shown == p.widths.len()));
+    let room: f32 = full.iter().map(|p| p.width() + 1.0).sum();
+    let one = crate::toolbar::fit_whole(&panels, room - 1.0);
+    let fits: Vec<_> = one.iter().map(|p| p.fit).collect();
+    assert_eq!(fits, [crate::toolbar::Fit::Buttons, crate::toolbar::Fit::Buttons, crate::toolbar::Fit::Collapsed]);
+    assert!(one.iter().all(|p| p.fit != crate::toolbar::Fit::Buttons || p.widths.iter().all(|w| *w == 60.0)), "no button narrows");
 }
 
 #[test]

@@ -5,6 +5,7 @@
   "defaults": {"version": 2, "nav": "inventor", "navigator": "cube", "theme": "tci-dark", "history": "under_browser", "new_document": "part"},
   "home": {"part": "MODEL"},
   "quick_access": true,
+  "ribbon_overflow": "whole_panels",
   "view_cube": {"edges": true, "compass": true},
   "letter_keys": "aliases",
   "alias_wait_ms": 750,
