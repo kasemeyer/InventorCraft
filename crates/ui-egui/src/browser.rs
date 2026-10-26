@@ -1160,8 +1160,10 @@ fn component_rows(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, depth: usize, 
                 Sketches => folder_rows(app, ui, id, "sketches", d, acts),
                 Construction => folder_rows(app, ui, id, "construction", d, acts),
                 Features => features::rows(app, ui, id, &[], d, acts),
-                Joints => crate::dialogs_assembly::browser_joints(app, ui, d, &folder_label(app, "joints")),
+                Joints => crate::dialogs_assembly::browser_joints(app, ui, d, &folder_label(app, "joints"), root_always(app, *node)),
                 Components => component_children(app, ui, id, d, acts),
+                History => history_rows(app, ui, d, acts),
+                EndOfPart => end_of_part_row(app, ui, d),
             }
         }
         return;
@@ -1178,6 +1180,46 @@ fn component_children(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, depth: usi
     for occurrence in model_children(app, id) {
         occurrence_rows(app, ui, vec![occurrence], depth, acts);
     }
+}
+
+/// The profile draws this root node even when it has nothing in it (an empty Relationships).
+fn root_always(app: &SolveApp, node: crate::profile::RootNode) -> bool {
+    let browser = &crate::profile::active(app).browser;
+    let always = match app.session.doc.kind {
+        solidcraft_engine::doc::DocumentKind::Assembly => &browser.assembly_always,
+        _ => &browser.part_always,
+    };
+    always.contains(&node)
+}
+
+/// The design's sketches and features flat at the root, in timeline order, without Sketches or
+/// Features folders: each sketch is drawn as its Sketches-folder row, each feature as its
+/// Features-folder row.
+fn history_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut Actions) {
+    let sketches = entries(app, 0, "sketches");
+    let sketch_keys: Vec<String> = sketches.iter().map(|e| e.key.clone()).collect();
+    let timeline: Vec<(usize, u64, bool)> = app
+        .session
+        .doc
+        .features
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| f.component == 0)
+        .map(|(i, f)| (i, f.id, matches!(f.kind, FeatureKind::Sketch { .. })))
+        .collect();
+    for (index, id, sketch) in timeline {
+        if !sketch {
+            features::row(app, ui, 0, &[], "c0", index, depth, acts);
+        } else if let Some(e) = sketches.iter().find(|e| e.key == id.to_string()) {
+            entry_row(app, ui, 0, None, "sketches", e, depth, None, &sketch_keys, false, acts);
+        }
+    }
+}
+
+/// The End of Part row: a label only (it neither selects, folds nor opens a menu).
+fn end_of_part_row(app: &SolveApp, ui: &mut egui::Ui, depth: usize) {
+    let label = folder_label(app, "end_of_part");
+    draw_row(ui, ui.id().with("end_of_part"), &Row { depth, icon: "error", label: &label, ..Default::default() });
 }
 
 /// The design's top-level browser nodes, in the active profile's order for the document's kind.
@@ -1451,7 +1493,8 @@ pub const STANDARD_VIEWS: [(&str, &str); 4] = [("Top", "top"), ("Front", "front"
 fn named_view_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut Actions) {
     let key = "namedviews";
     let open = is_open(app, key, false);
-    let r = draw_row(ui, ui.id().with(key), &Row { depth, fold: Some(open), icon: "folder", label: "Named Views", ..Default::default() });
+    let label = folder_label(app, "named_views");
+    let r = draw_row(ui, ui.id().with(key), &Row { depth, fold: Some(open), icon: "folder", label: &label, ..Default::default() });
     if r.fold || r.clicked {
         toggle(app, key, false);
     }
@@ -1914,6 +1957,8 @@ pub(crate) fn folder_label(app: &SolveApp, folder: &str) -> String {
         "bodies" => "Bodies",
         "sketches" => "Sketches",
         "joints" => "Joints",
+        "named_views" => "Named Views",
+        "end_of_part" => "End of Part",
         _ => "Construction",
     }
     .to_string()

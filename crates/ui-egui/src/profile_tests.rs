@@ -99,7 +99,7 @@ fn solidcraft_profile_keeps_upstream_keys_and_browser() {
     assert_eq!(p.defaults.nav.as_deref(), Some("fusion"));
     assert_eq!(p.defaults.navigator, Some(crate::prefs::NavigatorStyle::Axes));
     assert_eq!(p.defaults.theme.as_deref(), Some("dark"));
-    assert_eq!(p.defaults.history, Some(History::Bottom));
+    assert_eq!(p.defaults.history, Some(super::History::Bottom));
     assert!(p.defaults.new_document.is_none());
 }
 

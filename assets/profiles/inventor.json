@@ -58,9 +58,14 @@
   ],
   "button_labels": {"construct.plane.offset": "Plane", "construct.axis.edge": "Axis", "construct.point.vertex": "Point", "component.insert_design": "Place", "component.create": "Create"},
   "browser": {
-    "part_root": ["named_views", "bodies", "origin", "canvases", "analyses", "sketches", "construction", "features", "joints", "components", "doc_settings"],
-    "assembly_root": ["named_views", "joints", "origin", "canvases", "analyses", "bodies", "sketches", "construction", "features", "components", "doc_settings"],
-    "folder_labels": {"bodies": "profile.inventor.browser.solid_bodies", "joints": "profile.inventor.browser.relationships"},
+    "part_root": ["named_views", "bodies", "origin", "history", "end_of_part"],
+    "assembly_root": ["named_views", {"node": "joints", "always": true}, "origin", "canvases", "analyses", "bodies", "sketches", "construction", "features", "components"],
+    "folder_labels": {
+      "named_views": "profile.inventor.browser.representations",
+      "bodies": "profile.inventor.browser.solid_bodies",
+      "joints": "profile.inventor.browser.relationships",
+      "end_of_part": "profile.inventor.browser.end_of_part"
+    },
     "origin": [
       {"key": "YZ", "label": "profile.inventor.origin.yz"},
       {"key": "XZ", "label": "profile.inventor.origin.xz"},

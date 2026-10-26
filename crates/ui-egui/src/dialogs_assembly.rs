@@ -1335,13 +1335,14 @@ pub fn timeline_joints_vertical(app: &mut SolveApp, ui: &mut egui::Ui) {
 }
 
 /// The Joints folder (labelled `label`, placed by the profile's root order): a row per joint
-/// (double-click edits, the menu edits, drives, suppresses or deletes).
-pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, label: &str) {
+/// (double-click edits, the menu edits, drives, suppresses or deletes). Without joints it is
+/// drawn only when `always` (the profile says so).
+pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, label: &str, always: bool) {
     use crate::browser::{Row, draw_row, is_open, toggle};
     let joints: Vec<(u64, String, JointKind, bool)> =
         app.session.doc.assembly.joints.iter().map(|j| (j.id, j.name.clone(), j.kind, j.suppressed)).collect();
     app.tree.picked_joints.retain(|p| joints.iter().any(|j| j.0 == *p));
-    if joints.is_empty() {
+    if joints.is_empty() && !always {
         return;
     }
     // Drawn like every other browser node (its fold, eye and rows publish `fold:Joints`,

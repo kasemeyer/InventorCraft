@@ -275,11 +275,15 @@ impl AliasScope {
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(from = "BrowserLayoutJson")]
 pub struct BrowserLayout {
     pub part_root: Vec<RootNode>,
     pub assembly_root: Vec<RootNode>,
-    /// Folder key ("bodies", "joints", …) → catalog id of its label.
+    /// The part root's nodes drawn even when empty (`{"node": …, "always": true}` entries).
+    pub part_always: Vec<RootNode>,
+    /// The assembly root's nodes drawn even when empty.
+    pub assembly_always: Vec<RootNode>,
+    /// Folder key ("bodies", "joints", "named_views", "end_of_part", …) → catalog id of its label.
     pub folder_labels: BTreeMap<String, String>,
     pub origin: Vec<OriginEntry>,
 }
@@ -290,7 +294,76 @@ impl Default for BrowserLayout {
         use RootNode::*;
         let root = vec![DocSettings, NamedViews, Origin, Canvases, Analyses, Bodies, Sketches, Construction, Features, Joints, Components];
         let origin = ["O", "X", "Y", "Z", "XY", "XZ", "YZ"].into_iter().map(|key| OriginEntry { key: key.into(), label: None }).collect();
-        BrowserLayout { part_root: root.clone(), assembly_root: root, folder_labels: BTreeMap::new(), origin }
+        BrowserLayout {
+            part_root: root.clone(),
+            assembly_root: root,
+            part_always: Vec::new(),
+            assembly_always: Vec::new(),
+            folder_labels: BTreeMap::new(),
+            origin,
+        }
+    }
+}
+
+/// A root list entry as written: `"joints"`, or `{"node": "joints", "always": true}` for a node
+/// drawn even when it has nothing in it.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum RootEntry {
+    Node(RootNode),
+    Flagged(FlaggedRoot),
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FlaggedRoot {
+    node: RootNode,
+    #[serde(default)]
+    always: bool,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct BrowserLayoutJson {
+    part_root: Option<Vec<RootEntry>>,
+    assembly_root: Option<Vec<RootEntry>>,
+    folder_labels: BTreeMap<String, String>,
+    origin: Option<Vec<OriginEntry>>,
+}
+
+impl From<BrowserLayoutJson> for BrowserLayout {
+    fn from(json: BrowserLayoutJson) -> Self {
+        let base = BrowserLayout::default();
+        // (nodes in order, nodes drawn always)
+        let split = |entries: Option<Vec<RootEntry>>, fallback: Vec<RootNode>| match entries {
+            None => (fallback, Vec::new()),
+            Some(entries) => {
+                let mut always = Vec::new();
+                let nodes = entries
+                    .into_iter()
+                    .map(|e| match e {
+                        RootEntry::Node(n) => n,
+                        RootEntry::Flagged(f) => {
+                            if f.always {
+                                always.push(f.node);
+                            }
+                            f.node
+                        }
+                    })
+                    .collect();
+                (nodes, always)
+            }
+        };
+        let (part_root, part_always) = split(json.part_root, base.part_root);
+        let (assembly_root, assembly_always) = split(json.assembly_root, base.assembly_root);
+        BrowserLayout {
+            part_root,
+            assembly_root,
+            part_always,
+            assembly_always,
+            folder_labels: json.folder_labels,
+            origin: json.origin.unwrap_or(base.origin),
+        }
     }
 }
 
@@ -308,6 +381,10 @@ pub enum RootNode {
     Features,
     Joints,
     Components,
+    /// The design's sketches and features flat at the root, in timeline order (no folders).
+    History,
+    /// The End of Part row.
+    EndOfPart,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
@@ -650,6 +727,11 @@ pub fn validate(profile: &Profile) -> Vec<String> {
         }
         if !UI_ACTIONS.contains(&action.as_str()) {
             out.push(format!("function key \"{key}\": {action} is not a UI action"));
+        }
+    }
+    for (what, root) in [("browser.part_root", &profile.browser.part_root), ("browser.assembly_root", &profile.browser.assembly_root)] {
+        for (i, node) in root.iter().enumerate().filter(|&(i, node)| root[..i].contains(node)) {
+            out.push(format!("{what}: {node:?} appears twice (entry {i})"));
         }
     }
     if profile.defaults.new_document == Some(DocumentKind::Drawing) {

@@ -72,29 +72,37 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: 
             .collect(),
     };
     for index in indices {
-        let Some(feature) = app.session.doc.features.get(index) else { continue };
-        let (id, label, icon) = (feature.id, feature.name.clone(), crate::timeline::icon_of(&feature.kind));
-        let selected = app.session.selection.contains(&Sel::Feature { id });
-        app.tree.order.push(format!("f:{id}"));
-        let r = draw_row(ui, ui.id().with(("browser_feature", id)), &Row { depth: depth + 1, icon, label: &label, selected, ..Default::default() });
-        if let Some(rect) = r.rect {
-            crate::scenario::publish_handle(&format!("row:browser-feature:{scope}:{id}"), rect.center());
-            if app.tree.reveal_feature.as_ref().is_some_and(|target| target.id == id && target.path == path) {
-                ui.scroll_to_rect(rect, Some(egui::Align::Center));
-                app.tree.reveal_feature = None;
-            }
+        row(app, ui, component, path, &scope, index, depth + 1, acts);
+    }
+}
+
+/// One feature's row (the `index`th of the design's features): a click selects it, a
+/// double-click edits it, the menu is the feature's. Listed in a Features folder, or flat at the
+/// root under a profile's history.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn row(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: &[u64], scope: &str, index: usize, depth: usize, acts: &mut Actions) {
+    let Some(feature) = app.session.doc.features.get(index) else { return };
+    let (id, label, icon) = (feature.id, feature.name.clone(), crate::timeline::icon_of(&feature.kind));
+    let selected = app.session.selection.contains(&Sel::Feature { id });
+    app.tree.order.push(format!("f:{id}"));
+    let r = draw_row(ui, ui.id().with(("browser_feature", id)), &Row { depth, icon, label: &label, selected, ..Default::default() });
+    if let Some(rect) = r.rect {
+        crate::scenario::publish_handle(&format!("row:browser-feature:{scope}:{id}"), rect.center());
+        if app.tree.reveal_feature.as_ref().is_some_and(|target| target.id == id && target.path == path) {
+            ui.scroll_to_rect(rect, Some(egui::Align::Center));
+            app.tree.reveal_feature = None;
         }
-        if r.double {
-            if !path.is_empty() {
-                let _ = app.run("component.activate", json!({"component":component,"occurrence":path.last(),"path":path}));
-            }
-            app.edit_feature(id);
-        } else if r.clicked {
-            click_select(app, ui, format!("f:{id}"), Some(Sel::Feature { id }));
+    }
+    if r.double {
+        if !path.is_empty() {
+            let _ = app.run("component.activate", json!({"component":component,"occurrence":path.last(),"path":path}));
         }
-        if let Some(at) = r.secondary {
-            acts.menu = Some((at, Target::Feature { id }));
-        }
+        app.edit_feature(id);
+    } else if r.clicked {
+        click_select(app, ui, format!("f:{id}"), Some(Sel::Feature { id }));
+    }
+    if let Some(at) = r.secondary {
+        acts.menu = Some((at, Target::Feature { id }));
     }
 }
 
