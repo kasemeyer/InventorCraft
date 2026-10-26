@@ -5733,3 +5733,7 @@ mod panel_flow_tests;
 #[cfg(test)]
 #[path = "template_values_tests.rs"]
 mod template_values_tests;
+
+#[cfg(test)]
+#[path = "extrude_sections_tests.rs"]
+mod extrude_sections_tests;

@@ -189,7 +189,14 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
     } else {
         input_rows(d, ui, &app.session);
     }
+    // A profile that sections Extrude's panel (Inventor's Behavior / Output / Advanced) draws it
+    // here; the arm below keeps SolidCraft's rows unchanged.
+    let sectioned = matches!(d.kind, Kind::Extrude { .. }) && crate::profile::active(app).workflow.sectioned_extrude;
+    if sectioned {
+        enter |= extrude_sections(app, ui, d);
+    }
     match &mut d.kind {
+        Kind::Extrude { .. } if sectioned => {}
         Kind::Material { index, editor } => crate::material_editor::rows(app, ui, index, editor),
         Kind::Appearance(k) => enter |= crate::dialogs_appearance::rows(app, ui, k, &mut d.inputs),
         Kind::Motion(k) => enter |= crate::dialogs_motion::rows(app, ui, k, &mut d.inputs),
@@ -541,6 +548,133 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         _ => enter |= additional_rows(app, d, ui),
     }
     error_rows(app, ctx, d, ui);
+    enter
+}
+
+/// Extrude's panel in sections, as Inventor's property panel: Behavior (Direction, Extents and
+/// the distances), Output (the boolean, once there is a body) and Advanced (thin wall, start and
+/// taper; closed unless one of them is set). Returns whether Enter was pressed in a field.
+fn extrude_sections(app: &SolveApp, ui: &mut egui::Ui, d: &mut Dialog) -> bool {
+    let mut enter = false;
+    let has_bodies = !app.session.world_state().bodies.is_empty();
+    let Kind::Extrude {
+        distance,
+        direction,
+        operation,
+        auto_op,
+        smart,
+        distance2,
+        taper,
+        taper_present,
+        to_offset,
+        start,
+        all,
+        thin,
+        wall,
+        wall_side,
+        wall2,
+    } = &mut d.kind
+    else {
+        return false;
+    };
+    let segments = |labels: &[&str]| -> Vec<String> { labels.iter().map(|l| tr(l).to_owned()).collect() };
+    ui_kit::section(ui, "extrude_behavior", "Behavior", true, |ui| {
+        form_row(ui, "Direction", |ui| {
+            // Default, Flipped, Symmetric, Asymmetric (a reversed asymmetric pair shows as Asymmetric).
+            let order = [0usize, 1, 2, TWO_SIDES];
+            let shown = if *direction == TWO_SIDES_REVERSED { TWO_SIDES } else { *direction };
+            let current = order.iter().position(|o| *o == shown).unwrap_or(0);
+            let mut pos = current;
+            let labels = segments(&["Default", "Flipped", "Symmetric", "Asymmetric"]);
+            let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
+            if ui_kit::segmented(ui, &mut pos, &labels, ui_kit::Segments { proportional: true, ..Default::default() }) && pos != current {
+                *direction = order.get(pos).copied().unwrap_or(0);
+                d.extra.insert("convention".into(), json!(solidcraft_engine::doc::ExtrudeConvention::TotalDistance));
+                // An explicit direction ends the automatic choices (#1257).
+                smart.manual_dir = true;
+                *auto_op = false;
+            }
+        });
+        let cur = if to_object_on(&d.inputs) { 1 } else { usize::from(*all) * 2 };
+        let mut ext = cur;
+        form_row(ui, "Extents", |ui| {
+            // Segments rather than a dropdown, so every extent shows, as the capture's row of
+            // extent buttons does.
+            let labels = segments(&["Distance", "To", "Through All"]);
+            let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
+            if ui_kit::segmented(ui, &mut ext, &labels, ui_kit::Segments { proportional: true, ..Default::default() }) && ext != cur {
+                *all = ext == 2;
+                set_to_object(&mut d.inputs, &mut d.active, ext == 1);
+            }
+        });
+        if ext == 0 {
+            enter |= expr_row(ui, "Distance", distance);
+        }
+        if ext == 1 {
+            enter |= expr_row(ui, "To Offset", to_offset);
+        }
+        if two_sided(*direction) {
+            enter |= expr_row(ui, "Distance B", distance2);
+        }
+    });
+    if has_bodies {
+        ui_kit::section(ui, "extrude_output", "Output", true, |ui| {
+            form_row(ui, "Boolean", |ui| {
+                // OP_LABELS order is New, Join, Cut, Intersect; Inventor's is Join, Cut, Intersect, New Solid.
+                let order = [1usize, 2, 3, 0];
+                let current = order.iter().position(|o| *o == *operation).unwrap_or(0);
+                let mut pos = current;
+                let labels = segments(&["Join", "Cut", "Intersect", "New Solid"]);
+                let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
+                if ui_kit::segmented(ui, &mut pos, &labels, ui_kit::Segments { proportional: true, ..Default::default() }) && pos != current {
+                    *operation = order.get(pos).copied().unwrap_or(0);
+                    // A choice made by hand sticks.
+                    *auto_op = false;
+                }
+            });
+        });
+    }
+    let advanced = *thin || !start.is_empty() || object_on(&d.inputs, FROM_OBJECT) || *taper_present;
+    ui_kit::section(ui, "extrude_advanced", "Advanced", advanced, |ui| {
+        let was_thin = *thin;
+        ui_kit::checkbox_grid(ui, &mut [("Thin Extrude", thin)], 2);
+        if *thin != was_thin {
+            set_thin(&mut d.inputs, *thin);
+        }
+        if *thin {
+            choice_row(ui, "Wall Location", "ex_wall", wall_side, &WALL_LABELS);
+            enter |= expr_row(ui, "Wall Thickness", wall);
+            if *wall_side == 3 {
+                enter |= expr_row(ui, "Thickness Outside", wall2);
+            }
+        }
+        let old = if object_on(&d.inputs, FROM_OBJECT) { 2 } else { usize::from(!start.is_empty()) };
+        let mut st = old;
+        form_row(ui, "Start", |ui| {
+            combo(ui, "ex_start", &["Profile Plane", "Offset", "From Object"], &mut st);
+            if st != old {
+                set_object(&mut d.inputs, &mut d.active, FROM_OBJECT, st == 2);
+                if st == 1 && start.is_empty() {
+                    *start = "5 mm".into();
+                }
+                if st == 0 {
+                    start.clear();
+                }
+            }
+        });
+        if st != 0 {
+            enter |= expr_row(ui, "Offset", start);
+        }
+        if *direction < 2 {
+            form_row(ui, "Taper Angle", |ui| {
+                let before = taper.clone();
+                enter |= field(ui, taper);
+                if *taper != before {
+                    *taper_present = !taper.trim().is_empty();
+                }
+            });
+        }
+    });
     enter
 }
 
