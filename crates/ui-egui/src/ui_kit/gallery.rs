@@ -891,6 +891,11 @@ const ELEMENTS: &[Element] = &[
             segmented_glyphs(ui, &mut s.selected, &[GlyphSegment { key: "bar", tip: "Bar".into(), glyph: bar }], &[]);
         });
     }),
+    element!("expr_glyph_row", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
+        let bar = |r: egui::Rect, ink: egui::Color32| vec![egui::Shape::hline(r.x_range(), r.center().y, egui::Stroke::new(1.5, ink))];
+        let glyphs = [GlyphSegment { key: "bar", tip: "Bar".into(), glyph: bar }, GlyphSegment { key: "bar2", tip: "Bar 2".into(), glyph: bar }];
+        expr_glyph_row(ui, "Gallery", &mut s.value, true, "Gallery Extents", &mut s.selected, &glyphs);
+    }),
     element!("checkbox", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
         row(ui, "Gallery", |ui| {
             checkbox(ui, "Option", &mut s.checked);

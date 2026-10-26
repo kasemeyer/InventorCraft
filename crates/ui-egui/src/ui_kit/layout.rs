@@ -72,6 +72,46 @@ pub(crate) fn expr_row(ui: &mut Ui, label: &str, value: &mut String) -> bool {
     row(ui, label, |ui| super::field(ui, value))
 }
 
+/// Expression row whose field ends in a strip of glyph segments, as a property panel's distance
+/// with its extent buttons beside it. The strip is a nested choice named `segments` (handles
+/// `dialog:{segments}:{key}`, target `dialog:segments:{segments}`), one square segment per glyph
+/// at the right of the control column; the field takes the rest and is disabled unless
+/// `field_on`. Returns (accepted Enter, a segment clicked). Tokens: `row, field, segmented_glyphs, space_4`.
+pub(crate) fn expr_glyph_row(
+    ui: &mut Ui,
+    label: &str,
+    value: &mut String,
+    field_on: bool,
+    segments: &str,
+    selected: &mut usize,
+    glyphs: &[super::GlyphSegment],
+) -> (bool, bool) {
+    row(ui, label, |ui| {
+        let t = Tokens::get();
+        let control = ui.available_rect_before_wrap();
+        let strip = (row_height() * glyphs.len() as f32).min(control.width() * 0.6);
+        let strip_rect = egui::Rect::from_min_max(egui::pos2(control.right() - strip, control.top()), control.max);
+        let field_rect = egui::Rect::from_min_max(control.min, egui::pos2((strip_rect.left() - t.space_4).max(control.left()), control.bottom()));
+        let enter = ui
+            .scope_builder(egui::UiBuilder::new().max_rect(field_rect).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
+                ui.spacing_mut().text_edit_width = field_rect.width();
+                ui.add_enabled_ui(field_on, |ui| super::field(ui, value)).inner
+            })
+            .inner;
+        let clicked = ui
+            .scope_builder(
+                egui::UiBuilder::new()
+                    .id_salt(segments)
+                    .max_rect(strip_rect)
+                    .layout(egui::Layout::left_to_right(egui::Align::Center))
+                    .ui_stack_info(egui::UiStackInfo::default().with_tag_value(LABEL, segments.to_owned())),
+                |ui| super::segmented_glyphs(ui, selected, glyphs, &[]),
+            )
+            .inner;
+        (enter, clicked)
+    })
+}
+
 /// Whole-number count row with step arrows; retains completion and accepted Enter. Tokens: `row, count_field`.
 pub(crate) fn count_row(ui: &mut Ui, label: &str, value: &mut String, limits: &super::Count<'_>) -> bool {
     row(ui, label, |ui| super::count_field(ui, value, limits))

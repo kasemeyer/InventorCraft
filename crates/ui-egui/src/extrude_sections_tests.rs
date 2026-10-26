@@ -138,7 +138,11 @@ fn direction_and_extents_rows_fit_the_panel() {
     for (row, keys) in [("Direction", &["Default", "Flipped", "Symmetric", "Asymmetric"][..]), ("Extents", &["Distance", "To", "Through All"][..])] {
         let rect = crate::scenario::rect_of(&format!("dialog:segments:{row}")).unwrap_or_else(|| panic!("{row} row drawn"));
         let boolean = crate::scenario::rect_of("dialog:segments:Boolean").expect("Boolean row drawn");
-        assert!((rect.left() - boolean.left()).abs() < 0.5 && (rect.right() - boolean.right()).abs() < 0.5, "{row} sits in the field column");
+        // Direction fills the field column; the extents end it (at the end of the distance row).
+        if row == "Direction" {
+            assert!((rect.left() - boolean.left()).abs() < 0.5, "{row} starts the field column");
+        }
+        assert!(rect.left() >= boolean.left() - 0.5 && (rect.right() - boolean.right()).abs() < 0.5, "{row} sits in the field column");
         let width = rect.width() / keys.len() as f32;
         assert!(width >= rect.height(), "{row}: each segment holds its glyph square ({width} for {})", rect.height());
         for key in keys {
@@ -206,4 +210,42 @@ fn boolean_row_fits_the_panel() {
         assert!(row.contains(at), "Boolean:{key} inside its row");
         assert!(h.widget(key).is_some(), "{key} is the segment's accessible name");
     }
+}
+
+/// The extent buttons sit at the end of the distance row (the capture's row), after the field,
+/// and stay there with the field disabled when the extent is not a distance.
+#[test]
+fn extents_sit_at_the_end_of_the_distance_row() {
+    let mut h = extrude(true);
+    let place = |h: &Harness| {
+        let row = crate::scenario::rect_of("dialog:row:Distance").expect("Distance row drawn");
+        let strip = crate::scenario::rect_of("dialog:segments:Extents").expect("extent buttons drawn");
+        let field = crate::scenario::handle_at("dialog:Distance").expect("Distance field drawn");
+        assert!(row.contains_rect(strip), "the extent buttons are in the distance row: {strip:?} in {row:?}");
+        assert!((strip.right() - row.right()).abs() < 0.5, "the extent buttons end the row");
+        assert!(field.x < strip.left() && row.contains(field), "the field comes first, then the buttons");
+        assert!(crate::scenario::rect_of("dialog:row:Extents").is_none(), "no separate Extents row");
+        assert!(h.widget("Distance").is_some(), "the field keeps its accessible name");
+        strip
+    };
+    let before = place(&h);
+    // Whether the Distance field (the text input labelled Distance) takes typing.
+    let enabled = |h: &Harness| {
+        h.output.accesskit_update.as_ref().and_then(|tree| {
+            tree.nodes
+                .iter()
+                .find_map(|(_, n)| (n.role() == egui::accesskit::Role::TextInput && n.label() == Some("Distance")).then(|| !n.is_disabled()))
+        })
+    };
+    assert_eq!(enabled(&h), Some(true), "a distance extent types the distance");
+    click(&mut h, "Through All");
+    assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::Extrude { all: true, .. })), "Through All picked");
+    let after = place(&h);
+    assert_eq!(before, after, "the buttons do not move");
+    assert_eq!(enabled(&h), Some(false), "through all has no distance to type");
+    // By handle: the field is labelled Distance too.
+    h.step(&json!({"click": {"handle": "dialog:Extents:Distance"}})).unwrap();
+    h.frames(2);
+    assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::Extrude { all: false, .. })));
+    assert_eq!(enabled(&h), Some(true));
 }

@@ -772,16 +772,14 @@ fn extrude_sections(app: &SolveApp, ui: &mut egui::Ui, d: &mut Dialog) -> bool {
         });
         let cur = if to_object_on(&d.inputs) { 1 } else { usize::from(*all) * 2 };
         let mut ext = cur;
-        form_row(ui, "Extents", |ui| {
-            // Segments rather than a dropdown, so every extent shows, as the capture's row of
-            // extent buttons does; glyphs, since the words do not fit the field column.
-            if ui_kit::segmented_glyphs(ui, &mut ext, &extent_glyphs(), &[]) && ext != cur {
-                *all = ext == 2;
-                set_to_object(&mut d.inputs, &mut d.active, ext == 1);
-            }
-        });
-        if ext == 0 {
-            enter |= expr_row(ui, "Distance", distance);
+        // The extents sit at the end of the distance row, as in the capture: segments rather than
+        // a dropdown, so every extent shows; glyphs, since the words do not fit. The distance
+        // field stays in place (disabled) for To and Through All, so the buttons do not move.
+        let (typed, clicked) = ui_kit::expr_glyph_row(ui, "Distance", distance, cur == 0, "Extents", &mut ext, &extent_glyphs());
+        enter |= typed;
+        if clicked && ext != cur {
+            *all = ext == 2;
+            set_to_object(&mut d.inputs, &mut d.active, ext == 1);
         }
         if ext == 1 {
             enter |= expr_row(ui, "To Offset", to_offset);

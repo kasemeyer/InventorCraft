@@ -113,6 +113,7 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | choice: `segmented`, `Segments` | Equal text choices; `states` supplies mixed selection, `compact` clips instead of falling back to a dropdown, `primary` uses accent/on-accent for the selected segment | `control_*`, `selected_bg/ink`, `font_label`, `space_4/8` |
 | `segmented_icons`, `IconSegment` | Equal icon choices and mixed states | segment tokens, icon palette |
 | `segmented_glyphs`, `GlyphSegment` | Equal choices drawn as small painted glyphs, the words as hover text, where labels would not fit | segment tokens, `form_ink`, `selected_ink` |
+| `expr_glyph_row` | An expression row whose field ends in square glyph segments (a distance and its extent buttons); the segments are a nested choice with their own name and handles; the field can be disabled | `row`, `field` and `segmented_glyphs` tokens, `space_4` |
 | `checkbox`, `checkbox_indeterminate`, `checkbox_row`, `checkbox_grid`, `options` | One box/tick painter for inline, mixed, full-row, grid and menu choices | `space_14/3/2`, `radius_sm`, `control_fill/border`, `form_primary/ink`, `hover`, `on_accent` |
 | `text_emphasis` | Bold/italic with translated accessible names | form control/font tokens |
 | `tool_choices`, `ToolChoice`, `toggle_icon` | Wrapped command modes or independent icon toggles | sketch mode/icon tokens, `accent` |
