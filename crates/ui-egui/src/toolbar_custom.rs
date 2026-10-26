@@ -315,10 +315,36 @@ pub fn command_items(app: &SolveApp, id: &str) -> Vec<Item> {
 
 /// The toolbar's own menu (right-click on its empty space).
 pub fn toolbar_items(app: &SolveApp) -> Vec<Item> {
-    vec![
+    let mut v = vec![
         Item::action("ui.toolbarCustomize", "Customize Toolbar…", "settings"),
         Item::action("ui.toolbarReset", "Reset Toolbar", "restore").with(json!({ "tab": app.ui.tab })),
-    ]
+    ];
+    if let Some(panels) = panels_menu(app) {
+        v.push(panels);
+    }
+    v
+}
+
+/// Show Panels (Inventor's panel menu): every panel of the current tab, the shown ones checked;
+/// choosing one shows or hides it. None when the tab has no panels.
+fn panels_menu(app: &SolveApp) -> Option<Item> {
+    let tab = app.ui.tab.as_str();
+    let all = panel_lists_of(crate::profile::ribbon(app), tab, app.session.active_sketch.is_some());
+    if all.is_empty() {
+        return None;
+    }
+    let shown = panel_lists(app, tab);
+    let mut item = Item::action("ui.toolbarPanels", "Show Panels", "list");
+    item.children = all
+        .iter()
+        .map(|(panel, ..)| {
+            let on = shown.iter().any(|(p, ..)| p == panel);
+            let child = Item::action("ui.toolbarPanelShown", &crate::profile::panel_label(app, tab, panel), "")
+                .with(json!({ "tab": tab, "panel": panel, "shown": !on }));
+            if on { child.key("current") } else { child }
+        })
+        .collect();
+    Some(item)
 }
 
 /// Run a toolbar item from a menu.
@@ -335,6 +361,11 @@ pub fn run(app: &mut SolveApp, action: &str, p: &Value) {
         "ui.toolbarReset" => reset(app, &tab),
         "ui.toolbarCustomize" => app.toolbar_custom.customizing = true,
         "ui.shortcutPin" => app.sbox.toggle_pin(id),
+        "ui.toolbarPanelShown" => {
+            if let (Some(panel), Some(shown)) = (p.get("panel").and_then(Value::as_str), p.get("shown").and_then(Value::as_bool)) {
+                set_panel_shown(app, &tab, panel, shown);
+            }
+        }
         _ => {}
     }
 }
@@ -426,6 +457,10 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
     }
     app.toolbar_custom.customizing = !closed && action != ui_kit::Action::Cancel;
 }
+
+#[cfg(test)]
+#[path = "toolbar_panels_tests.rs"]
+mod toolbar_panels_tests;
 
 #[cfg(test)]
 mod migration_tests {
