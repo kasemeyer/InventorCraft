@@ -130,19 +130,62 @@ pub(crate) struct IconSegment {
 /// Equal icon choices with mixed state. Tokens: `segmented tokens, space_4/12, icon/fill, accent; icon palette`.
 pub(crate) fn segmented_icons(ui: &mut Ui, selected: &mut usize, options: &[IconSegment], states: &[bool]) -> bool {
     let t = Tokens::get();
+    let keys: Vec<(&str, &str)> = options.iter().map(|o| (o.key, o.key)).collect();
+    let tips: Vec<&str> = options.iter().map(|o| o.tip.as_str()).collect();
+    painted_segments(ui, selected, &keys, &tips, states, |painter, index, icon_rect, _| {
+        if let Some(option) = options.get(index) {
+            crate::icons::paint_icon(painter, icon_rect, option.icon, f32::from(t.icon.a()) / 255.0);
+        }
+    })
+}
+
+/// One segment of [`segmented_glyphs`]: a stable key (its scenario handle), the hover text (also
+/// its accessible name) and the glyph: shapes drawn in the segment's square in the given ink.
+pub(crate) struct GlyphSegment {
+    pub key: &'static str,
+    pub tip: String,
+    pub glyph: fn(egui::Rect, egui::Color32) -> Vec<egui::Shape>,
+}
+
+/// A row of equal segments that each show a small painted glyph instead of a label, for a choice
+/// whose words do not fit its row; the words are the hover text. Same frame and states as
+/// [`segmented_icons`]. Tokens: `segmented tokens, space_4/12, form_ink, selected_ink`.
+pub(crate) fn segmented_glyphs(ui: &mut Ui, selected: &mut usize, options: &[GlyphSegment], states: &[bool]) -> bool {
+    let keys: Vec<(&str, &str)> = options.iter().map(|o| (o.key, o.tip.as_str())).collect();
+    let tips: Vec<&str> = options.iter().map(|o| o.tip.as_str()).collect();
+    painted_segments(ui, selected, &keys, &tips, states, |painter, index, glyph_rect, ink| {
+        if let Some(option) = options.get(index) {
+            painter.extend((option.glyph)(glyph_rect, ink));
+        }
+    })
+}
+
+/// The frame shared by [`segmented_icons`] and [`segmented_glyphs`]: equal segments, each with
+/// (handle key, accessible name) from `keys` and hover text from `tips`; `paint` draws segment
+/// `index` in its square with the ink for its state.
+fn painted_segments(
+    ui: &mut Ui,
+    selected: &mut usize,
+    keys: &[(&str, &str)],
+    tips: &[&str],
+    states: &[bool],
+    paint: impl Fn(&egui::Painter, usize, egui::Rect, egui::Color32),
+) -> bool {
+    let t = Tokens::get();
     let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), row_height()), egui::Sense::hover());
     ui.painter().rect_filled(rect, t.control_radius, t.control_fill);
-    let width = rect.width() / options.len().max(1) as f32;
+    let count = keys.len();
+    let width = rect.width() / count.max(1) as f32;
     let mut clicked = false;
-    for (index, option) in options.iter().enumerate() {
+    for (index, (key, name)) in keys.iter().enumerate() {
         let segment = egui::Rect::from_min_size(rect.min + vec2(index as f32 * width, 0.0), vec2(width, rect.height()));
         let response = ui.interact(segment, ui.make_persistent_id(("icon_segment", index)), egui::Sense::click());
         let on = states.get(index).copied().unwrap_or(*selected == index);
         let rounding = egui::CornerRadius {
             nw: if index == 0 { t.control_radius } else { 0 },
             sw: if index == 0 { t.control_radius } else { 0 },
-            ne: if index + 1 == options.len() { t.control_radius } else { 0 },
-            se: if index + 1 == options.len() { t.control_radius } else { 0 },
+            ne: if index + 1 == count { t.control_radius } else { 0 },
+            se: if index + 1 == count { t.control_radius } else { 0 },
         };
         if on || response.hovered() {
             ui.painter().rect_filled(segment, rounding, if on { t.selected_bg } else { t.hover });
@@ -153,11 +196,11 @@ pub(crate) fn segmented_icons(ui: &mut Ui, selected: &mut usize, options: &[Icon
         // A square icon area inside the segment: dash gaps and dots need the room to read apart.
         let side = (segment.width().min(segment.height()) - t.space_4).max(t.space_12);
         let icon_rect = egui::Rect::from_center_size(segment.center(), vec2(side, side));
-        crate::icons::paint_icon(ui.painter(), icon_rect, option.icon, f32::from(t.icon.a()) / 255.0);
+        paint(ui.painter(), index, icon_rect, if on { t.selected_ink } else { t.form_ink });
         t.button_bevel_with_radius(ui, &response, on, rounding);
-        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), on, option.key));
-        scenario::publish_handle(&format!("dialog:{}:{}", label(ui), option.key), segment.center());
-        let response = response.on_hover_text(&option.tip);
+        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), on, *name));
+        scenario::publish_handle(&format!("dialog:{}:{key}", label(ui)), segment.center());
+        let response = response.on_hover_text(tips.get(index).copied().unwrap_or(key));
         if response.clicked() {
             *selected = index;
             clicked = true;

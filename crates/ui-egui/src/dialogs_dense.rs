@@ -2,6 +2,7 @@
 use super::*;
 use crate::ui_kit;
 use crate::ui_kit::{choice_row, expr_row, hint_row};
+use egui::Color32;
 
 pub(super) fn command(kind: &Kind) -> Option<&'static str> {
     match kind {
@@ -551,6 +552,119 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
     enter
 }
 
+/// Extrude's Direction segments in order (Default, Flipped, Symmetric, Asymmetric): a glyph each,
+/// the translated word as hover text and accessible name, the English word as the handle key.
+pub(super) fn direction_glyphs() -> [ui_kit::GlyphSegment; 4] {
+    [
+        glyph_segment("Default", glyph_default),
+        glyph_segment("Flipped", glyph_flipped),
+        glyph_segment("Symmetric", glyph_symmetric),
+        glyph_segment("Asymmetric", glyph_asymmetric),
+    ]
+}
+
+/// Extrude's Extents segments in order (Distance, To, Through All), as [`direction_glyphs`].
+pub(super) fn extent_glyphs() -> [ui_kit::GlyphSegment; 3] {
+    [glyph_segment("Distance", glyph_distance), glyph_segment("To", glyph_to), glyph_segment("Through All", glyph_through_all)]
+}
+
+fn glyph_segment(key: &'static str, glyph: fn(egui::Rect, Color32) -> Vec<egui::Shape>) -> ui_kit::GlyphSegment {
+    ui_kit::GlyphSegment { key, tip: tr(key).to_owned(), glyph }
+}
+
+/// The glyphs' stroke width in a square of side `s`.
+fn glyph_stroke(s: f32) -> f32 {
+    (s * 0.09).max(1.5)
+}
+
+/// An arrow from `from` to its tip `to`: a shaft and a filled triangular head.
+fn glyph_arrow(from: egui::Pos2, to: egui::Pos2, s: f32, ink: Color32) -> [egui::Shape; 2] {
+    let dir = (to - from).normalized();
+    let head = s * 0.2;
+    let base = to - dir * head;
+    let side = dir.rot90() * head * 0.55;
+    [
+        egui::Shape::line_segment([from, base], egui::Stroke::new(glyph_stroke(s), ink)),
+        egui::Shape::convex_polygon(vec![to, base + side, base - side], ink, egui::Stroke::NONE),
+    ]
+}
+
+/// The sketch profile the extrusion starts from: a dimmer horizontal line at height `y`.
+fn glyph_profile(r: egui::Rect, y: f32, ink: Color32) -> egui::Shape {
+    let inset = r.width() * 0.12;
+    egui::Shape::hline(
+        egui::Rangef::new(r.left() + inset, r.right() - inset),
+        y,
+        egui::Stroke::new(glyph_stroke(r.width()) * 0.8, ink.gamma_multiply(0.55)),
+    )
+}
+
+/// Direction glyphs: the profile across the middle, arrows out of it. The ends sit `s × 0.08`
+/// inside the square.
+fn glyph_direction(r: egui::Rect, ink: Color32, up: Option<f32>, down: Option<f32>) -> Vec<egui::Shape> {
+    let s = r.width();
+    let c = r.center();
+    let reach = r.height() / 2.0 - s * 0.08;
+    let mut shapes = vec![glyph_profile(r, c.y, ink)];
+    if let Some(k) = up {
+        shapes.extend(glyph_arrow(c, egui::pos2(c.x, c.y - reach * k), s, ink));
+    }
+    if let Some(k) = down {
+        shapes.extend(glyph_arrow(c, egui::pos2(c.x, c.y + reach * k), s, ink));
+    }
+    shapes
+}
+
+fn glyph_default(r: egui::Rect, ink: Color32) -> Vec<egui::Shape> {
+    glyph_direction(r, ink, Some(1.0), None)
+}
+
+fn glyph_flipped(r: egui::Rect, ink: Color32) -> Vec<egui::Shape> {
+    glyph_direction(r, ink, None, Some(1.0))
+}
+
+fn glyph_symmetric(r: egui::Rect, ink: Color32) -> Vec<egui::Shape> {
+    glyph_direction(r, ink, Some(1.0), Some(1.0))
+}
+
+fn glyph_asymmetric(r: egui::Rect, ink: Color32) -> Vec<egui::Shape> {
+    glyph_direction(r, ink, Some(1.0), Some(0.55))
+}
+
+/// Extent glyphs: the profile near the bottom and an arrow up out of it.
+fn glyph_extent(r: egui::Rect) -> (f32, egui::Pos2, f32) {
+    let s = r.width();
+    (s, egui::pos2(r.center().x, r.bottom() - s * 0.12), r.top() + s * 0.08)
+}
+
+/// A distance: the arrow ends at a dimension tick.
+fn glyph_distance(r: egui::Rect, ink: Color32) -> Vec<egui::Shape> {
+    let (s, start, top) = glyph_extent(r);
+    let mut shapes = vec![glyph_profile(r, start.y, ink)];
+    shapes.extend(glyph_arrow(start, egui::pos2(start.x, top + s * 0.06), s, ink));
+    shapes.push(egui::Shape::hline(egui::Rangef::new(start.x - s * 0.22, start.x + s * 0.22), top, egui::Stroke::new(glyph_stroke(s), ink)));
+    shapes
+}
+
+/// To an object: the arrow stops at a block.
+fn glyph_to(r: egui::Rect, ink: Color32) -> Vec<egui::Shape> {
+    let (s, start, top) = glyph_extent(r);
+    let block = egui::Rect::from_min_max(egui::pos2(r.left() + s * 0.15, top), egui::pos2(r.right() - s * 0.15, top + s * 0.2));
+    let mut shapes = vec![glyph_profile(r, start.y, ink), egui::Shape::rect_filled(block, 1.0, ink.gamma_multiply(0.55))];
+    shapes.extend(glyph_arrow(start, egui::pos2(start.x, block.bottom()), s, ink));
+    shapes
+}
+
+/// Through all: the arrow passes through a block.
+fn glyph_through_all(r: egui::Rect, ink: Color32) -> Vec<egui::Shape> {
+    let (s, start, top) = glyph_extent(r);
+    let y = (start.y + top) / 2.0 - s * 0.04;
+    let block = egui::Rect::from_min_max(egui::pos2(r.left() + s * 0.15, y - s * 0.1), egui::pos2(r.right() - s * 0.15, y + s * 0.1));
+    let mut shapes = vec![glyph_profile(r, start.y, ink), egui::Shape::rect_filled(block, 1.0, ink.gamma_multiply(0.55))];
+    shapes.extend(glyph_arrow(start, egui::pos2(start.x, top), s, ink));
+    shapes
+}
+
 /// Extrude's panel in sections, as Inventor's property panel: Behavior (Direction, Extents and
 /// the distances), Output (the boolean, once there is a body) and Advanced (thin wall, start and
 /// taper; closed unless one of them is set). Returns whether Enter was pressed in a field.
@@ -585,9 +699,8 @@ fn extrude_sections(app: &SolveApp, ui: &mut egui::Ui, d: &mut Dialog) -> bool {
             let shown = if *direction == TWO_SIDES_REVERSED { TWO_SIDES } else { *direction };
             let current = order.iter().position(|o| *o == shown).unwrap_or(0);
             let mut pos = current;
-            let labels = segments(&["Default", "Flipped", "Symmetric", "Asymmetric"]);
-            let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
-            if ui_kit::segmented(ui, &mut pos, &labels, ui_kit::Segments { proportional: true, ..Default::default() }) && pos != current {
+            // Glyphs, as Inventor's row of four buttons: the words do not fit the field column.
+            if ui_kit::segmented_glyphs(ui, &mut pos, &direction_glyphs(), &[]) && pos != current {
                 *direction = order.get(pos).copied().unwrap_or(0);
                 d.extra.insert("convention".into(), json!(solidcraft_engine::doc::ExtrudeConvention::TotalDistance));
                 // An explicit direction ends the automatic choices (#1257).
@@ -599,10 +712,8 @@ fn extrude_sections(app: &SolveApp, ui: &mut egui::Ui, d: &mut Dialog) -> bool {
         let mut ext = cur;
         form_row(ui, "Extents", |ui| {
             // Segments rather than a dropdown, so every extent shows, as the capture's row of
-            // extent buttons does.
-            let labels = segments(&["Distance", "To", "Through All"]);
-            let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
-            if ui_kit::segmented(ui, &mut ext, &labels, ui_kit::Segments { proportional: true, ..Default::default() }) && ext != cur {
+            // extent buttons does; glyphs, since the words do not fit the field column.
+            if ui_kit::segmented_glyphs(ui, &mut ext, &extent_glyphs(), &[]) && ext != cur {
                 *all = ext == 2;
                 set_to_object(&mut d.inputs, &mut d.active, ext == 1);
             }

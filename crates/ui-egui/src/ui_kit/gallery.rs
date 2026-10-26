@@ -878,6 +878,12 @@ const ELEMENTS: &[Element] = &[
             segmented_icons(ui, &mut s.selected, &[IconSegment { key: "normal", icon: "normal", tip: "Normal".into() }], &[]);
         });
     }),
+    element!("segmented_glyphs", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
+        row(ui, "Gallery", |ui| {
+            let bar = |r: egui::Rect, ink: egui::Color32| vec![egui::Shape::hline(r.x_range(), r.center().y, egui::Stroke::new(1.5, ink))];
+            segmented_glyphs(ui, &mut s.selected, &[GlyphSegment { key: "bar", tip: "Bar".into(), glyph: bar }], &[]);
+        });
+    }),
     element!("checkbox", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
         row(ui, "Gallery", |ui| {
             checkbox(ui, "Option", &mut s.checked);
