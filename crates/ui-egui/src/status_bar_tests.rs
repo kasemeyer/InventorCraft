@@ -77,3 +77,20 @@ fn only_profiles_that_ask_draw_it() {
     h.frames(2);
     assert!(crate::scenario::rect_of("status_bar").is_none());
 }
+
+/// Every right-hand cell sits between two rules: a trailing rule closes the last one (the
+/// document count), as in the capture.
+#[test]
+fn a_trailing_rule_closes_the_last_cell() {
+    let mut h = part();
+    rectangle(&mut h);
+    h.frames(2);
+    let rect = |key: &str| crate::scenario::rect_of(key).unwrap_or_else(|| panic!("{key} drawn"));
+    let bar = rect("status_bar");
+    let (documents, sketch) = (rect("status_bar:cell:0"), rect("status_bar:cell:1"));
+    let rules: Vec<_> = (0..3).map(|i| rect(&format!("status_bar:rule:{i}"))).collect();
+    assert!(crate::scenario::rect_of("status_bar:rule:3").is_none(), "one rule per cell, plus the trailing one");
+    assert!(rules[0].left() > documents.right() && rules[0].right() <= bar.right(), "the trailing rule is after the document count");
+    assert!(rules[1].left() < documents.left() && rules[1].left() > sketch.right(), "a rule between the sketch status and the count");
+    assert!(rules[2].right() < sketch.left(), "a rule before the sketch status");
+}

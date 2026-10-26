@@ -55,14 +55,20 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             let font = FontId::proportional(t.font_label);
             let y = r.center().y;
             p.text(pos2(r.left() + t.space_8, y), Align2::LEFT_CENTER, &s.left, font.clone(), t.text);
-            // Right-aligned cells, each set off by a rule on its left: the sketch status, then
-            // the document count.
-            let mut x = r.right() - t.space_8;
+            // Right-aligned cells, each between two rules as in the capture: a trailing rule
+            // after the last cell (the document count), then each cell and the rule on its left.
             let rule = Stroke::new(1.0, t.dialog_rule);
-            for cell in [Some(s.documents.to_string()), s.sketch.clone()].into_iter().flatten() {
+            let rules = r.y_range().shrink(t.space_2);
+            let mut x = r.right() - t.space_8;
+            p.vline(x, rules, rule);
+            crate::scenario::publish_rect("status_bar:rule:0", Rect::from_x_y_ranges(x..=x + 1.0, rules));
+            x -= t.space_8;
+            for (index, cell) in [Some(s.documents.to_string()), s.sketch.clone()].into_iter().flatten().enumerate() {
                 let at = p.text(pos2(x, y), Align2::RIGHT_CENTER, &cell, font.clone(), t.text);
+                crate::scenario::publish_rect(&format!("status_bar:cell:{index}"), at);
                 x = at.left() - t.space_8;
-                p.vline(x, r.y_range().shrink(t.space_2), rule);
+                p.vline(x, rules, rule);
+                crate::scenario::publish_rect(&format!("status_bar:rule:{}", index + 1), Rect::from_x_y_ranges(x..=x + 1.0, rules));
                 x -= t.space_8;
             }
         });

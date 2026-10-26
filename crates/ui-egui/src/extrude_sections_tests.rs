@@ -45,7 +45,7 @@ fn click(h: &mut Harness, text: &str) {
 #[test]
 fn inventor_extrude_shows_behavior_output_and_advanced() {
     let h = extrude(true);
-    for text in ["Flipped", "Asymmetric", "Through All", "New Solid", "Behavior", "Output"] {
+    for text in ["Flipped", "Asymmetric", "Through All", "New Solid", "Behavior", "Output", "Distance A", "Advanced Properties"] {
         assert!(h.widget(text).is_some(), "{text} is drawn");
     }
 }
@@ -218,23 +218,23 @@ fn boolean_row_fits_the_panel() {
 fn extents_sit_at_the_end_of_the_distance_row() {
     let mut h = extrude(true);
     let place = |h: &Harness| {
-        let row = crate::scenario::rect_of("dialog:row:Distance").expect("Distance row drawn");
+        let row = crate::scenario::rect_of("dialog:row:Distance A").expect("Distance A row drawn");
         let strip = crate::scenario::rect_of("dialog:segments:Extents").expect("extent buttons drawn");
-        let field = crate::scenario::handle_at("dialog:Distance").expect("Distance field drawn");
+        let field = crate::scenario::handle_at("dialog:Distance A").expect("Distance A field drawn");
         assert!(row.contains_rect(strip), "the extent buttons are in the distance row: {strip:?} in {row:?}");
         assert!((strip.right() - row.right()).abs() < 0.5, "the extent buttons end the row");
         assert!(field.x < strip.left() && row.contains(field), "the field comes first, then the buttons");
         assert!(crate::scenario::rect_of("dialog:row:Extents").is_none(), "no separate Extents row");
-        assert!(h.widget("Distance").is_some(), "the field keeps its accessible name");
+        assert!(h.widget("Distance A").is_some(), "the field keeps its accessible name");
         strip
     };
     let before = place(&h);
-    // Whether the Distance field (the text input labelled Distance) takes typing.
+    // Whether the Distance A field (the text input so labelled) takes typing.
     let enabled = |h: &Harness| {
         h.output.accesskit_update.as_ref().and_then(|tree| {
             tree.nodes
                 .iter()
-                .find_map(|(_, n)| (n.role() == egui::accesskit::Role::TextInput && n.label() == Some("Distance")).then(|| !n.is_disabled()))
+                .find_map(|(_, n)| (n.role() == egui::accesskit::Role::TextInput && n.label() == Some("Distance A")).then(|| !n.is_disabled()))
         })
     };
     assert_eq!(enabled(&h), Some(true), "a distance extent types the distance");
@@ -243,9 +243,40 @@ fn extents_sit_at_the_end_of_the_distance_row() {
     let after = place(&h);
     assert_eq!(before, after, "the buttons do not move");
     assert_eq!(enabled(&h), Some(false), "through all has no distance to type");
-    // By handle: the field is labelled Distance too.
+    // By handle, as the extent and its word are named alike.
     h.step(&json!({"click": {"handle": "dialog:Extents:Distance"}})).unwrap();
     h.frames(2);
     assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::Extrude { all: false, .. })));
     assert_eq!(enabled(&h), Some(true));
+}
+
+/// A reversed asymmetric pair shows as Asymmetric; clicking that shown segment sets the plain
+/// pair rather than doing nothing.
+#[test]
+fn asymmetric_on_a_reversed_pair_sets_the_plain_pair() {
+    let mut h = extrude(true);
+    if let Some(Kind::Extrude { direction, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        *direction = TWO_SIDES_REVERSED;
+    }
+    h.frames(2);
+    assert_eq!(direction(&h), TWO_SIDES_REVERSED);
+    click(&mut h, "Asymmetric");
+    assert_eq!(direction(&h), TWO_SIDES, "Asymmetric sets the plain pair");
+    assert!(h.widget("Distance B").is_some(), "still two-sided");
+}
+
+/// The capture's words: Distance A and Advanced Properties, translated (ja here); SolidCraft's
+/// Extrude keeps Distance and Advanced.
+#[test]
+fn distance_a_and_advanced_properties_are_the_capture_words() {
+    let mut h = extrude(true);
+    h.app.preferences.language = "ja".into();
+    h.frames(2);
+    let ja = crate::i18n::Locale::for_language("ja");
+    for word in ["Distance A", "Advanced Properties"] {
+        let shown = ja.text(word);
+        assert_ne!(shown, word, "{word} is translated in ja");
+        assert!(h.widget(shown).is_some(), "{word} shows as {shown}");
+    }
+    assert!(crate::scenario::rect_of("dialog:row:Distance A").is_some(), "the handle keeps the English key");
 }

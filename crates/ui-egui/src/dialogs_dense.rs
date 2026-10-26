@@ -729,7 +729,7 @@ fn glyph_new_solid(r: egui::Rect, ink: Color32) -> Vec<egui::Shape> {
 }
 
 /// Extrude's panel in sections, as Inventor's property panel: Behavior (Direction, Extents and
-/// the distances), Output (the boolean, once there is a body) and Advanced (thin wall, start and
+/// the distances), Output (the boolean, once there is a body) and Advanced Properties (thin wall, start and
 /// taper; closed unless one of them is set). Returns whether Enter was pressed in a field.
 fn extrude_sections(app: &SolveApp, ui: &mut egui::Ui, d: &mut Dialog) -> bool {
     let mut enter = false;
@@ -759,11 +759,13 @@ fn extrude_sections(app: &SolveApp, ui: &mut egui::Ui, d: &mut Dialog) -> bool {
             // Default, Flipped, Symmetric, Asymmetric (a reversed asymmetric pair shows as Asymmetric).
             let order = [0usize, 1, 2, TWO_SIDES];
             let shown = if *direction == TWO_SIDES_REVERSED { TWO_SIDES } else { *direction };
-            let current = order.iter().position(|o| *o == shown).unwrap_or(0);
-            let mut pos = current;
+            let mut pos = order.iter().position(|o| *o == shown).unwrap_or(0);
             // Glyphs, as Inventor's row of four buttons: the words do not fit the field column.
-            if ui_kit::segmented_glyphs(ui, &mut pos, &direction_glyphs(), &[]) && pos != current {
-                *direction = order.get(pos).copied().unwrap_or(0);
+            // Compared with the direction itself, not the shown segment: Asymmetric clicked on a
+            // reversed pair sets the plain pair.
+            let picked = ui_kit::segmented_glyphs(ui, &mut pos, &direction_glyphs(), &[]).then(|| order.get(pos).copied().unwrap_or(0));
+            if let Some(picked) = picked.filter(|p| *p != *direction) {
+                *direction = picked;
                 d.extra.insert("convention".into(), json!(solidcraft_engine::doc::ExtrudeConvention::TotalDistance));
                 // An explicit direction ends the automatic choices (#1257).
                 smart.manual_dir = true;
@@ -775,7 +777,7 @@ fn extrude_sections(app: &SolveApp, ui: &mut egui::Ui, d: &mut Dialog) -> bool {
         // The extents sit at the end of the distance row, as in the capture: segments rather than
         // a dropdown, so every extent shows; glyphs, since the words do not fit. The distance
         // field stays in place (disabled) for To and Through All, so the buttons do not move.
-        let (typed, clicked) = ui_kit::expr_glyph_row(ui, "Distance", distance, cur == 0, "Extents", &mut ext, &extent_glyphs());
+        let (typed, clicked) = ui_kit::expr_glyph_row(ui, "Distance A", distance, cur == 0, "Extents", &mut ext, &extent_glyphs());
         enter |= typed;
         if clicked && ext != cur {
             *all = ext == 2;
@@ -805,7 +807,7 @@ fn extrude_sections(app: &SolveApp, ui: &mut egui::Ui, d: &mut Dialog) -> bool {
         });
     }
     let advanced = *thin || !start.is_empty() || object_on(&d.inputs, FROM_OBJECT) || *taper_present;
-    ui_kit::section(ui, "extrude_advanced", "Advanced", advanced, |ui| {
+    ui_kit::section(ui, "extrude_advanced", "Advanced Properties", advanced, |ui| {
         let was_thin = *thin;
         ui_kit::checkbox_grid(ui, &mut [("Thin Extrude", thin)], 2);
         if *thin != was_thin {
