@@ -1145,24 +1145,47 @@ fn component_rows(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, depth: usize, 
         return;
     }
     let d = depth + 1;
-    if id == 0 {
-        doc_settings(app, ui, d);
-        named_view_rows(app, ui, d, acts);
-        origin_rows(app, ui, d, acts);
-        canvas_rows(app, ui, d, acts);
-        analysis_rows(app, ui, d, acts);
-    }
     let _ = t;
+    if id == 0 {
+        // The design's own nodes, in the profile's order.
+        for node in root_order(app) {
+            use crate::profile::RootNode::*;
+            match node {
+                DocSettings => doc_settings(app, ui, d),
+                NamedViews => named_view_rows(app, ui, d, acts),
+                Origin => origin_rows(app, ui, d, acts),
+                Canvases => canvas_rows(app, ui, d, acts),
+                Analyses => analysis_rows(app, ui, d, acts),
+                Bodies => folder_rows(app, ui, id, "bodies", d, acts),
+                Sketches => folder_rows(app, ui, id, "sketches", d, acts),
+                Construction => folder_rows(app, ui, id, "construction", d, acts),
+                Features => features::rows(app, ui, id, &[], d, acts),
+                Joints => crate::dialogs_assembly::browser_joints(app, ui, d, &folder_label(app, "joints")),
+                Components => component_children(app, ui, id, d, acts),
+            }
+        }
+        return;
+    }
     for folder in ["bodies", "sketches", "construction"] {
         folder_rows(app, ui, id, folder, d, acts);
     }
     features::rows(app, ui, id, &[], d, acts);
-    if id == 0 {
-        crate::dialogs_assembly::browser_joints(app, ui, d);
+    component_children(app, ui, id, d, acts);
+}
+
+/// A component's placed children.
+fn component_children(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, depth: usize, acts: &mut Actions) {
+    for occurrence in model_children(app, id) {
+        occurrence_rows(app, ui, vec![occurrence], depth, acts);
     }
-    let children = model_children(app, id);
-    for occurrence in children {
-        occurrence_rows(app, ui, vec![occurrence], d, acts);
+}
+
+/// The design's top-level browser nodes, in the active profile's order for the document's kind.
+pub(crate) fn root_order(app: &SolveApp) -> &'static [crate::profile::RootNode] {
+    let browser = &crate::profile::active(app).browser;
+    match app.session.doc.kind {
+        solidcraft_engine::doc::DocumentKind::Assembly => &browser.assembly_root,
+        _ => &browser.part_root,
     }
 }
 
@@ -1343,11 +1366,26 @@ fn origin_things() -> [(&'static str, &'static str, Option<Thing>); 7] {
     ]
 }
 
+/// The Origin folder's rows in the active profile's order: `(key, label, icon, thing lit for
+/// it)`. A key `origin_things` does not know is left out.
+fn origin_entries(app: &SolveApp) -> Vec<(&'static str, &'static str, &'static str, Option<Thing>)> {
+    let things = origin_things();
+    crate::profile::active(app)
+        .browser
+        .origin
+        .iter()
+        .filter_map(|entry| {
+            let (key, icon, thing) = things.iter().find(|(k, ..)| *k == entry.key.as_str())?.clone();
+            Some((key, entry.label.as_deref().map_or(key, crate::i18n::tr), icon, thing))
+        })
+        .collect()
+}
+
 fn origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &Actions) {
     let key = "origin";
     let open = is_open(app, key, false);
     let lit = |thing: &Option<Thing>| thing.as_ref().map_or((false, false), |t| acts.lit.thing(t));
-    let items = origin_things();
+    let items = origin_entries(app);
     let r = draw_row(
         ui,
         ui.id().with(key),
@@ -1358,7 +1396,7 @@ fn origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &Actio
             icon: "origin",
             label: "Origin",
             dim: !app.origin_shown(),
-            mark: if items.iter().any(|(_, _, thing)| lit(thing) != (false, false)) { Mark::Branch } else { Mark::None },
+            mark: if items.iter().any(|(.., thing)| lit(thing) != (false, false)) { Mark::Branch } else { Mark::None },
             ..Default::default()
         },
     );
@@ -1374,8 +1412,7 @@ fn origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &Actio
     if !open {
         return;
     }
-    for (k, icon, thing) in items {
-        let label = k;
+    for (k, label, icon, thing) in items {
         let visible = !app.session.visibility.hidden_origin.iter().any(|h| h == k);
         let sel = match icon {
             "plane" => Some(Sel::Plane { name: k.into() }),
@@ -1868,12 +1905,18 @@ fn set_visible(app: &mut SolveApp, folder: &str, items: &[&Entry], on: bool) {
     }
 }
 
-fn folder_label(folder: &str) -> &'static str {
+/// A root folder's label: the active profile's catalog id for it, else upstream's text.
+pub(crate) fn folder_label(app: &SolveApp, folder: &str) -> String {
+    if let Some(id) = crate::profile::active(app).browser.folder_labels.get(folder) {
+        return crate::i18n::tr(id).to_string();
+    }
     match folder {
         "bodies" => "Bodies",
         "sketches" => "Sketches",
+        "joints" => "Joints",
         _ => "Construction",
     }
+    .to_string()
 }
 
 fn folder_static(folder: &str) -> &'static str {
@@ -1941,6 +1984,7 @@ fn folder_rows_at(app: &mut SolveApp, ui: &mut egui::Ui, comp: u64, path: Option
     // hidden, whatever their own eyes say.
     let shown = !app.session.folder_hidden(&key);
     let folder_faded = !shown || path.is_some_and(|p| !app.session.occurrence_visible(p));
+    let label = folder_label(app, folder);
     let r = draw_row(
         ui,
         ui.id().with(&key),
@@ -1949,7 +1993,7 @@ fn folder_rows_at(app: &mut SolveApp, ui: &mut egui::Ui, comp: u64, path: Option
             fold: Some(open),
             eye: Some(shown),
             icon: "folder",
-            label: folder_label(folder),
+            label: &label,
             dim: folder_faded,
             mark: acts.lit.branch(folder, &all),
             ..Default::default()
@@ -2454,3 +2498,7 @@ mod section_browser_tests;
 #[cfg(test)]
 #[path = "browser_card_tests.rs"]
 mod card_tests;
+
+#[cfg(test)]
+#[path = "browser_profile_tests.rs"]
+mod browser_profile_tests;

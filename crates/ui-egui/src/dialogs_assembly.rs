@@ -1334,9 +1334,9 @@ pub fn timeline_joints_vertical(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
 }
 
-/// The Joints folder at the end of the Browser: a row per joint (double-click edits, the menu
-/// edits, drives, suppresses or deletes).
-pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
+/// The Joints folder (labelled `label`, placed by the profile's root order): a row per joint
+/// (double-click edits, the menu edits, drives, suppresses or deletes).
+pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, label: &str) {
     use crate::browser::{Row, draw_row, is_open, toggle};
     let joints: Vec<(u64, String, JointKind, bool)> =
         app.session.doc.assembly.joints.iter().map(|j| (j.id, j.name.clone(), j.kind, j.suppressed)).collect();
@@ -1353,7 +1353,7 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
     let r = draw_row(
         ui,
         ui.id().with(key),
-        &Row { depth, fold: Some(open), eye: Some(folder_shown), icon: "folder", label: "Joints", dim: !folder_shown, ..Default::default() },
+        &Row { depth, fold: Some(open), eye: Some(folder_shown), icon: "folder", label, dim: !folder_shown, ..Default::default() },
     );
     if r.eye {
         crate::browser::toggle_folder(app, key);

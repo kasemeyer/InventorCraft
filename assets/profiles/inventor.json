@@ -57,6 +57,20 @@
     {"keys": "V", "command": "solid.move", "scope": "assembly"}
   ],
   "button_labels": {"construct.plane.offset": "Plane", "construct.axis.edge": "Axis", "construct.point.vertex": "Point", "component.insert_design": "Place", "component.create": "Create"},
+  "browser": {
+    "part_root": ["named_views", "bodies", "origin", "canvases", "analyses", "sketches", "construction", "features", "joints", "components", "doc_settings"],
+    "assembly_root": ["named_views", "joints", "origin", "canvases", "analyses", "bodies", "sketches", "construction", "features", "components", "doc_settings"],
+    "folder_labels": {"bodies": "profile.inventor.browser.solid_bodies", "joints": "profile.inventor.browser.relationships"},
+    "origin": [
+      {"key": "YZ", "label": "profile.inventor.origin.yz"},
+      {"key": "XZ", "label": "profile.inventor.origin.xz"},
+      {"key": "XY", "label": "profile.inventor.origin.xy"},
+      {"key": "X", "label": "profile.inventor.origin.x"},
+      {"key": "Y", "label": "profile.inventor.origin.y"},
+      {"key": "Z", "label": "profile.inventor.origin.z"},
+      {"key": "O", "label": "profile.inventor.origin.center"}
+    ]
+  },
   "omitted": {
     "timeline.delete": "the Delete key and the browser and history menus delete; Inventor has no Delete button",
     "view.list": "agents list named views; people use the Named Views browser folder",
