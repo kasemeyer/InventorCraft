@@ -21,7 +21,9 @@ pub struct SketchView {
 /// Once per frame, before `view_history::settle`: on None→Some remember the settled view (when
 /// restoring) and look at the sketch unless a look-at is already animating (when looking);
 /// on Some→Some look at the new sketch; on Some→None animate back to the remembered view.
-pub(crate) fn tick(app: &mut SolveApp) {
+/// `busy` is `view_history::busy` for this frame: while a gesture or a resting 3D mouse keeps the
+/// view from settling, the settled view is stale and the camera itself is the view to return to.
+pub(crate) fn tick(app: &mut SolveApp, busy: bool) {
     let now = app.session.active_sketch;
     let was = std::mem::replace(&mut app.sketch_view.open, now);
     if now == was {
@@ -33,7 +35,11 @@ pub(crate) fn tick(app: &mut SolveApp) {
         (None, Some(_)) => {
             // The view from before: `settle` has not run since the sketch opened, so a look-at
             // that already landed (no animation) is not it yet.
-            app.sketch_view.return_to = restore.then(|| crate::view_history::settled(app).unwrap_or(app.cam));
+            // While busy the settled view predates the gesture: take the camera (where a look-at
+            // that just started is moving from).
+            let current = app.cam_anim.as_ref().map_or(app.cam, |anim| anim.from);
+            let before = if busy { current } else { crate::view_history::settled(app).unwrap_or(app.cam) };
+            app.sketch_view.return_to = restore.then_some(before);
             if look {
                 look_at(app);
             }

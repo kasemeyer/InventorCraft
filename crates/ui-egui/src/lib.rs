@@ -1674,8 +1674,8 @@ impl SolveApp {
             self.set_up_axis(self.ui.up_axis);
         }
         self.step_view_animation(ctx);
-        sketch_view::tick(self);
         let busy = view_history::busy(self, ctx);
+        sketch_view::tick(self, busy);
         view_history::settle(self, busy);
         self.poll_control_jobs(ctx);
         self.drain_control(ctx);

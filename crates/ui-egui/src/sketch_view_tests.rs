@@ -197,3 +197,28 @@ fn switching_tabs_out_of_a_sketch_does_not_restore_its_view() {
     h.frames(2);
     assert!(h.app.cam == c0, "its finish still returns to the view from before it: {:?} vs {:?}", h.app.cam, c0);
 }
+
+/// One frame of 3D mouse motion queued for the viewport, as `space_mouse::navigate_frame` hands it.
+fn cap_turns(h: &mut Harness) {
+    use crate::space_mouse::{DeviceMotion, Motion};
+    h.app.viewport.device_motion = Some(DeviceMotion { motion: Motion { translation: [0.0; 3], rotation: [0.5, 0.0, 0.0] }, seconds: 0.02 });
+    h.frames(1);
+}
+
+#[test]
+fn a_sketch_entered_while_the_3d_mouse_rests_returns_to_where_the_cap_left_the_view() {
+    let mut h = inv();
+    let c0 = iso(&mut h);
+    for _ in 0..5 {
+        cap_turns(&mut h);
+    }
+    let moved = h.app.cam;
+    assert!(moved != c0, "the cap turned the view");
+    assert!(crate::view_history::settled(&h.app) == Some(c0), "still resting: nothing settled yet");
+    assert_eq!(h.call("engine.execute", json!({"command":"sketch.create","params":{"plane":"XZ"}}))["ok"], json!(true));
+    h.frames(30);
+    assert!(h.app.cam != moved, "the sketch was looked at");
+    h.app.finish_sketch();
+    h.frames(2);
+    assert!(h.app.cam == moved, "back where the cap left it, not the stale settled view: {:?}", h.app.cam);
+}
