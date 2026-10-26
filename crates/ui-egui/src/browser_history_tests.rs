@@ -75,7 +75,7 @@ fn work_features_nest_under_their_consumer() {
     let (wp, s3) = (id_of(&h, "WP"), id_of(&h, "S3"));
     let doc = &h.app.session.doc;
     assert_eq!(parents(doc, None), BTreeMap::from([(s3, e2), (wp, s3)]));
-    assert_eq!(top_rows(doc).into_iter().map(|(_, id)| id).collect::<Vec<_>>(), [e2]);
+    assert_eq!(top_rows(doc, &parents(doc, doc.marker)).into_iter().map(|(_, id)| id).collect::<Vec<_>>(), [e2]);
     h.app.tree.expanded.insert(format!("history/{e2}"));
     h.app.tree.expanded.insert(format!("history/{s3}"));
     h.frames(2);
