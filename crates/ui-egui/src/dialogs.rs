@@ -2602,7 +2602,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let continues = continues(app, &d);
     // Enter with a menu open over the panel (the marking menu) is not the panel's: neither the
     // footer's OK nor the keyboard's apply takes it.
-    let menu_enter = app.viewport.context_menu.is_some() && ctx.input(|i| i.key_pressed(egui::Key::Enter));
+    let menu_enter = crate::marking_menu::holds_keys(app) && ctx.input(|i| i.key_pressed(egui::Key::Enter));
     if let Kind::ConfirmDelete { with, fail, .. } = &d.kind {
         let detail = with.join(" · ");
         let (closed, action) = crate::ui_kit::Confirm::new(egui::Id::new(("sc_dialog", title(&d.kind))), "delete", &heading)

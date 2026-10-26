@@ -70,6 +70,13 @@ pub(crate) fn context(app: &SolveApp) -> MenuContext {
     }
 }
 
+/// A menu is open under a profile with marking menus (which open inside tools and panels): Esc
+/// and Enter are the menu's then, not the tool's or the panel's. Without marking menus
+/// (SolidCraft) the keys reach the tool and the panel as they always have.
+pub(crate) fn holds_keys(app: &SolveApp) -> bool {
+    app.viewport.context_menu.is_some() && layout(app).is_some()
+}
+
 fn current(app: &SolveApp) -> Option<(MenuContext, &'static MenuLayout)> {
     let ctx = context(app);
     layout(app)?.get(&ctx).map(|l| (ctx, l))

@@ -2288,9 +2288,9 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                     app.last_escape = None;
                     continue;
                 }
-                // A menu open over the view (the marking menu inside a tool or a panel) takes this
-                // Esc alone: the tool, the panel and the sketch stay as they were.
-                if app.viewport.context_menu.is_some() {
+                // The marking menu open over the view (inside a tool or a panel) takes this Esc
+                // alone: the tool, the panel and the sketch stay as they were.
+                if crate::marking_menu::holds_keys(app) {
                     crate::context_menu::close(app);
                     app.last_escape = None;
                     continue;
