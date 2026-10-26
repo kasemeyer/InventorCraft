@@ -35,7 +35,7 @@ cargo config (`%USERPROFILE%\.cargo\config.toml`, not the repo's, so upstream is
 
 ```toml
 [build]
-jobs = 12
+jobs = 20
 ```
 
 and start long runs at below-normal priority, for example from PowerShell:
