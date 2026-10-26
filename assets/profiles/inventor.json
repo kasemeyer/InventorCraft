@@ -58,8 +58,8 @@
   ],
   "button_labels": {"construct.plane.offset": "Plane", "construct.axis.edge": "Axis", "construct.point.vertex": "Point", "component.insert_design": "Place", "component.create": "Create"},
   "browser": {
-    "part_root": ["named_views", "bodies", "origin", "history", "end_of_part"],
-    "assembly_root": ["named_views", {"node": "joints", "always": true}, "origin", "canvases", "analyses", "bodies", "sketches", "construction", "features", "components"],
+    "part_root": ["named_views", "bodies", "origin", "history", "end_of_part", "canvases", "analyses", "components", "doc_settings"],
+    "assembly_root": ["named_views", {"node": "joints", "always": true}, "origin", "canvases", "analyses", "bodies", "sketches", "construction", "features", "components", "doc_settings"],
     "folder_labels": {
       "named_views": "profile.inventor.browser.representations",
       "bodies": "profile.inventor.browser.solid_bodies",

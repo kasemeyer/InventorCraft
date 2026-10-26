@@ -40,7 +40,11 @@ fn inventor_part_root_is_flat_history_between_origin_and_end_of_part() {
     h.app.tree.collapsed.insert("c0/bodies".into());
     h.frames(2);
     let labels = labels();
-    assert_eq!(labels[1..], ["Representations", "Solid Bodies", "Origin", "Profile", name.as_str(), "End of Part"], "{labels:?}");
+    assert_eq!(
+        labels[1..],
+        ["Representations", "Solid Bodies", "Origin", "Profile", name.as_str(), "End of Part", "Document Settings"],
+        "{labels:?}"
+    );
     for folder in ["fold:Sketches", "fold:Features", "fold:Named Views", "fold:Bodies"] {
         assert!(crate::scenario::handle_at(folder).is_none(), "{folder} is drawn: {labels:?}");
     }
@@ -92,14 +96,14 @@ fn solidcraft_root_keeps_its_folders() {
 #[test]
 fn root_lists_parse_always_flags_and_reject_duplicates() {
     let inventor = crate::profile::get("inventor").unwrap();
-    assert_eq!(inventor.browser.part_root, [NamedViews, Bodies, Origin, History, EndOfPart]);
+    assert_eq!(inventor.browser.part_root, [NamedViews, Bodies, Origin, History, EndOfPart, Canvases, Analyses, Components, DocSettings]);
     assert_eq!(inventor.browser.assembly_always, [Joints]);
     assert!(inventor.browser.part_always.is_empty());
     assert!(crate::profile::get("solidcraft").unwrap().browser.assembly_always.is_empty());
     let mut twice = inventor.clone();
     twice.browser.part_root.push(Origin);
     let problems = crate::profile::validate(&twice);
-    assert_eq!(problems, ["browser.part_root: Origin appears twice (entry 5)"], "{problems:?}");
+    assert_eq!(problems, ["browser.part_root: Origin appears twice (entry 9)"], "{problems:?}");
 }
 
 #[test]
@@ -125,4 +129,42 @@ fn solidcraft_browser_keeps_its_order_and_names() {
     assert_eq!(origin_children(&mut h), ["O", "X", "Y", "Z", "XY", "XZ", "YZ"]);
     assert_eq!(folder_label(&h.app, "bodies"), "Bodies");
     assert_eq!(folder_label(&h.app, "named_views"), "Named Views");
+}
+
+#[test]
+fn inventor_part_shows_canvases_only_with_a_canvas() {
+    let mut h = inventor(Part);
+    assert!(!labels().iter().any(|l| l == "Canvases"), "{:?}", labels());
+    let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+    png.extend(400u32.to_be_bytes());
+    png.extend(200u32.to_be_bytes());
+    png.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
+    let data = solidcraft_engine::doc::canvas::base64_encode(&png);
+    h.app.run("canvas.insert", json!({"data": data, "plane": "XY", "width": 80})).unwrap();
+    h.frames(2);
+    let labels = labels();
+    assert!(position(&labels, "Canvases") > position(&labels, "End of Part"), "{labels:?}");
+}
+
+#[test]
+fn inventor_part_shows_a_plain_component_after_end_of_part() {
+    let mut h = inventor(Part);
+    h.app.run("component.create", json!({"name":"Block","grounded":false})).unwrap();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+    h.app.run("component.activate", json!({"component":0})).unwrap();
+    h.frames(2);
+    let labels = labels();
+    assert!(position(&labels, "Block:1") > position(&labels, "End of Part"), "{labels:?}");
+}
+
+#[test]
+fn inventor_document_settings_is_the_last_root_row_and_opens() {
+    let mut h = inventor(Part);
+    let labels = labels();
+    assert_eq!(labels.last().map(String::as_str), Some("Document Settings"), "{labels:?}");
+    h.step(&json!({"click":{"chevron":"Document Settings"}})).unwrap();
+    h.frames(2);
+    let units = format!("Units: {}", h.app.session.doc.units);
+    let labels = super::drawn_rows().into_iter().map(|(label, ..)| label).collect::<Vec<_>>();
+    assert!(position(&labels, &units) > position(&labels, "Document Settings"), "{labels:?}");
 }
