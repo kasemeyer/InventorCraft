@@ -59,7 +59,11 @@ fn inventor_turns_the_workflow_on() {
 #[test]
 fn inventor_face_ring_follows_the_capture() {
     let face = &inventor_layouts()[&MenuContext::Face];
-    assert_eq!(face.ring, strings(&EIGHT));
+    // SE is the capture's Select Tangencies, which a face has no counterpart for: an empty slot.
+    let mut ring = EIGHT;
+    ring[3] = "";
+    assert_eq!(face.ring, strings(&ring));
+    assert!(face.unmapped.iter().any(|u| u == "SE: Select Tangencies"), "{:?}", face.unmapped);
     assert_eq!(face.overflow, strings(&["ui.repeat", "-", "ui.previousView", "ui.home", "-", "ui.properties"]));
     assert_eq!(face.evidence.as_deref(), Some("docs/evidence/screenshots/part/marking-menu.png"));
 }

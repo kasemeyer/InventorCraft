@@ -110,11 +110,13 @@ fn selected_curves(app: &SolveApp, lines_only: bool) -> Vec<String> {
 }
 
 /// Whether the open panel would act on `action` now; OK and Apply also need what is picked to
-/// make the feature (the capture greys them with nothing picked).
+/// make the feature (the capture greys them with nothing picked) and, as the footer does, a
+/// preview without an error, so the menu never offers what the footer greys.
 fn panel_can(app: &SolveApp, action: PanelAction) -> bool {
-    app.dialog
-        .as_ref()
-        .is_some_and(|d| crate::dialogs::can_act(app, d, action) && (action == PanelAction::Cancel || crate::dialogs::makes_feature(app, d)))
+    app.dialog.as_ref().is_some_and(|d| {
+        crate::dialogs::can_act(app, d, action)
+            && (action == PanelAction::Cancel || (crate::dialogs::makes_feature(app, d) && (!d.previews() || app.preview.error.is_none())))
+    })
 }
 
 /// The one selected sketch dimension, if exactly one is selected.

@@ -367,3 +367,86 @@ fn the_ring_is_drawn_as_pills_and_a_click_runs_one() {
     assert!(h.app.viewport.context_menu.is_none(), "a pill click closes the menu");
     assert!(h.app.cam.back().z > 0.999, "and runs Look At: {:?}", h.app.cam.back());
 }
+
+/// A finished 60 × 40 rectangle and the Extrude panel open on it, under Inventor.
+fn extrude_panel() -> Harness {
+    let mut h = inventor(DocumentKind::Part);
+    h.app.preferences.look_at_anim = false;
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[60,40]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.start("solid.extrude");
+    h.frames(2);
+    h
+}
+
+#[test]
+fn escape_with_the_menu_open_over_a_tool_only_closes_the_menu() {
+    let mut h = inventor(DocumentKind::Part);
+    h.app.preferences.look_at_anim = false;
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.start("sketch.line");
+    h.frames(2);
+    open(&mut h.app, pos2(400.0, 300.0));
+    h.frames(1);
+    assert!(h.app.viewport.context_menu.is_some());
+    h.step(&json!({"key":"Escape"})).unwrap();
+    assert!(h.app.viewport.context_menu.is_none(), "Esc closed the menu");
+    assert!(h.app.tool.is_some(), "and left the tool out");
+    assert!(h.app.session.active_sketch.is_some());
+}
+
+#[test]
+fn escape_with_the_menu_open_over_a_panel_keeps_the_panel() {
+    let mut h = extrude_panel();
+    open(&mut h.app, pos2(400.0, 300.0));
+    h.frames(1);
+    assert!(h.app.viewport.context_menu.is_some());
+    h.step(&json!({"key":"Escape"})).unwrap();
+    h.frames(1);
+    assert!(h.app.viewport.context_menu.is_none(), "Esc closed the menu");
+    assert!(h.app.dialog.is_some(), "and kept the Extrude panel");
+    h.step(&json!({"key":"Escape"})).unwrap();
+    h.frames(1);
+    assert!(h.app.dialog.is_none(), "the next Esc cancels the panel");
+}
+
+#[test]
+fn enter_with_the_menu_open_does_not_apply_the_panel() {
+    let mut h = extrude_panel();
+    open(&mut h.app, pos2(400.0, 300.0));
+    h.frames(1);
+    assert_eq!(entry(&describe(&h.app), "items", "ui.ok")["enabled"], json!(true), "the panel could apply");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    h.frames(2);
+    assert_eq!(extrudes(&h), 0, "Enter over the menu applied nothing");
+    assert!(h.app.dialog.is_some(), "the panel stays open");
+}
+
+#[test]
+fn the_menus_ok_and_apply_are_off_while_the_preview_fails() {
+    let mut h = extrude_panel();
+    open(&mut h.app, pos2(400.0, 300.0));
+    let menu = describe(&h.app);
+    assert_eq!(entry(&menu, "items", "ui.ok")["enabled"], json!(true));
+    assert_eq!(entry(&menu, "radial", "ui.applyContinue")["enabled"], json!(true));
+    // The footer greys OK and + while the preview reports an error; so does the menu.
+    h.app.preview.error = Some("the extrusion fails".into());
+    let menu = describe(&h.app);
+    assert_eq!(entry(&menu, "items", "ui.ok")["enabled"], json!(false));
+    assert_eq!(entry(&menu, "radial", "ui.applyContinue")["enabled"], json!(false));
+    assert_eq!(entry(&menu, "radial", "ui.cancel")["enabled"], json!(true), "Cancel still works");
+}
+
+#[test]
+fn the_face_ring_has_no_dead_select_tangencies_pill() {
+    let mut h = boxed(DocumentKind::Part);
+    let menu = open_on_top_face(&mut h);
+    let ring = ids(&menu, "radial");
+    assert_eq!(ring[3], "-", "SE is an empty slot on a face: {ring:?}");
+    assert!(!ring.contains(&"ui.tangentChain".to_string()));
+    assert!(layout_of(&h, MenuContext::Face).unmapped.iter().any(|u| u == "SE: Select Tangencies"));
+    assert_eq!(layout_of(&h, MenuContext::Edge).ring[3], "ui.tangentChain", "an edge keeps Select Tangent Chain");
+}

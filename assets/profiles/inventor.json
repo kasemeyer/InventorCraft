@@ -15,10 +15,10 @@
     "status_bar": true,
     "sectioned_extrude": true,
     "marking_menu": {
-      "face":   {"ring": ["ui.lookAt", "solid.extrude", "ui.selectOther", "ui.tangentChain", "sketch.create", "construct.plane.offset", "edit.undo", "inspect.measure"],
+      "face":   {"ring": ["ui.lookAt", "solid.extrude", "ui.selectOther", "", "sketch.create", "construct.plane.offset", "edit.undo", "inspect.measure"],
                  "overflow": ["ui.repeat", "-", "ui.previousView", "ui.home", "-", "ui.properties"],
                  "evidence": "docs/evidence/screenshots/part/marking-menu.png",
-                 "unmapped": ["list: 3D Grips", "list: Create Note", "list: Assign Entity Name…", "list: Export Face As…", "list: Help Topics…"]},
+                 "unmapped": ["SE: Select Tangencies", "list: 3D Grips", "list: Create Note", "list: Assign Entity Name…", "list: Export Face As…", "list: Help Topics…"]},
       "edge":   {"ring": ["solid.fillet", "solid.extrude", "ui.selectOther", "ui.tangentChain", "sketch.create", "construct.plane.offset", "edit.undo", "inspect.measure"],
                  "overflow": ["ui.repeat", "-", "ui.lookAt", "ui.previousView", "ui.home"],
                  "evidence": "docs/evidence/screenshots/marking-menus/edge-crop.png",

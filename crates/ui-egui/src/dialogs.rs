@@ -2600,6 +2600,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let repeatable = repeatable(&d);
     // Feature panels apply with "+" and stay open for the next one, where the profile asks.
     let continues = continues(app, &d);
+    // Enter with a menu open over the panel (the marking menu) is not the panel's: neither the
+    // footer's OK nor the keyboard's apply takes it.
+    let menu_enter = app.viewport.context_menu.is_some() && ctx.input(|i| i.key_pressed(egui::Key::Enter));
     if let Kind::ConfirmDelete { with, fail, .. } = &d.kind {
         let detail = with.join(" · ");
         let (closed, action) = crate::ui_kit::Confirm::new(egui::Id::new(("sc_dialog", title(&d.kind))), "delete", &heading)
@@ -2675,6 +2678,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             cancel |= closed;
             if app.issue_report.draft.is_none() {
                 match action {
+                    crate::ui_kit::Action::Ok if menu_enter => {}
                     crate::ui_kit::Action::Ok => {
                         ok = true;
                         apply_again = false;
@@ -2707,7 +2711,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         && !matches!(&d.kind, Kind::Motion(k) if k.wide())
         && !matches!(&d.kind, Kind::Material { editor, .. } if editor.editing());
     let report_active = app.issue_report.draft.is_some();
-    if !report_active && enter_applies && app.applying.is_none() && (enter || canvas_enter || (enter_free && nothing_focused)) {
+    if !report_active && !menu_enter && enter_applies && app.applying.is_none() && (enter || canvas_enter || (enter_free && nothing_focused)) {
         ok = true;
     }
     // OK, "+" or Cancel asked for from outside the footer (the marking menu) acts like its

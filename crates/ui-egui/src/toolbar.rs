@@ -2288,6 +2288,13 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                     app.last_escape = None;
                     continue;
                 }
+                // A menu open over the view (the marking menu inside a tool or a panel) takes this
+                // Esc alone: the tool, the panel and the sketch stay as they were.
+                if app.viewport.context_menu.is_some() {
+                    crate::context_menu::close(app);
+                    app.last_escape = None;
+                    continue;
+                }
                 // Two quick presses in a sketch finish it (keeping it, like Finish Sketch);
                 // the first one has already cancelled whatever was active.
                 let now = ctx.input(|i| i.time);
