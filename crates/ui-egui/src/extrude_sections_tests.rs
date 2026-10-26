@@ -148,3 +148,62 @@ fn direction_and_extents_rows_fit_the_panel() {
         }
     }
 }
+
+/// A glyph's filled rectangles and its outlined (stroke-only) rectangles.
+fn boxes(shapes: &[egui::Shape]) -> (Vec<egui::Rect>, Vec<egui::Rect>) {
+    let (mut filled, mut outlined) = (Vec::new(), Vec::new());
+    for s in shapes {
+        if let egui::Shape::Rect(r) = s {
+            if r.fill == egui::Color32::TRANSPARENT { outlined.push(r.rect) } else { filled.push(r.rect) }
+        }
+    }
+    (filled, outlined)
+}
+
+#[test]
+fn boolean_glyphs_draw_bodies_not_words() {
+    let square = egui::Rect::from_center_size(egui::pos2(50.0, 50.0), egui::vec2(20.0, 20.0));
+    let ink = egui::Color32::WHITE;
+    let glyphs = dense::boolean_glyphs();
+    assert_eq!(glyphs.iter().map(|g| g.key).collect::<Vec<_>>(), ["Join", "Cut", "Intersect", "New Solid"]);
+    for g in &glyphs {
+        let shapes = (g.glyph)(square, ink);
+        assert!(!shapes.iter().any(|s| matches!(s, egui::Shape::Text(_))), "{}: no text", g.key);
+        assert!(shapes.iter().all(|s| square.expand(1.0).contains_rect(s.visual_bounding_rect())), "{}: inside its square", g.key);
+        assert_eq!(g.tip, g.key, "{}: the word is the hover text (English)", g.key);
+    }
+    let shapes: Vec<_> = glyphs.iter().map(|g| (g.glyph)(square, ink)).collect();
+    // Join: two filled bodies that overlap (merged).
+    let (filled, outlined) = boxes(&shapes[0]);
+    assert!(filled.len() == 2 && outlined.is_empty(), "Join: two filled bodies {filled:?}");
+    let overlap = filled[0].intersect(filled[1]);
+    assert!(overlap.is_positive(), "Join: the bodies overlap");
+    // Cut: the body less the overlap is filled; the tool is an outline; the bite is empty.
+    let (filled, outlined) = boxes(&shapes[1]);
+    assert!(filled.len() == 2 && outlined.len() == 1, "Cut: the body in two parts and the tool {filled:?} {outlined:?}");
+    assert!(!filled.iter().any(|f| f.contains(overlap.center())), "Cut: the bite is removed");
+    assert!(outlined[0].contains(overlap.center()), "Cut: the tool's outline runs over the bite");
+    // Intersect: only the overlap filled, both bodies outlines.
+    let (filled, outlined) = boxes(&shapes[2]);
+    assert!(filled.len() == 1 && outlined.len() == 2, "Intersect: the overlap and two outlines");
+    assert!((filled[0].area() - overlap.area()).abs() < 0.01 && filled[0].contains(overlap.center()), "Intersect: the overlap only");
+    // New Solid: one lone body and a plus (two crossing segments) outside it.
+    let (filled, outlined) = boxes(&shapes[3]);
+    let plus: Vec<_> = shapes[3].iter().filter(|s| matches!(s, egui::Shape::LineSegment { .. })).map(|s| s.visual_bounding_rect()).collect();
+    assert!(filled.len() == 1 && outlined.is_empty() && plus.len() == 2, "New Solid: a body and a plus");
+    assert!(plus[0].intersects(plus[1]) && !filled[0].intersects(plus[0]), "New Solid: the plus crosses beside the body");
+}
+
+#[test]
+fn boolean_row_fits_the_panel() {
+    let h = extrude(true);
+    let row = crate::scenario::rect_of("dialog:segments:Boolean").expect("Boolean row drawn");
+    let direction = crate::scenario::rect_of("dialog:segments:Direction").expect("Direction row drawn");
+    assert!((row.left() - direction.left()).abs() < 0.5 && (row.right() - direction.right()).abs() < 0.5, "Boolean sits in the field column");
+    assert!(row.width() / 4.0 >= row.height(), "each segment holds its glyph square ({} for {})", row.width() / 4.0, row.height());
+    for key in ["Join", "Cut", "Intersect", "New Solid"] {
+        let at = crate::scenario::handle_at(&format!("dialog:Boolean:{key}")).unwrap_or_else(|| panic!("Boolean:{key} drawn"));
+        assert!(row.contains(at), "Boolean:{key} inside its row");
+        assert!(h.widget(key).is_some(), "{key} is the segment's accessible name");
+    }
+}

@@ -665,6 +665,69 @@ fn glyph_through_all(r: egui::Rect, ink: Color32) -> Vec<egui::Shape> {
     shapes
 }
 
+/// Extrude's Boolean segments in Inventor's order (Join, Cut, Intersect, New Solid), as
+/// [`direction_glyphs`]. Not the icon set's `cut`: that is the clipboard's Cut.
+pub(super) fn boolean_glyphs() -> [ui_kit::GlyphSegment; 4] {
+    [
+        glyph_segment("Join", glyph_join),
+        glyph_segment("Cut", glyph_cut),
+        glyph_segment("Intersect", glyph_intersect),
+        glyph_segment("New Solid", glyph_new_solid),
+    ]
+}
+
+/// A rectangle of the glyph square `r` from fractions of its side (left, top, right, bottom).
+fn glyph_box(r: egui::Rect, l: f32, t: f32, rt: f32, b: f32) -> egui::Rect {
+    let s = r.width();
+    egui::Rect::from_min_max(r.min + egui::vec2(l * s, t * s), r.min + egui::vec2(rt * s, b * s))
+}
+
+/// The two overlapping bodies of the boolean glyphs: the body (upper left) and the tool (lower right).
+fn glyph_bodies(r: egui::Rect) -> (egui::Rect, egui::Rect) {
+    (glyph_box(r, 0.1, 0.1, 0.62, 0.62), glyph_box(r, 0.38, 0.38, 0.9, 0.9))
+}
+
+/// A body drawn as an outline only (the part a boolean leaves out).
+fn glyph_outline(rect: egui::Rect, ink: Color32, s: f32) -> egui::Shape {
+    egui::Shape::rect_stroke(rect, 1.0, egui::Stroke::new(glyph_stroke(s) * 0.8, ink.gamma_multiply(0.55)), egui::StrokeKind::Inside)
+}
+
+/// Join: both bodies filled, merged into one.
+fn glyph_join(r: egui::Rect, ink: Color32) -> Vec<egui::Shape> {
+    let (body, tool) = glyph_bodies(r);
+    vec![egui::Shape::rect_filled(body, 1.0, ink), egui::Shape::rect_filled(tool, 1.0, ink)]
+}
+
+/// Cut: the body with the tool's bite removed (the body less the overlap, as two filled
+/// rectangles); the tool an outline.
+fn glyph_cut(r: egui::Rect, ink: Color32) -> Vec<egui::Shape> {
+    let (_, tool) = glyph_bodies(r);
+    vec![
+        egui::Shape::rect_filled(glyph_box(r, 0.1, 0.1, 0.62, 0.38), 0.0, ink),
+        egui::Shape::rect_filled(glyph_box(r, 0.1, 0.38, 0.38, 0.62), 0.0, ink),
+        glyph_outline(tool, ink, r.width()),
+    ]
+}
+
+/// Intersect: only the overlap filled; both bodies outlines.
+fn glyph_intersect(r: egui::Rect, ink: Color32) -> Vec<egui::Shape> {
+    let (body, tool) = glyph_bodies(r);
+    vec![glyph_outline(body, ink, r.width()), glyph_outline(tool, ink, r.width()), egui::Shape::rect_filled(body.intersect(tool), 0.0, ink)]
+}
+
+/// New Solid: a lone body and a plus beside it.
+fn glyph_new_solid(r: egui::Rect, ink: Color32) -> Vec<egui::Shape> {
+    let s = r.width();
+    let c = r.min + egui::vec2(0.76 * s, 0.24 * s);
+    let arm = 0.14 * s;
+    let stroke = egui::Stroke::new(glyph_stroke(s), ink);
+    vec![
+        egui::Shape::rect_filled(glyph_box(r, 0.1, 0.4, 0.6, 0.9), 1.0, ink),
+        egui::Shape::line_segment([c - egui::vec2(arm, 0.0), c + egui::vec2(arm, 0.0)], stroke),
+        egui::Shape::line_segment([c - egui::vec2(0.0, arm), c + egui::vec2(0.0, arm)], stroke),
+    ]
+}
+
 /// Extrude's panel in sections, as Inventor's property panel: Behavior (Direction, Extents and
 /// the distances), Output (the boolean, once there is a body) and Advanced (thin wall, start and
 /// taper; closed unless one of them is set). Returns whether Enter was pressed in a field.
@@ -691,7 +754,6 @@ fn extrude_sections(app: &SolveApp, ui: &mut egui::Ui, d: &mut Dialog) -> bool {
     else {
         return false;
     };
-    let segments = |labels: &[&str]| -> Vec<String> { labels.iter().map(|l| tr(l).to_owned()).collect() };
     ui_kit::section(ui, "extrude_behavior", "Behavior", true, |ui| {
         form_row(ui, "Direction", |ui| {
             // Default, Flipped, Symmetric, Asymmetric (a reversed asymmetric pair shows as Asymmetric).
@@ -735,9 +797,8 @@ fn extrude_sections(app: &SolveApp, ui: &mut egui::Ui, d: &mut Dialog) -> bool {
                 let order = [1usize, 2, 3, 0];
                 let current = order.iter().position(|o| *o == *operation).unwrap_or(0);
                 let mut pos = current;
-                let labels = segments(&["Join", "Cut", "Intersect", "New Solid"]);
-                let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
-                if ui_kit::segmented(ui, &mut pos, &labels, ui_kit::Segments { proportional: true, ..Default::default() }) && pos != current {
+                // Glyphs, as Inventor's row of buttons: the words do not fit the field column.
+                if ui_kit::segmented_glyphs(ui, &mut pos, &boolean_glyphs(), &[]) && pos != current {
                     *operation = order.get(pos).copied().unwrap_or(0);
                     // A choice made by hand sticks.
                     *auto_op = false;
