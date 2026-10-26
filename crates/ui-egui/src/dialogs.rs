@@ -422,8 +422,36 @@ impl Default for HoleOpts {
     }
 }
 
+/// A footer action asked for from outside the footer (the marking menu).
+// Only tests ask for these until the marking menu does (B-2 Task 4); then this expectation fails and goes.
+#[cfg_attr(not(test), expect(dead_code, reason = "the marking menu asks for OK and + through `Dialog::requested` in B-2 Task 4"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PanelAction {
+    Ok,
+    ApplyAndContinue,
+}
+
+/// Feature panels that can apply and stay open for the next one.
+pub(crate) fn continues_kind(kind: &Kind) -> bool {
+    matches!(
+        kind,
+        Kind::Extrude { .. }
+            | Kind::Revolve { .. }
+            | Kind::Fillet { .. }
+            | Kind::Hole { .. }
+            | Kind::Shell { .. }
+            | Kind::Draft { .. }
+            | Kind::PatternRect { .. }
+            | Kind::PatternCirc { .. }
+            | Kind::Mirror
+            | Kind::Combine { .. }
+    )
+}
+
 #[derive(Clone, Debug)]
 pub struct Dialog {
+    /// OK or "+" asked for from outside the footer (the marking menu); taken on the next `show`.
+    pub(crate) requested: Option<PanelAction>,
     pub kind: Kind,
     /// Selection inputs, in order; clicks in the viewport go to the active one.
     pub inputs: Vec<SelInput>,
@@ -623,6 +651,7 @@ impl Dialog {
     pub(crate) fn new(kind: Kind, inputs: Vec<SelInput>) -> Dialog {
         let chain_applied = matches!(kind, Kind::Fillet { chain: true, .. });
         Dialog {
+            requested: None,
             kind,
             inputs,
             active: 0,
@@ -2558,6 +2587,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let window = panel.window(ctx);
     let repeatable =
         matches!(&d.kind, Kind::SketchModify(k) if crate::sketch_modify_ui::repeatable(k)) && d.editing.is_none() && !d.extra.contains_key("pattern");
+    // Feature panels apply with "+" and stay open for the next one, where the profile asks.
+    let continues = !repeatable && d.editing.is_none() && crate::profile::active(app).workflow.apply_and_continue && continues_kind(&d.kind);
     if let Kind::ConfirmDelete { with, fail, .. } = &d.kind {
         let detail = with.join(" · ");
         let (closed, action) = crate::ui_kit::Confirm::new(egui::Id::new(("sc_dialog", title(&d.kind))), "delete", &heading)
@@ -2587,7 +2618,13 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 drag_key: title(&d.kind),
                 moved,
                 docked,
-                apply_label: repeatable.then_some("Apply"),
+                apply_label: if repeatable {
+                    Some("Apply")
+                } else if continues {
+                    Some("+")
+                } else {
+                    None
+                },
             };
             let applying = app.applying.is_some();
             let mut collapsed = d.collapsed;
@@ -2661,6 +2698,15 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let report_active = app.issue_report.draft.is_some();
     if !report_active && enter_applies && app.applying.is_none() && (enter || canvas_enter || (enter_free && nothing_focused)) {
         ok = true;
+    }
+    // OK or "+" asked for from outside the footer (the marking menu) acts like its button.
+    match d.requested.take() {
+        Some(PanelAction::Ok) if has_ok => ok = true,
+        Some(PanelAction::ApplyAndContinue) if continues => {
+            ok = true;
+            apply_again = true;
+        }
+        _ => {}
     }
     if !report_active && esc && !app.esc_handled {
         app.esc_handled = true;
@@ -5609,3 +5655,7 @@ mod shell_thickness_tests {
         assert_eq!(dialog_commands(&h.app, d).err().as_deref(), Some("enter the thickness"));
     }
 }
+
+#[cfg(test)]
+#[path = "panel_flow_tests.rs"]
+mod panel_flow_tests;
