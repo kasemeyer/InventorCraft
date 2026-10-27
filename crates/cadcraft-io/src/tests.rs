@@ -860,7 +860,8 @@ fn generated_arrowhead_blocks_are_not_kept_as_user_blocks() {
     }
     // TCI-CAD: the DWG leg (cadcraft-dwg round trip) removed; the DXF leg is upstream's. The next
     // TCI-CAD: line's array also held `(from_dwg, "DWG")`.
-    for (back, what) in [(read_dxf(dxf.as_bytes()).unwrap(), "DXF")] { // TCI-CAD: DXF leg only (DWG removed)
+    for (back, what) in [(read_dxf(dxf.as_bytes()).unwrap(), "DXF")] {
+        // TCI-CAD: DXF leg only (DWG removed)
         assert!(back.blocks.keys().all(|k| !k.starts_with('_')), "{what}: {:?}", back.blocks.keys().collect::<Vec<_>>());
         assert!(roundtrip(&back).blocks.keys().all(|k| !k.starts_with('_')), "{what}: second save");
     }
@@ -892,7 +893,8 @@ fn file_arrowhead_blocks_with_standard_names_are_kept() {
     let dxf = write_dxf(&d);
     // TCI-CAD: the DWG leg (cadcraft-dwg round trip) removed; the DXF leg is upstream's. The next
     // TCI-CAD: line's array also held `(from_dwg, "DWG")`.
-    for (back, what) in [(read_dxf(dxf.as_bytes()).unwrap(), "DXF")] { // TCI-CAD: DXF leg only (DWG removed)
+    for (back, what) in [(read_dxf(dxf.as_bytes()).unwrap(), "DXF")] {
+        // TCI-CAD: DXF leg only (DWG removed)
         for name in ["_Dot", "_DotSmall"] {
             assert_eq!(kinds(&back, name), kinds(&d, name), "{what}: {name}");
         }
