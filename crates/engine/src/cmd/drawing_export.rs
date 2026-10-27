@@ -31,6 +31,11 @@ fn write(path: &str, bytes: &[u8], cmd: &str) -> Result<()> {
 }
 
 /// A sheet index of a drawing of `count` sheets.
+/// A drawing with no sheet has nothing to export (a refusal, with the command's name).
+fn has_sheets(m: &solidcraft_doc::DrawingModel, cmd: &str) -> Result<()> {
+    if m.sheets.is_empty() { Err(bad(cmd, "the drawing has no sheets")) } else { Ok(()) }
+}
+
 fn sheet_of(v: &Value, count: usize, cmd: &str) -> Result<usize> {
     let n = v.as_u64().ok_or_else(|| bad(cmd, "a sheet is an index (0, 1, ...)"))?;
     usize::try_from(n).ok().filter(|i| *i < count).ok_or_else(|| bad(cmd, format!("sheet {n} does not exist ({count} sheets)")))
@@ -39,6 +44,7 @@ fn sheet_of(v: &Value, count: usize, cmd: &str) -> Result<usize> {
 fn export_pdf(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "drawing.export.pdf";
     let m = drawing::require(s, cmd)?;
+    has_sheets(m, cmd)?;
     let path = path(p, cmd)?;
     let sheets: Vec<usize> = match p.get("sheets") {
         None | Some(Value::Null) => (0..m.sheets.len()).collect(),
@@ -53,6 +59,7 @@ fn export_pdf(s: &mut Session, p: &Value) -> Result<Value> {
 fn export_dxf(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "drawing.export.dxf";
     let m = drawing::require(s, cmd)?;
+    has_sheets(m, cmd)?;
     let path = path(p, cmd)?;
     let sheet = match p.get("sheet") {
         None | Some(Value::Null) => s.drawing_sheet.min(m.sheets.len().saturating_sub(1)),

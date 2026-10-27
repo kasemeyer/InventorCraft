@@ -272,6 +272,36 @@ fn pdf_asks_for_300_px_per_inch() {
     s.view_rasterizer = None;
     let (_, bytes) = pdf(&mut s, &out(&dir, "stored.pdf"), json!({}));
     assert_eq!(images(&bytes), vec![vec![(800.0, 600.0)]]);
+    // Final wave 24: the picture is drawn over raster_rect, in points (× 72): the image's
+    // transformation at its `Do` is [w 0 0 h x0 y0].
+    let rect = crate::drawing::raster_rect(model(&s), &model(&s).views[&v]).unwrap();
+    let want = [(rect[2] - rect[0]) * 72.0, 0.0, 0.0, (rect[3] - rect[1]) * 72.0, rect[0] * 72.0, rect[1] * 72.0];
+    let doc = pdf_read::read(&bytes);
+    let got = image_ctms(&doc.pages[0].content);
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert!(got[0].iter().zip(want).all(|(g, w)| (g - w).abs() <= 1e-3), "{got:?} vs {want:?} ({rect:?})");
+}
+
+/// The transformation matrix at each `Do` (an image or form drawn) in page content.
+fn image_ctms(content: &str) -> Vec<[f64; 6]> {
+    let mut stack = vec![[1.0, 0.0, 0.0, 1.0, 0.0, 0.0]];
+    let mut out = Vec::new();
+    for o in pdf_read::ops(content) {
+        let ctm = *stack.last().unwrap();
+        match o.op.as_str() {
+            "q" => stack.push(ctm),
+            "Q" => {
+                stack.pop();
+            }
+            "cm" if o.nums.len() == 6 => {
+                let m = [o.nums[0], o.nums[1], o.nums[2], o.nums[3], o.nums[4], o.nums[5]];
+                *stack.last_mut().unwrap() = pdf_read::mul(m, ctm);
+            }
+            "Do" => out.push(ctm),
+            _ => {}
+        }
+    }
+    out
 }
 
 /// Check 1: only fresh pictures print; a stale one (kept from before a change nothing could
@@ -544,4 +574,23 @@ fn dxf_leaves_out_suppressed_annotations() {
     assert!(entities.iter().all(|e| e.handle.0 != cl && e.handle.0 != dim));
     assert_eq!(entities.iter().filter(|e| e.common.layer == "HIDDEN").count(), 0);
     assert_eq!(dimensions(&back, &layout).len(), 2, "VIEW1's two dimensions are written");
+}
+
+/// Final wave 23: a drawing with no sheet refuses both exports with the command's name, as bad
+/// parameters, and writes nothing.
+#[test]
+fn a_drawing_without_sheets_exports_nothing() {
+    let (mut s, _, _, _, _, dir) = dimensioned("a_drawing_without_sheets_exports_nothing");
+    crate::drawing::edit(&mut s, "test", |m, _| {
+        m.sheets.clear();
+        Ok(())
+    })
+    .unwrap();
+    for (cmd, file) in [("drawing.export.pdf", "none.pdf"), ("drawing.export.dxf", "none.dxf")] {
+        let path = out(&dir, file);
+        let e = s.execute(cmd, &json!({"path": path})).unwrap_err();
+        assert!(matches!(&e, crate::EngineError::BadParams { .. }), "{cmd}: {e:?}");
+        assert_eq!(e.to_string(), format!("invalid parameters for `{cmd}`: the drawing has no sheets"), "{cmd}");
+        assert!(!std::path::Path::new(&path).exists(), "{cmd}");
+    }
 }
