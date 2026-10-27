@@ -191,6 +191,10 @@ pub(crate) fn add_sheet(m: &mut DrawingModel, size: AnsiSize, landscape: bool) -
 pub(crate) fn resize_sheet(m: &mut DrawingModel, index: usize, size: AnsiSize, landscape: bool) -> Result<(), String> {
     let Some(sheet) = m.sheets.get(index).cloned() else { return Err(format!("sheet {index} does not exist ({} sheets)", m.sheets.len())) };
     let border = ensure_border(&mut m.paper, size, landscape);
+    let previous = match m.paper.entity(sheet.border).map(|e| &e.kind) {
+        Some(EntityKind::Insert(ins)) => Some(ins.block.clone()),
+        _ => None,
+    };
     let fresh = page(size, landscape);
     let Some(layout) = m.paper.layouts.iter_mut().find(|l| l.name == sheet.layout) else {
         return Err(format!("sheet {index} has no layout {}", sheet.layout));
@@ -207,6 +211,19 @@ pub(crate) fn resize_sheet(m: &mut DrawingModel, index: usize, size: AnsiSize, l
             }
         })
         .map_err(|e| format!("sheet {index}'s border: {e}"))?;
+    // The previous size's border block goes when no sheet uses it any more.
+    if let Some(old) = previous.filter(|old| *old != border && old.starts_with("TCI_BORDER_")) {
+        let used = m
+            .paper
+            .layouts
+            .iter()
+            .flat_map(|l| l.entities.iter())
+            .chain(m.paper.model.iter())
+            .any(|e| matches!(&e.kind, EntityKind::Insert(ins) if ins.block == old));
+        if !used {
+            m.paper.blocks.remove(&old);
+        }
+    }
     let (w, _) = size.inches(landscape);
     let at = Vec3::new(w - BORDER_INSET_IN, BORDER_INSET_IN, 0.0);
     m.paper

@@ -85,6 +85,7 @@ fn sheet_add_takes_the_active_size() {
     // Portrait media plus the landscape flag (R46).
     assert!(close(page.width_mm, 431.8) && close(page.height_mm, 558.8) && page.landscape, "{page:?}");
     assert_eq!(insert_of(m, m.sheets[1].border).0, "TCI_BORDER_C");
+    assert!(m.paper.block("TCI_BORDER_D").is_none(), "no sheet is D any more");
     let at = insert_of(m, m.sheets[1].title_block).1;
     assert!(close(at[0], 21.5) && close(at[1], 0.5), "{at:?}");
     assert_eq!(field(m, 1, "SIZE"), "C");
@@ -94,6 +95,10 @@ fn sheet_add_takes_the_active_size() {
     let m = model(&s);
     assert_eq!((m.sheets[2].size, m.sheets[2].landscape), (AnsiSize::A, false));
     assert_eq!(insert_of(m, m.sheets[2].border).0, "TCI_BORDER_A_PORTRAIT");
+    // Sheet 0 still uses the C border, so resizing sheet 1 away from it kept it.
+    assert!(m.paper.block("TCI_BORDER_C").is_some());
+    let borders: Vec<&String> = m.paper.blocks.keys().filter(|k| k.starts_with("TCI_BORDER_")).collect();
+    assert_eq!(borders, ["TCI_BORDER_A_PORTRAIT", "TCI_BORDER_C"]);
     assert_eq!(field(m, 2, "SHEET"), "3 OF 3");
 }
 
@@ -117,6 +122,8 @@ fn set_size_regenerates_border_and_title_block() {
     // The same inserts, regenerated in place.
     assert_eq!((m.sheets[0].border, m.sheets[0].title_block), (border, title));
     assert_eq!(insert_of(m, border), ("TCI_BORDER_B".to_string(), [0.0, 0.0]));
+    // The D border no sheet uses any more is gone (final wave 7).
+    assert!(m.paper.block("TCI_BORDER_D").is_none());
     let block = m.paper.block("TCI_BORDER_B").expect("the B border block");
     let zones: BTreeSet<String> = block
         .entities
