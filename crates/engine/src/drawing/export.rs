@@ -87,8 +87,8 @@ pub(crate) fn sheet_paper(m: &DrawingModel, sheet: usize) -> Result<Drawing> {
     Ok(d)
 }
 
-/// The DXF of sheet `sheet` at `version`; the file name only names the format.
-pub(crate) fn dxf(m: &DrawingModel, sheet: usize, version: Version) -> Result<Vec<u8>> {
-    let d = sheet_paper(m, sheet)?;
-    cadcraft_io::write_with(&d, "sheet.dxf", &SaveOptions { version: Some(version), binary: false }).map_err(|e| EngineError::Other(e.to_string()))
+/// The DXF of `paper` (one sheet's, [`sheet_paper`]) at `version`; the file name only names the
+/// format.
+pub(crate) fn dxf(paper: &Drawing, version: Version) -> Result<Vec<u8>> {
+    cadcraft_io::write_with(paper, "sheet.dxf", &SaveOptions { version: Some(version), binary: false }).map_err(|e| EngineError::Other(e.to_string()))
 }

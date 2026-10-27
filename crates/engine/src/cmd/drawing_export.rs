@@ -63,8 +63,10 @@ fn export_dxf(s: &mut Session, p: &Value) -> Result<Value> {
         Some(Some("R2000")) => (cadcraft_io::Version::R2000, "R2000"),
         Some(_) => return Err(bad(cmd, "version must be R2018 or R2000")),
     };
-    let entities = export::sheet_paper(m, sheet)?.layouts.iter().map(|l| l.entities.len()).sum::<usize>();
-    let bytes = export::dxf(m, sheet, version)?;
+    // One copy of the sheet's paper: what is counted is what is written.
+    let paper = export::sheet_paper(m, sheet)?;
+    let entities = paper.layouts.iter().map(|l| l.entities.len()).sum::<usize>();
+    let bytes = export::dxf(&paper, version)?;
     write(path, &bytes, cmd)?;
     Ok(json!({"path": path, "sheet": sheet, "version": name, "entities": entities, "bytes": bytes.len()}))
 }
