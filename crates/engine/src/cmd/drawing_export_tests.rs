@@ -300,6 +300,31 @@ fn stale_or_missing_pictures_print_as_lines_only() {
     assert_eq!(r["images"].as_u64(), Some(0));
 }
 
+/// Final wave 20: a stored picture is fresh only for the model revision, orientation and scale
+/// it was drawn at: turned front to back with nothing to draw it, the view keeps an 800 x 600
+/// picture of the same size as the view's box, and it is still not printed.
+#[test]
+fn a_same_size_stale_picture_is_not_reused() {
+    let (mut s, _, v, _, _, dir) = dimensioned("a_same_size_stale_picture_is_not_reused");
+    s.view_rasterizer = Some(Arc::new(Recording::default()));
+    run(&mut s, "drawing.view.set_style", json!({"view": v, "shaded": true}));
+    let drawn_for = model(&s).views[&v].raster.as_ref().and_then(|r| r.drawn_for.clone()).unwrap();
+    assert_eq!((drawn_for.orientation, drawn_for.scale), (model(&s).views[&v].orientation, 1.0));
+    assert_eq!(drawn_for.revision, model(&s).views[&v].revision);
+    assert!(crate::drawing::raster::fresh(model(&s), &model(&s).views[&v]));
+    let (r, _) = pdf(&mut s, &out(&dir, "fresh.pdf"), json!({}));
+    assert_eq!(r["images"].as_u64(), Some(1));
+    s.view_rasterizer = None;
+    run(&mut s, "drawing.view.set_orientation", json!({"view": v, "orientation": "back"}));
+    let view = &model(&s).views[&v];
+    assert_eq!(view.raster.as_ref().map(|r| (r.width, r.height)), Some((800, 600)));
+    let rect = crate::drawing::raster_rect(model(&s), view).unwrap();
+    assert!(crate::drawing::raster::fits(view.raster.as_ref().unwrap(), rect), "the same pixel size: {rect:?}");
+    assert!(!crate::drawing::raster::fresh(model(&s), view));
+    let (r, _) = pdf(&mut s, &out(&dir, "turned.pdf"), json!({}));
+    assert_eq!(r["images"].as_u64(), Some(0));
+}
+
 #[test]
 fn dxf_round_trips_at_r2018_and_r2000() {
     let (mut s, _, v, dia, _, dir) = dimensioned("dxf_round_trips_at_r2018_and_r2000");

@@ -279,6 +279,18 @@ pub struct RasterRef {
     pub height: u32,
     #[serde(with = "png_base64")]
     pub png: Vec<u8>,
+    /// What the picture was drawn of: it is the view's picture only while the view shows that
+    /// (with its pixel size, the picture's freshness). None: not known (counts as stale).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drawn_for: Option<RasterKey>,
+}
+
+/// The model revision, orientation and scale a shaded picture was drawn at.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RasterKey {
+    pub revision: ModelRevision,
+    pub orientation: Orientation,
+    pub scale: f64,
 }
 
 /// The PNG bytes of a [`RasterRef`] as canonical padded base64 (at most 64 MiB of PNG).

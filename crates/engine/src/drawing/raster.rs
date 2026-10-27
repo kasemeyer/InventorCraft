@@ -8,7 +8,7 @@
 //! already install with `capture::install` (the app, the CLI's `run`, `snapshot` and `mcp`), by
 //! way of [`CaptureRasterizer`], the session's default [`ViewRasterizer`] (R18).
 
-use solidcraft_doc::{DrawingModel, DrawingView, RasterRef};
+use solidcraft_doc::{DrawingModel, DrawingView, RasterKey, RasterRef};
 use solidcraft_geom::{Aabb3, Vec2};
 use solidcraft_render::{Camera, Rgb, Scene, SceneMesh};
 
@@ -151,7 +151,12 @@ pub(crate) fn rasterize(s: &Session, model: &LoadedModel, v: &DrawingView, px_pe
     }
     let png = solidcraft_render::png(width as usize, height as usize, keyed(picture.rgba))
         .ok_or_else(|| EngineError::Other(format!("shaded view {}: PNG encoding failed", v.identifier)))?;
-    Ok(Some(RasterRef { width, height, png }))
+    Ok(Some(RasterRef {
+        width,
+        height,
+        png,
+        drawn_for: Some(RasterKey { revision: model.revision.clone(), orientation: v.orientation, scale: v.scale }),
+    }))
 }
 
 /// Brings `v`'s raster up to date with its style: none unless shaded; a shaded view is drawn
@@ -183,10 +188,13 @@ pub(crate) fn fits(r: &RasterRef, rect: [f64; 4]) -> bool {
     r.width.abs_diff(w) <= 1 && r.height.abs_diff(h) <= 1
 }
 
-/// Whether shaded view `v` of `m` has a fresh picture ([`fits`] its [`raster_rect`]).
+/// Whether shaded view `v` of `m` has a fresh picture: drawn of the model revision, orientation
+/// and scale the view shows now (`RasterRef::drawn_for`), and its pixel size [`fits`] the view's
+/// [`raster_rect`]. A picture of the same size drawn of something else is stale.
 pub(crate) fn fresh(m: &DrawingModel, v: &DrawingView) -> bool {
+    let now = RasterKey { revision: v.revision.clone(), orientation: v.orientation, scale: v.scale };
     match (&v.raster, raster_rect(m, v)) {
-        (Some(r), Some(rect)) => fits(r, rect),
+        (Some(r), Some(rect)) => r.drawn_for.as_ref() == Some(&now) && fits(r, rect),
         _ => false,
     }
 }

@@ -218,7 +218,7 @@ fn an_older_design_has_no_drawing() {
 
 #[test]
 fn rasters_save_as_base64() {
-    let raster = RasterRef { width: 2, height: 1, png: vec![137, 80, 78, 71] };
+    let raster = RasterRef { width: 2, height: 1, png: vec![137, 80, 78, 71], drawn_for: None };
     let value = serde_json::to_value(&raster).unwrap();
     assert_eq!(value["png"], "iVBORw==");
     assert_eq!(value["width"], 2);
@@ -311,4 +311,18 @@ fn a_view_without_a_projection_loads_with_none() {
     let back: DrawingView = serde_json::from_value(value).unwrap();
     assert_eq!(back.projection, None);
     assert_eq!(back, DrawingView { projection: None, ..view });
+}
+
+/// Final wave 20: a picture saves what it was drawn of; one saved without it loads with none.
+#[test]
+fn a_raster_saves_what_it_was_drawn_of() {
+    use crate::drawing::RasterKey;
+    let key = RasterKey { revision: ModelRevision("ab".into()), orientation: CubeTarget::from_name("front").unwrap().orientation(), scale: 0.5 };
+    let raster = RasterRef { width: 2, height: 1, png: vec![137, 80, 78, 71], drawn_for: Some(key) };
+    let value = serde_json::to_value(&raster).unwrap();
+    assert_eq!(value["drawn_for"]["scale"], 0.5);
+    assert_eq!(value["drawn_for"]["revision"], "ab");
+    assert_eq!(serde_json::from_value::<RasterRef>(value).unwrap(), raster);
+    let old = serde_json::json!({"width": 2, "height": 1, "png": "iVBORw=="});
+    assert_eq!(serde_json::from_value::<RasterRef>(old).unwrap().drawn_for, None);
 }

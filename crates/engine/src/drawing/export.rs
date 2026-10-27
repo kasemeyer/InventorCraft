@@ -4,9 +4,9 @@
 //!   (stroke-font text is geometry; searchable text is deferred, R60), and each shaded view's
 //!   picture under its curves as a [`PageImage`] over [`raster_rect`]. The picture is drawn again
 //!   at [`PDF_PX_PER_IN`] when a rasterizer draws and the model is the one the view shows; else
-//!   the stored picture is used only when it is fresh: its pixel size is what the view draws now
-//!   at [`SCREEN_PX_PER_IN`](raster::SCREEN_PX_PER_IN) (within a pixel each way), so a stale picture is never stretched. A
-//!   view with no fresh picture prints as lines only.
+//!   the stored picture is used only when it is fresh ([`raster::fresh`]: drawn of the model
+//!   revision, orientation and scale the view shows, its pixel size what the view draws now), so
+//!   a stale picture is never stretched. A view with no fresh picture prints as lines only.
 //! - **DXF:** one sheet's paper space through `cadcraft_io::write_with`, R2018 (default) or R2000.
 //!   Pictures are not written (they are not on the paper); entities the view styles suppress
 //!   (invisible, R61) are left out, with every other layout.
@@ -26,16 +26,17 @@ pub(crate) struct PdfOut {
     pub images: usize,
 }
 
-/// The picture of shaded view `v` for a PDF: drawn again at `PDF_PX_PER_IN` (a rasterizer draws
-/// and the model is at the view's revision), else its stored picture when fresh, else none.
-fn picture(s: &Session, loads: &mut Loads, v: &DrawingView, rect: [f64; 4]) -> Option<Vec<u8>> {
+/// The picture of shaded view `v` of `m` for a PDF: drawn again at `PDF_PX_PER_IN` (a rasterizer
+/// draws and the model is at the view's revision), else its stored picture when fresh
+/// ([`raster::fresh`]), else none.
+fn picture(s: &Session, m: &DrawingModel, loads: &mut Loads, v: &DrawingView) -> Option<Vec<u8>> {
     let drawn = s.view_rasterizer.as_ref().and_then(|_| {
         let loaded = loads.get(s, &v.model).filter(|l| l.revision == v.revision)?;
         raster::rasterize(s, &loaded, v, PDF_PX_PER_IN).ok().flatten()
     });
     match drawn {
         Some(r) => Some(r.png),
-        None => v.raster.as_ref().filter(|r| raster::fits(r, rect)).map(|r| r.png.clone()),
+        None => v.raster.as_ref().filter(|_| raster::fresh(m, v)).map(|r| r.png.clone()),
     }
 }
 
@@ -46,7 +47,7 @@ pub(crate) fn page_images(s: &Session, m: &DrawingModel, sheets: &[usize]) -> Ve
     for (page, sheet) in sheets.iter().enumerate() {
         for v in m.views.values().filter(|v| v.sheet == *sheet && v.shaded) {
             let Some(rect) = raster_rect(m, v) else { continue };
-            if let Some(png) = picture(s, &mut loads, v, rect) {
+            if let Some(png) = picture(s, m, &mut loads, v) {
                 out.push(PageImage { sheet: page, rect_in: rect, png });
             }
         }
