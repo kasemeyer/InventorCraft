@@ -9,6 +9,7 @@ pub(crate) mod model_ref;
 pub mod orient;
 pub mod pick;
 pub(crate) mod project;
+pub mod raster;
 pub mod template;
 
 use std::sync::Arc;
@@ -21,6 +22,7 @@ pub use model_ref::{ModelProvider, stale_views};
 pub use orient::{Projection, aligned_position, projected_orientation, projection_at};
 pub use pick::{CurveKind, PaperPick, pick, preview_view};
 pub use project::{PaperCurve, camera_for};
+pub use raster::{CaptureRasterizer, FLAT_GREY, MAX_RASTER_SIDE, PDF_PX_PER_IN, SCREEN_PX_PER_IN, ViewRasterizer, raster_rect};
 pub use template::*;
 
 use crate::{EngineError, Result, Session};

@@ -4583,6 +4583,7 @@ dependencies = [
  "cadcraft-io",
  "cadcraft-render",
  "chrono",
+ "image",
  "log",
  "schemars",
  "serde",
