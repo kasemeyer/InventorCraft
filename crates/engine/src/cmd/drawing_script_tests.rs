@@ -185,9 +185,9 @@ fn the_example_script_makes_the_two_view_drawing() {
 /// The sheet's entities per layer: the border and title block (2 inserts); the centre mark's 2 legs;
 /// the 4 dimensions; the hole's 2 hidden lines in the top view (spec §7.3); the hole note's leader
 /// and text; and 19 visible curves: VIEW1's 4 lines, 1 circle and 4 arcs (§7.3's front golden) and
-/// the top view's 10 lines (`drawing_projection_tests::top_view_has_two_hidden_lines_for_the_hole`):
+/// the top view's 10 lines (`drawing_projection_tests::top_view_visible_lines_are_pinned`):
 /// the outline's sides (2), front (3 pieces: the fillets' edges and the top face's) and back (5
-/// pieces: the same, the left end split where two fillet edges' names alternate). The two lines
+/// pieces: the same, the left end split where two fillet edges' names alternate, a 0.0077 in piece). The two lines
 /// where the top face meets the fillets (x = 8.5 and 11.5) are tangent (R64) and the views leave
 /// tangent edges off.
 const EXPECTED_LAYERS: &[(&str, usize)] = &[("BORDER", 2), ("CENTER", 2), ("DIMENSION", 4), ("HIDDEN", 2), ("NOTE", 2), ("VISIBLE", 19)];

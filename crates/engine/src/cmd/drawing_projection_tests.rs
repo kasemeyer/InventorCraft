@@ -186,6 +186,87 @@ fn right_view_has_two_hidden_lines_for_the_hole() {
     assert_no_visible_duplicates(&g);
 }
 
+/// The visible lines, each named and with its ends in order (by x, then y), sorted.
+fn visible_lines(g: &ViewGeometry) -> Vec<(String, [f64; 4])> {
+    let mut out: Vec<(String, [f64; 4])> = g
+        .curves
+        .iter()
+        .filter(|c| !c.hidden)
+        .map(|c| match c.curve {
+            PaperCurve::Line { a, b } => {
+                let (p, q) = if (a.x, a.y) <= (b.x, b.y) { (a, b) } else { (b, a) };
+                (c.edge.clone(), [p.x, p.y, q.x, q.y])
+            }
+            ref other => panic!("a visible curve that is not a line: {other:?}"),
+        })
+        .collect();
+    out.sort_by(|(e, p), (f, q)| e.cmp(f).then(p[0].total_cmp(&q[0])).then(p[1].total_cmp(&q[1])));
+    out
+}
+
+fn assert_lines(g: &ViewGeometry, expected: &[(&str, [f64; 4])]) {
+    let got = visible_lines(g);
+    let same = got.len() == expected.len()
+        && got.iter().zip(expected).all(|((e, p), (f, q))| e == &format!("0/Block/e/{f}") && p.iter().zip(q).all(|(a, b)| (a - b).abs() <= 1e-4));
+    assert!(same, "{got:#?}");
+}
+
+/// Spec §7.3: the top view's 10 visible lines with tangent edges off (Inventor's default; R64
+/// hides the top face's joins with the rounds): the sides (2), the front (3: the rounds' edges
+/// and the top face's) and the back (5). The back's left end is split where the front and back
+/// rounds' edges, which project onto each other, alternate in naming the line by chord, leaving
+/// a 0.1954 mm (0.0077 in) piece named after the bottom round; the line is drawn whole.
+#[test]
+fn top_view_visible_lines_are_pinned() {
+    let g = view(&block(), "top", LineStyle::Hidden, false);
+    assert_eq!(counts(&g), (12, 0, 0, 0, 2));
+    assert_lines(
+        &g,
+        &[
+            ("F1:+x|F3:blend:F1:+x|F1:-z", [50.8, -12.7, 50.8, 12.7]),
+            ("F1:+y|F1:+z", [-38.1, 12.7, 38.1, 12.7]),
+            ("F1:+y|F3:blend:F1:+x|F1:+z", [38.1, 12.7, 50.8, 12.7]),
+            ("F1:+y|F3:blend:F1:+z|F1:-x", [-50.8, 12.7, -50.4126, 12.7]),
+            ("F1:+y|F3:blend:F1:+z|F1:-x", [-50.2172, 12.7, -38.1, 12.7]),
+            ("F1:+y|F3:blend:F1:-x|F1:-z", [-50.4126, 12.7, -50.2172, 12.7]),
+            ("F1:+z|F1:-y", [-38.1, -12.7, 38.1, -12.7]),
+            ("F1:-x|F3:blend:F1:+z|F1:-x", [-50.8, -12.7, -50.8, 12.7]),
+            ("F1:-y|F3:blend:F1:+x|F1:+z", [38.1, -12.7, 50.8, -12.7]),
+            ("F1:-y|F3:blend:F1:+z|F1:-x", [-50.8, -12.7, -38.1, -12.7]),
+        ],
+    );
+    // With tangent edges on, the joins at x = -38.1 and 38.1 are added (12 visible).
+    let on = view(&block(), "top", LineStyle::Hidden, true);
+    assert_eq!(visible_lines(&on).len(), 12);
+}
+
+/// Spec §7.3: the right view's 10 visible lines with tangent edges off: the outline's sides
+/// between the rounds (2), its top and bottom (1 each), the rounds' edges on the -y face (1 above,
+/// 1 below) and on the +y face (1 above, 3 below: split as the top view's back is, leaving a
+/// 0.2554 mm piece named after the left bottom round).
+#[test]
+fn right_view_visible_lines_are_pinned() {
+    let g = view(&block(), "right", LineStyle::Hidden, false);
+    assert_eq!(counts(&g), (12, 0, 0, 0, 2));
+    assert_lines(
+        &g,
+        &[
+            ("F1:+x|F1:+y", [12.7, -25.4, 12.7, 25.4]),
+            ("F1:+x|F1:-y", [-12.7, -25.4, -12.7, 25.4]),
+            ("F1:+y|F3:blend:F1:+x|F1:+z", [12.7, 25.4, 12.7, 38.1]),
+            ("F1:+y|F3:blend:F1:+x|F1:-z", [12.7, -38.1, 12.7, -34.9752]),
+            ("F1:+y|F3:blend:F1:+x|F1:-z", [12.7, -34.7197, 12.7, -25.4]),
+            ("F1:+y|F3:blend:F1:-x|F1:-z", [12.7, -34.9752, 12.7, -34.7197]),
+            ("F1:+z|F3:blend:F1:+x|F1:+z", [-12.7, 38.1, 12.7, 38.1]),
+            ("F1:-y|F3:blend:F1:+x|F1:+z", [-12.7, 25.4, -12.7, 38.1]),
+            ("F1:-y|F3:blend:F1:+x|F1:-z", [-12.7, -38.1, -12.7, -25.4]),
+            ("F1:-z|F3:blend:F1:+x|F1:-z", [-12.7, -38.1, 12.7, -38.1]),
+        ],
+    );
+    let on = view(&block(), "right", LineStyle::Hidden, true);
+    assert_eq!(visible_lines(&on).len(), 12);
+}
+
 #[test]
 fn hidden_line_removed_drops_the_hidden_curves() {
     let s = block();
