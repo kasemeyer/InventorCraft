@@ -55,8 +55,12 @@ fn new_drawing_is_d_landscape_with_border_and_title_block() {
     assert_eq!((sheet.size, sheet.landscape, sheet.layout.as_str()), (AnsiSize::D, true, "Sheet:1"));
     assert_eq!(m.paper.layouts.len(), 1);
     let layout = m.paper.layout("Sheet:1").unwrap();
-    assert!(close(layout.page.width_mm, 863.6) && close(layout.page.height_mm, 558.8), "{:?}", layout.page);
+    // The portrait media size plus the landscape flag (CADCraft's convention; R46).
+    assert!(close(layout.page.width_mm, 558.8) && close(layout.page.height_mm, 863.6), "{:?}", layout.page);
     assert!(layout.page.landscape);
+    // The renderer still lays the sheet out 34 x 22 in.
+    let rendered = cadcraft_render::Sheet::from_page(&layout.page, 25.4);
+    assert!(close(rendered.size.x, 34.0) && close(rendered.size.y, 22.0), "{:?}", rendered.size);
     assert_eq!(layout.page.paper, "ANSI D (22.00 x 34.00 Inches)");
     // CADCraft draws the sheet 34 x 22 paper units (inches).
     let drawn = cadcraft_render::sheet(&m.paper, "Sheet:1").unwrap();
@@ -270,6 +274,13 @@ fn a_drawing_refuses_model_geometry() {
     assert_eq!(e.to_string(), "solid.box: a drawing holds no model geometry: open the part or assembly");
     assert!(s.doc.features.is_empty() && s.undo.is_empty());
     assert!(err(&mut s, "sketch.create", json!({"plane": "XY"})).contains("a drawing holds no model geometry"));
+    // Inserting a STEP or mesh file adds model geometry too (R47).
+    assert_eq!(
+        err(&mut s, "file.insert_step", json!({"path": dir.join("x.step")})),
+        "file.insert_step: a drawing holds no model geometry: open the part or assembly"
+    );
+    assert!(err(&mut s, "file.insert_mesh", json!({"path": dir.join("x.stl")})).contains("a drawing holds no model geometry"));
+    assert!(s.undo.is_empty());
     // Files, documents and the drawing's own commands still run.
     run(&mut s, "file.save", json!({"path": dir.join("sheet")}));
     assert!(dir.join("sheet.tcidrw").is_file());

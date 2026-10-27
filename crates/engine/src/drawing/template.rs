@@ -245,10 +245,12 @@ fn insert(block: &str, at: Vec3, attribs: Vec<Attrib>) -> Insert {
     }
 }
 
-/// The page setup of an ANSI sheet: the paper, in millimetres as CADCraft keeps them, width by
-/// height as the sheet lies.
+/// The page setup of an ANSI sheet: the paper in millimetres as CADCraft keeps them, the portrait
+/// media size (width the short side) plus the `landscape` flag (R46): the DXF writer emits the
+/// media and the rotation, and the reader takes `landscape = rotated != (w > h)`.
 fn page(size: AnsiSize, landscape: bool) -> PageSetup {
-    let (w, h) = size.inches(landscape);
+    let (a, b) = size.inches(landscape);
+    let (w, h) = (a.min(b), a.max(b));
     let paper = cadcraft_render::paper_size(&format!("ANSI {}", size.letter())).map_or_else(String::new, |p| p.name.to_string());
     PageSetup { paper, width_mm: w * 25.4, height_mm: h * 25.4, landscape, ..PageSetup::default() }
 }
