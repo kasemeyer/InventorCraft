@@ -4,10 +4,12 @@
 //! block fields.
 
 pub(crate) mod assoc;
+pub(crate) mod centermark;
 pub mod dims;
 pub(crate) mod edges;
 pub(crate) mod mapper;
 pub(crate) mod model_ref;
+pub(crate) mod notes;
 pub mod orient;
 pub mod pick;
 pub(crate) mod project;
@@ -19,9 +21,11 @@ use std::sync::Arc;
 use serde_json::Value;
 use solidcraft_doc::{DocumentKind, DrawingModel, DrawingProps};
 
+pub use centermark::MARK_OVERSHOOT_IN;
 pub use dims::{VALUE_TOKEN, dimension_text, sick_dimensions};
 pub(crate) use model_ref::rebased_models;
 pub use model_ref::{ModelProvider, stale_views};
+pub use notes::{LEADER_ARROW, NOTE_HEIGHT_IN};
 pub use orient::{Projection, aligned_position, projected_orientation, projection_at};
 pub use pick::{CurveKind, PaperPick, pick, preview_view};
 pub use project::{PaperCurve, camera_for};
@@ -42,8 +46,9 @@ pub(crate) fn require<'a>(s: &'a Session, cmd: &str) -> Result<&'a DrawingModel>
 
 /// Runs `f` on a copy-on-write copy of the drawing, re-solves the associative dimensions
 /// (`assoc::update` against the drawing `f` started from, then each attached dimension's
-/// DIMLFAC to 1 / its view's scale) and installs the edited document. One command = one undo
-/// step through `undoable`: `Session::execute` records the document `f` started from.
+/// DIMLFAC to 1 / its view's scale), puts attached leaders' arrow ends back on their edges
+/// (`notes::follow`) and installs the edited document. One command = one undo step through
+/// `undoable`: `Session::execute` records the document `f` started from.
 pub(crate) fn edit<T>(s: &mut Session, cmd: &str, f: impl FnOnce(&mut DrawingModel, &Session) -> Result<T>) -> Result<T> {
     require(s, cmd)?;
     let Some(mut model) = s.doc.drawing.clone() else { return Err(EngineError::Other(format!("{cmd}: {NOT_A_DRAWING}"))) };
@@ -55,6 +60,8 @@ pub(crate) fn edit<T>(s: &mut Session, cmd: &str, f: impl FnOnce(&mut DrawingMod
         assoc::update(&mut edited.paper, &before.paper);
     }
     dims::sync_factors(edited);
+    // Attached leaders follow their edges (`assoc::update` handles dimensions only).
+    notes::follow(&mut edited.paper);
     s.doc_mut().drawing = Some(model);
     Ok(out)
 }

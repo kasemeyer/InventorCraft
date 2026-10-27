@@ -21,7 +21,7 @@ use cadcraft_geom::{Mat3, PolyVertex, Vec2 as PaperVec2, Vec3 as PaperVec3};
 use solidcraft_doc::{DrawingModel, DrawingView, ViewId};
 use solidcraft_geom::Vec2;
 
-use super::project::{PaperCurve, ViewGeometry};
+use super::project::{PaperCurve, ViewCurve, ViewGeometry};
 
 pub const XDATA_APP: &str = "TCICAD_VIEW";
 
@@ -224,8 +224,9 @@ fn segments(curves: &[super::project::ViewCurve]) -> Vec<u32> {
 /// Writes `g` for view `v` into its sheet's layout: modify_entity for keys that exist, Drawing::add for new
 /// keys, remove_entity for keys no longer produced; `v.group` then lists exactly the view's entities.
 ///
-/// Centre marks and centrelines (`Seg::Mark`) are not curves of `g`: they are kept as they are
-/// and stay in the group.
+/// Centre marks and centrelines (`Seg::Mark`) are not curves of `g`: they are regenerated from
+/// the curves they mark (in place, handles kept) and stay in the group; a mark whose circle or
+/// edges are gone is removed (`place_marks`).
 pub(crate) fn place(m: &mut DrawingModel, v: &DrawingView, g: &ViewGeometry) {
     let Some(layout) = m.sheets.get(v.sheet).map(|s| s.layout.clone()) else { return };
     let space = Space::Paper(layout.clone());
@@ -268,15 +269,117 @@ pub(crate) fn place(m: &mut DrawingModel, v: &DrawingView, g: &ViewGeometry) {
         members.extend(l.entities.iter().filter(|e| label_of(e).is_some_and(|(view, _)| view == v.id)).map(|e| e.handle));
     }
     for (key, h) in &before {
-        match key.seg {
-            Seg::Mark => members.push(*h),
-            Seg::Index(_) if !produced.contains(key) => {
-                m.paper.remove_entity(*h);
-            }
-            Seg::Index(_) => {}
+        if matches!(key.seg, Seg::Index(_)) && !produced.contains(key) {
+            m.paper.remove_entity(*h);
         }
     }
+    let on_paper: Vec<(&ViewCurve, PaperCurve)> = g.curves.iter().map(|c| (c, to_paper(&c.curve, position, v.scale))).collect();
+    members.extend(place_marks(m, &layout, v.id, &on_paper));
     set_group(m, v, members);
+}
+
+/// The layer of centre marks and centrelines.
+pub(crate) const CENTER_LAYER: &str = "CENTER";
+
+fn paper_point(p: Vec2) -> PaperVec2 {
+    PaperVec2::new(p.x, p.y)
+}
+
+/// The circle (centre, radius) a centre mark on `edge` marks in `curves`: the circle or arc
+/// showing `edge` (a joined circle names it among its sources; an arc is taken as its circle,
+/// R51), a circle before an arc, the lowest segment first.
+fn mark_circle(curves: &[(&ViewCurve, PaperCurve)], edge: &str) -> Option<(PaperVec2, f64)> {
+    curves
+        .iter()
+        .filter(|(c, _)| c.edge == edge || c.sources.iter().any(|s| s == edge))
+        .filter_map(|(c, p)| match p {
+            PaperCurve::Circle { c: o, r } => Some((0, c.segment, paper_point(*o), *r)),
+            PaperCurve::Arc { c: o, r, .. } => Some((1, c.segment, paper_point(*o), *r)),
+            _ => None,
+        })
+        .min_by_key(|(rank, segment, ..)| (*rank, *segment))
+        .map(|(_, _, c, r)| (c, r))
+}
+
+/// The straight piece (lowest segment) showing `edge` in `curves`.
+fn mark_line(curves: &[(&ViewCurve, PaperCurve)], edge: &str) -> Option<(PaperVec2, PaperVec2)> {
+    curves
+        .iter()
+        .filter(|(c, _)| c.edge == edge)
+        .filter_map(|(c, p)| match p {
+            PaperCurve::Line { a, b } => Some((c.segment, paper_point(*a), paper_point(*b))),
+            _ => None,
+        })
+        .min_by_key(|(segment, ..)| *segment)
+        .map(|(_, a, b)| (a, b))
+}
+
+/// The lines a mark keyed `edge` draws now: a centre mark's two (across, up) when `edge` shows a
+/// circle or arc, else a centreline's one when `edge` is two straight edges `<a>|<b>` (R21; an
+/// edge id may itself hold `|`, so every split is tried). None: what it marked is gone.
+fn mark_lines(curves: &[(&ViewCurve, PaperCurve)], edge: &str) -> Option<Vec<(PaperVec2, PaperVec2)>> {
+    if let Some((c, r)) = mark_circle(curves, edge) {
+        return Some(super::centermark::center_mark(c, r).to_vec());
+    }
+    edge.match_indices('|').find_map(|(i, _)| {
+        let (a, b) = (edge.get(..i)?, edge.get(i + 1..)?);
+        let line = super::centermark::center_line(mark_line(curves, a)?, mark_line(curves, b)?)?;
+        Some(vec![line])
+    })
+}
+
+/// Regenerates view `view`'s centre marks and centrelines from its curves on paper: each line is
+/// changed in place (a mark's line across stays across), and the marks whose edges are gone
+/// are removed. Returns the handles kept.
+fn place_marks(m: &mut DrawingModel, layout: &str, view: ViewId, curves: &[(&ViewCurve, PaperCurve)]) -> Vec<Handle> {
+    let mut marks: BTreeMap<String, Vec<(Handle, bool)>> = BTreeMap::new();
+    if let Some(l) = m.paper.layout(layout) {
+        for e in l.entities.iter() {
+            let Some(key) = xkey_of(e).filter(|k| k.view == view && k.seg == Seg::Mark) else { continue };
+            let across = match &e.kind {
+                EntityKind::Line(l) => (l.b.x - l.a.x).abs() >= (l.b.y - l.a.y).abs(),
+                _ => true,
+            };
+            marks.entry(key.edge).or_default().push((e.handle, across));
+        }
+    }
+    let mut kept = Vec::new();
+    for (edge, handles) in marks {
+        let Some(lines) = mark_lines(curves, &edge) else {
+            for (h, _) in handles {
+                m.paper.remove_entity(h);
+            }
+            continue;
+        };
+        for (h, across) in handles {
+            let pick = if across { lines.first() } else { lines.get(1).or_else(|| lines.first()) };
+            let Some(&(a, b)) = pick else { continue };
+            let kind = EntityKind::Line(Line { a: PaperVec3::new(a.x, a.y, 0.0), b: PaperVec3::new(b.x, b.y, 0.0) });
+            if m.paper.entity(h).is_some_and(|e| e.kind != kind) {
+                let _ = m.paper.modify_entity(h, |e| e.kind = kind);
+            }
+            kept.push(h);
+        }
+    }
+    kept
+}
+
+/// Adds a mark of view `v` keyed `edge`: `lines` on CENTER with the key `(v, edge, "cm")`, in
+/// the view's group. Returns their handles.
+pub(crate) fn add_marks(m: &mut DrawingModel, v: &DrawingView, edge: &str, lines: &[(PaperVec2, PaperVec2)]) -> crate::Result<Vec<Handle>> {
+    let layout = m.sheets.get(v.sheet).map(|s| s.layout.clone()).ok_or_else(|| crate::EngineError::Other(format!("view {} has no sheet", v.id)))?;
+    let key = XKey { view: v.id, edge: edge.to_string(), seg: Seg::Mark };
+    let mut out = Vec::new();
+    for (a, b) in lines {
+        let common = Common { layer: CENTER_LAYER.to_string(), xdata: key.tags(), ..Common::default() };
+        let kind = EntityKind::Line(Line { a: PaperVec3::new(a.x, a.y, 0.0), b: PaperVec3::new(b.x, b.y, 0.0) });
+        out.push(m.paper.add(&Space::Paper(layout.clone()), common, kind).map_err(|e| crate::EngineError::Other(e.to_string()))?);
+    }
+    let name = group_name(v.group);
+    if let Some(group) = m.paper.groups.iter_mut().find(|g| g.name == name) {
+        group.members.extend(out.iter().copied());
+    }
+    Ok(out)
 }
 
 /// `v`'s group lists `members` and is described by its identifier.

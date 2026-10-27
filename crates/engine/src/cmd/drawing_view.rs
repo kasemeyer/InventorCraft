@@ -7,6 +7,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use cadcraft_doc::Handle;
 use serde_json::{Value, json};
 use solidcraft_doc::{
     CubeTarget, DocumentKind, DrawingModel, DrawingView, LineStyle, ModelKind, ModelRef, ModelRevision, Orientation, ViewId, parse_scale,
@@ -19,7 +20,7 @@ use crate::drawing::model_ref::{self, LoadedModel, Loads, absolute, load};
 use crate::drawing::orient::{Projection, aligned_position, orientation_from, projected_orientation, projection_at};
 use crate::drawing::project::{PaperCurve, ProjectOptions, ViewGeometry, project_view};
 use crate::drawing::raster;
-use crate::drawing::{self, template};
+use crate::drawing::{self, notes, template};
 use crate::params::{bad, vec2, vec3};
 use crate::{Result, Session};
 
@@ -56,7 +57,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          → view, identifier, label_visible",
     ),
     CommandSpec::new("drawing.view.delete", "Delete View", delete).icon("delete").params(
-        "view: a view id; children?: delete (default: the views projected from it go too) or keep (they become base views). The dimensions attached to a deleted view go with it → deleted: view ids, kept",
+        "view: a view id; children?: delete (default: the views projected from it go too) or keep (they become base views). The dimensions, notes and centre marks attached to a deleted view go with it → deleted: view ids, kept",
     ),
     CommandSpec::new("drawing.update", "Update Views", update).icon("update").params(
         "views?: view ids (default: every view whose model changed since it was drawn). Each is projected again from its model, its entities changed in place \
@@ -358,21 +359,29 @@ fn projection_of(parent: &DrawingView, child: &DrawingView) -> Projection {
     child.projection.unwrap_or_else(|| projection_at([parent.position.x, parent.position.y], [child.position.x, child.position.y]))
 }
 
-/// Raster states by view, of the views a command drew.
-type RasterStates = BTreeMap<ViewId, &'static str>;
+/// What a command's redraws made besides the views: the raster state of each view drawn, and
+/// the texts of their hole notes read again from the models (`drawing::notes`).
+#[derive(Default)]
+struct Redraws {
+    rasters: BTreeMap<ViewId, &'static str>,
+    notes: Vec<(Handle, String)>,
+}
 
 /// `v` projected again from `loaded`, with its new revision and kind, and its raster brought up
 /// to date (a shaded view is drawn again; Task 9). Every regeneration goes through here.
-fn redrawn(s: &Session, mut v: DrawingView, loaded: &LoadedModel, cmd: &str, states: &mut RasterStates) -> Result<(DrawingView, ViewGeometry)> {
+fn redrawn(s: &Session, mut v: DrawingView, loaded: &LoadedModel, cmd: &str, states: &mut Redraws) -> Result<(DrawingView, ViewGeometry)> {
     let (g, revision, kind) = geometry_of(loaded, &v).map_err(|e| crate::EngineError::Other(format!("{cmd}: {e}")))?;
     (v.revision, v.model.kind) = (revision, kind);
-    states.insert(v.id, raster::refresh(s, Some(loaded), &mut v));
+    states.rasters.insert(v.id, raster::refresh(s, Some(loaded), &mut v));
+    if let Some(m) = s.doc.drawing.as_deref() {
+        states.notes.extend(notes::hole_texts(m, v.id, loaded));
+    }
     Ok((v, g))
 }
 
 /// `views` projected again from their (possibly changed) models (`redrawn`); the model of each
 /// is loaded once.
-fn regenerated(s: &Session, views: Vec<DrawingView>, cmd: &str, states: &mut RasterStates) -> Result<Vec<(DrawingView, ViewGeometry)>> {
+fn regenerated(s: &Session, views: Vec<DrawingView>, cmd: &str, states: &mut Redraws) -> Result<Vec<(DrawingView, ViewGeometry)>> {
     let mut loads = Loads::default();
     views
         .into_iter()
@@ -384,8 +393,9 @@ fn regenerated(s: &Session, views: Vec<DrawingView>, cmd: &str, states: &mut Ras
 }
 
 /// Writes `changed` views into `m`: regenerated ones through `mapper::place`, the others as
-/// stored; every one's label follows; the title blocks' SCALE is refreshed.
-fn install(m: &mut DrawingModel, changed: Vec<DrawingView>, regenerated: Vec<(DrawingView, ViewGeometry)>) {
+/// stored; every one's label follows; the hole notes take `texts`; the title blocks' SCALE is
+/// refreshed.
+fn install(m: &mut DrawingModel, changed: Vec<DrawingView>, regenerated: Vec<(DrawingView, ViewGeometry)>, texts: &[(Handle, String)]) {
     for v in changed {
         mapper::place_label(m, &v);
         m.views.insert(v.id, v);
@@ -395,6 +405,7 @@ fn install(m: &mut DrawingModel, changed: Vec<DrawingView>, regenerated: Vec<(Dr
         mapper::place_label(m, &v);
         m.views.insert(v.id, v);
     }
+    notes::set_texts(&mut m.paper, texts);
     template::refresh_title_blocks(m);
 }
 
@@ -439,7 +450,7 @@ fn set_style(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     let (mut redraw, mut changed) = (Vec::new(), Vec::new());
-    let mut states = RasterStates::new();
+    let mut states = Redraws::default();
     let mut loads = Loads::default();
     for (vid, v) in &views {
         match m.views.get(vid) {
@@ -449,7 +460,7 @@ fn set_style(s: &mut Session, p: &Value) -> Result<Value> {
                 // Shading turned on or off: the raster is drawn, or dropped (the curves stay).
                 if old.shaded != v.shaded {
                     let loaded = if v.shaded { loads.get(s, &v.model) } else { None };
-                    states.insert(v.id, raster::refresh(s, loaded.as_deref(), &mut v));
+                    states.rasters.insert(v.id, raster::refresh(s, loaded.as_deref(), &mut v));
                 }
                 changed.push(v);
             }
@@ -457,10 +468,11 @@ fn set_style(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     let regenerated = regenerated(s, redraw, cmd, &mut states)?;
-    let state = states.get(&id).copied().unwrap_or_else(|| views.get(&id).map_or(raster::NONE, raster_state));
+    let texts = std::mem::take(&mut states.notes);
+    let state = states.rasters.get(&id).copied().unwrap_or_else(|| views.get(&id).map_or(raster::NONE, raster_state));
     let updated: Vec<ViewId> = changed.iter().map(|v| v.id).chain(regenerated.iter().map(|(v, _)| v.id)).collect();
     drawing::edit(s, cmd, |m, _| {
-        install(m, changed, regenerated);
+        install(m, changed, regenerated, &texts);
         Ok(())
     })?;
     Ok(json!({"view": id, "changed": updated, "raster": state}))
@@ -500,15 +512,16 @@ fn set_scale(s: &mut Session, p: &Value) -> Result<Value> {
     let mut changed: Vec<(DrawingView, f64)> =
         views.into_values().filter_map(|v| m.views.get(&v.id).filter(|old| **old != v).map(|old| (v.clone(), old.scale))).collect();
     // A shaded view's raster is drawn again at its new scale (the curves are only scaled).
-    let mut states = RasterStates::new();
+    let mut states = Redraws::default();
     let mut loads = Loads::default();
     for (v, old) in &mut changed {
         if v.shaded && *old != v.scale {
             let loaded = loads.get(s, &v.model);
-            states.insert(v.id, raster::refresh(s, loaded.as_deref(), v));
+            states.rasters.insert(v.id, raster::refresh(s, loaded.as_deref(), v));
         }
     }
     let state = states
+        .rasters
         .get(&id)
         .copied()
         .unwrap_or_else(|| changed.iter().map(|(v, _)| v).chain(m.views.get(&id)).find(|v| v.id == id).map_or(raster::NONE, raster_state));
@@ -520,7 +533,7 @@ fn set_scale(s: &mut Session, p: &Value) -> Result<Value> {
                 mapper::transform_view(m, v, &mapper::move_and_scale(v.position, v.position, v.scale / old));
             }
         }
-        install(m, changed.into_iter().map(|(v, _)| v).collect(), Vec::new());
+        install(m, changed.into_iter().map(|(v, _)| v).collect(), Vec::new(), &[]);
         Ok(())
     })?;
     Ok(json!({"view": id, "changed": ids, "raster": state}))
@@ -555,7 +568,7 @@ fn set_position(s: &mut Session, p: &Value) -> Result<Value> {
                 mapper::transform_view(m, v, &mapper::move_and_scale(old, v.position, 1.0));
             }
         }
-        install(m, moved, Vec::new());
+        install(m, moved, Vec::new(), &[]);
         Ok(())
     })?;
     Ok(json!({"view": id, "position": [to.x, to.y]}))
@@ -587,12 +600,13 @@ fn set_orientation(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     let redraw: Vec<DrawingView> = std::iter::once(id).chain(order).filter_map(|vid| views.remove(&vid)).collect();
-    let mut states = RasterStates::new();
+    let mut states = Redraws::default();
     let regenerated = regenerated(s, redraw, cmd, &mut states)?;
-    let state = states.get(&id).copied().unwrap_or(raster::NONE);
+    let texts = std::mem::take(&mut states.notes);
+    let state = states.rasters.get(&id).copied().unwrap_or(raster::NONE);
     let ids: Vec<ViewId> = regenerated.iter().map(|(v, _)| v.id).collect();
     drawing::edit(s, cmd, |m, _| {
-        install(m, Vec::new(), regenerated);
+        install(m, Vec::new(), regenerated, &texts);
         Ok(())
     })?;
     Ok(json!({"view": id, "changed": ids, "raster": state}))
@@ -617,7 +631,7 @@ fn set_label(s: &mut Session, p: &Value) -> Result<Value> {
     v.label_visible = visible.unwrap_or(v.label_visible);
     let out = json!({"view": id, "identifier": v.identifier, "label_visible": v.label_visible});
     drawing::edit(s, cmd, |m, _| {
-        install(m, vec![v], Vec::new());
+        install(m, vec![v], Vec::new(), &[]);
         Ok(())
     })?;
     Ok(out)
@@ -659,12 +673,13 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
             }
         }
         drawing::dims::remove_attached(&mut m.paper, &gone);
+        notes::remove_attached(&mut m.paper, &removed.iter().copied().collect());
         for vid in &removed {
             if let Some(v) = m.views.remove(vid) {
                 mapper::remove_view(m, &v);
             }
         }
-        install(m, freed, Vec::new());
+        install(m, freed, Vec::new(), &[]);
         Ok(())
     })?;
     model_ref::evict_unreferenced(s);
@@ -706,12 +721,13 @@ fn update(s: &mut Session, p: &Value) -> Result<Value> {
             Some(_) => {}
         }
     }
-    let mut states = RasterStates::new();
+    let mut states = Redraws::default();
     let regenerated = redraw.into_iter().map(|(v, loaded)| redrawn(s, v, &loaded, cmd, &mut states)).collect::<Result<Vec<_>>>()?;
+    let texts = std::mem::take(&mut states.notes);
     let updated: Vec<ViewId> = regenerated.iter().map(|(v, _)| v.id).collect();
     if !regenerated.is_empty() {
         drawing::edit(s, cmd, |m, _| {
-            install(m, Vec::new(), regenerated);
+            install(m, Vec::new(), regenerated, &texts);
             Ok(())
         })?;
     }

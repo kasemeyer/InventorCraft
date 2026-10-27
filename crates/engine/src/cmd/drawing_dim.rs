@@ -91,7 +91,7 @@ fn snap_param(p: &Value, cmd: &str) -> Result<Option<Snap>> {
 }
 
 /// The view curve `{edge, segment?}` or `{at}` names.
-fn resolve(s: &Session, m: &DrawingModel, v: &DrawingView, p: &Value, cmd: &str) -> Result<Handle> {
+pub(crate) fn resolve(s: &Session, m: &DrawingModel, v: &DrawingView, p: &Value, cmd: &str) -> Result<Handle> {
     if let Some(at) = p.get("at") {
         let at = vec2(at).ok_or_else(|| bad(cmd, "`at` must be two finite numbers"))?;
         return match pick(s, [at.x, at.y], AT_TOLERANCE_IN) {
