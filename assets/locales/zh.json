@@ -745,6 +745,7 @@
   "cmd.document_new_assembly": "新建装配",
   "cmd.document_new_part": "新建零件",
   "cmd.document_units": "更改设计单位",
+  "cmd.drawing_new": "新建工程图",
   "cmd.edit_checkpoint": "检查点",
   "cmd.edit_restore_checkpoint": "恢复检查点",
   "cmd.engine_commands": "列出命令",

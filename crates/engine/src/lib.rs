@@ -12,6 +12,7 @@ pub mod cmd;
 pub mod control_auth;
 pub mod control_pending;
 pub mod crash;
+pub mod drawing;
 pub mod frames;
 pub mod fuzz;
 pub mod licences;
@@ -337,6 +338,9 @@ pub struct Session {
     /// Record this session's top-level commands in the crash journal (the app's own design;
     /// never previews or other scratch sessions). See [`crash`].
     pub crash_journal: bool,
+    /// The drawing sheet shown (an index into the drawing's sheets): view state, not saved, 0
+    /// when a design opens.
+    pub drawing_sheet: usize,
     /// Full model evaluations (`refresh`), for tests.
     #[cfg(test)]
     pub(crate) evaluations: usize,
@@ -411,6 +415,10 @@ impl SurfaceAnalysis {
     }
 }
 
+/// The undoable commands a Drawing document runs, by id prefix (the kind guard in
+/// [`Session::execute`]).
+const DRAWING_COMMANDS: [&str; 7] = ["drawing.", "edit.", "file.", "document.", "doc.", "project.", "metadata."];
+
 const MAX_UNDO: usize = 200;
 /// Checkpoints kept (the oldest go first).
 const MAX_CHECKPOINTS: usize = 16;
@@ -482,6 +490,7 @@ impl Session {
             camera: None,
             render_viewport: None,
             render_jobs: Default::default(),
+            drawing_sheet: 0,
             #[cfg(test)]
             evaluations: 0,
             motion_traces: Default::default(),
@@ -897,6 +906,11 @@ impl Session {
     /// the model up to date before anything reads it.
     pub fn execute(&mut self, id: &str, params: &Value) -> Result<Value> {
         let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
+        // A drawing holds no bodies, features or components: only the commands on files,
+        // documents, history and the drawing itself change it.
+        if spec.undoable && self.doc.kind == solidcraft_doc::DocumentKind::Drawing && !DRAWING_COMMANDS.iter().any(|p| spec.id.starts_with(p)) {
+            return Err(EngineError::Other(format!("{}: a drawing holds no model geometry: open the part or assembly", spec.id)));
+        }
         let host_viewport = self.render_viewport.clone();
         let host_jobs = self.render_jobs.host.clone();
         let additional_jobs = self.render_jobs.additional.clone();
@@ -1126,6 +1140,7 @@ impl Session {
             render_viewport: self.render_viewport.clone(),
             render_jobs: self.render_jobs.scratch(),
             saved_visibility: self.saved_visibility.clone(),
+            drawing_sheet: self.drawing_sheet,
             #[cfg(test)]
             evaluations: 0,
             motion_traces: self.motion_traces.clone(),

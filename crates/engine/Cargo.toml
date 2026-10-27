@@ -44,6 +44,14 @@ serde_path_to_error = { workspace = true }
 thiserror = { workspace = true }
 log = { workspace = true }
 web-time = { workspace = true }
+# The vendored CADCraft drawing crates (Plan D): a drawing's paper, its fonts, sheets and exports.
+cadcraft-doc = { path = "../cadcraft-doc" }
+cadcraft-fonts = { path = "../cadcraft-fonts" }
+cadcraft-render = { path = "../cadcraft-render" }
+cadcraft-io = { path = "../cadcraft-io" }
+cadcraft-geom = { path = "../cadcraft-geom" }
+# A title block's creation date in local time (already in the tree through truck-stepio).
+chrono = "0.4.38"
 
 [dev-dependencies]
 # Model-cache tests also run in a source tarball build (no git commit).

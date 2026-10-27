@@ -745,6 +745,7 @@
   "cmd.document_new_assembly": "New Assembly",
   "cmd.document_new_part": "New Part",
   "cmd.document_units": "Change Design Units",
+  "cmd.drawing_new": "New Drawing",
   "cmd.edit_checkpoint": "Checkpoint",
   "cmd.edit_restore_checkpoint": "Restore Checkpoint",
   "cmd.engine_commands": "List Commands",

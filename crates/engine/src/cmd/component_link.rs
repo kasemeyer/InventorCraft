@@ -100,7 +100,7 @@ fn relative(base: &Path, target: &Path) -> Option<PathBuf> {
 }
 
 /// How a link stores `file` for a design saved at `design` (`None`: not saved yet).
-fn stored(design: Option<&str>, file: &Path) -> String {
+pub(crate) fn stored(design: Option<&str>, file: &Path) -> String {
     let file = absolute(file);
     match base_dir(design).and_then(|d| relative(&d, &file)) {
         // Relative paths are written with `/`, so a design moves between systems with its parts.
@@ -110,7 +110,7 @@ fn stored(design: Option<&str>, file: &Path) -> String {
 }
 
 /// The file a stored link path names, for a design saved at `design`.
-fn resolve(design: Option<&str>, link: &str) -> PathBuf {
+pub(crate) fn resolve(design: Option<&str>, link: &str) -> PathBuf {
     let p = Path::new(link);
     match base_dir(design) {
         Some(d) if p.is_relative() => d.join(p),

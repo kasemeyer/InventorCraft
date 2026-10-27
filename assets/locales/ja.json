@@ -745,6 +745,7 @@
   "cmd.document_new_assembly": "新規アセンブリ",
   "cmd.document_new_part": "新規部品",
   "cmd.document_units": "デザインの単位を変更",
+  "cmd.drawing_new": "新規図面",
   "cmd.edit_checkpoint": "チェックポイント",
   "cmd.edit_restore_checkpoint": "チェックポイントを復元",
   "cmd.engine_commands": "コマンドを一覧表示",
