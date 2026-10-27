@@ -531,3 +531,40 @@ fn bumped_keys_fit_dxf_1071_and_round_trip() {
         }
     }
 }
+
+/// Final wave 29 (audit GAP 6): a polyline (an iso view's hole rim) is dimensioned between its
+/// vertices: `snap: "vertex"` with `vertex` (an index) on an `edge` pick, or the vertex nearest
+/// an `at` pick; the dimension is associated by `AssocSnap::Vertex` and is not sick.
+#[test]
+fn polyline_vertices_are_dimensioned() {
+    let (mut s, block) = block_drawing("polyline_vertices_are_dimensioned");
+    let v = run(&mut s, "drawing.view.base", json!({"model": block, "orientation": "iso_top_right", "scale": 1, "position": [10, 8]}))["view"]
+        .as_u64()
+        .unwrap();
+    let rim = "0/Block/e/F1:-y|F2:bore:side:0";
+    let poly = handle_of_edge(&s, v, rim);
+    let EntityKind::LwPolyline(p) = model(&s).paper.entity(poly).unwrap().kind.clone() else { panic!("the rim is not a polyline") };
+    let last = p.vertices.len() - 1;
+    let (a, b) = (p.vertices[0].p, p.vertices[last].p);
+    assert!(a.dist(b) > 0.1, "{a:?} {b:?}");
+    let picks = json!([{"edge": rim, "snap": "vertex", "vertex": 0}, {"at": [b.x, b.y], "snap": "vertex"}]);
+    let r = run(&mut s, "drawing.dim.aligned", json!({"view": v, "picks": picks, "placement": [a.x + 1.0, a.y + 1.0]}));
+    let h = handle(&r);
+    let (_, d) = dim(&s, h);
+    let snaps: Vec<AssocSnap> = d.assoc.iter().map(|x| x.snap.clone()).collect();
+    assert_eq!(snaps, [AssocSnap::Vertex { index: 0 }, AssocSnap::Vertex { index: last }]);
+    assert!(d.p13.xy().dist(a) < 1e-9 && d.p14.xy().dist(b) < 1e-9, "{d:?}");
+    assert_eq!(r["text"].as_str(), Some(format!("{:.2}", a.dist(b)).trim_start_matches('0')));
+    assert!(sick_dimensions(model(&s)).is_empty());
+    // A vertex snap on an `edge` pick names its index; one past the end is refused.
+    let e = s.execute(
+        "drawing.dim.aligned",
+        &json!({"view": v, "picks": [{"edge": rim, "snap": "vertex"}, {"edge": rim, "snap": "end"}], "placement": [12, 10]}),
+    );
+    assert_eq!(bad_message(e), "a vertex snap on an `edge` pick names its `vertex` (an index)");
+    let e = s.execute(
+        "drawing.dim.aligned",
+        &json!({"view": v, "picks": [{"edge": rim, "snap": "vertex", "vertex": last + 1}, {"edge": rim, "snap": "end"}], "placement": [12, 10]}),
+    );
+    assert_eq!(bad_message(e), "the picked curve has no such point");
+}

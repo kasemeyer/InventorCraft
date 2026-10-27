@@ -21,7 +21,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         "As Inventor's General Dimension, the kind is chosen by the picks: one straight edge gives its length (horizontal or vertical by the edge, else aligned); \
          a circle gives a diameter, an arc a radius; two picks give the distance between their snap points (default: a line's mid point, a circle's or arc's centre), \
          horizontal when the placement is above or below them, vertical when it is left or right, unless orientation: horizontal|vertical|aligned is given. \
-         view: a view id; picks: one or two of {edge: a model edge id shown by the view (segment?: which piece), snap?: start|end|mid|center} or {at: [x, y], snap?}; \
+         view: a view id; picks: one or two of {edge: a model edge id shown by the view (segment?: which piece), snap?: start|end|mid|center|vertex (a polyline's vertex: vertex?: its index, else the one nearest `at`)} or {at: [x, y], snap?}; \
          placement: [x, y] in inches → handle, kind: linear|aligned|diameter|radius, text: what it draws",
     ),
     CommandSpec::new("drawing.dim.linear", "Linear Dimension", linear).icon("dimension").params(
@@ -68,6 +68,8 @@ enum Snap {
     End,
     Mid,
     Center,
+    /// A polyline's vertex: by index, or (None) the one nearest the pick's `at`.
+    Vertex(Option<usize>),
 }
 
 /// A picked view entity.
@@ -75,6 +77,8 @@ struct Picked {
     handle: Handle,
     kind: EntityKind,
     snap: Option<Snap>,
+    /// Where an `{at}` pick was made.
+    at: Option<Vec2>,
 }
 
 fn snap_param(p: &Value, cmd: &str) -> Result<Option<Snap>> {
@@ -85,7 +89,14 @@ fn snap_param(p: &Value, cmd: &str) -> Result<Option<Snap>> {
             Some("end") => Ok(Some(Snap::End)),
             Some("mid") => Ok(Some(Snap::Mid)),
             Some("center") => Ok(Some(Snap::Center)),
-            _ => Err(bad(cmd, "`snap` must be start, end, mid or center")),
+            Some("vertex") => match p.get("vertex") {
+                None | Some(Value::Null) => Ok(Some(Snap::Vertex(None))),
+                Some(n) => {
+                    let n = n.as_u64().and_then(|n| usize::try_from(n).ok()).ok_or_else(|| bad(cmd, "`vertex` must be a whole number"))?;
+                    Ok(Some(Snap::Vertex(Some(n))))
+                }
+            },
+            _ => Err(bad(cmd, "`snap` must be start, end, mid, center or vertex")),
         },
     }
 }
@@ -139,7 +150,8 @@ fn picks(s: &Session, m: &DrawingModel, v: &DrawingView, p: &Value, cmd: &str) -
             }
             let handle = resolve(s, m, v, pk, cmd)?;
             let kind = m.paper.entity(handle).map(|e| e.kind.clone()).ok_or_else(|| bad(cmd, "the picked curve is gone"))?;
-            Ok(Picked { handle, kind, snap: snap_param(pk, cmd)? })
+            let at = pk.get("at").and_then(vec2).map(|q| Vec2::new(q.x, q.y));
+            Ok(Picked { handle, kind, snap: snap_param(pk, cmd)?, at })
         })
         .collect()
 }
@@ -154,7 +166,25 @@ fn anchor(paper: &cadcraft_doc::Drawing, pk: &Picked, cmd: &str) -> Result<Ancho
         (EntityKind::Arc(_), Some(Snap::Mid)) => AssocSnap::Mid,
         (EntityKind::Arc(_) | EntityKind::Circle(_), None | Some(Snap::Center)) => AssocSnap::Center,
         (EntityKind::LwPolyline(_), None) => AssocSnap::Start,
-        _ => return Err(bad(cmd, "that snap is not on the picked curve (a line has start, end and mid; an arc also center; a circle center)")),
+        // GAP 6: a polyline's vertex (an iso view's rims are polylines).
+        (EntityKind::LwPolyline(_), Some(Snap::Vertex(Some(index)))) => AssocSnap::Vertex { index },
+        (EntityKind::LwPolyline(p), Some(Snap::Vertex(None))) => {
+            let at = pk.at.ok_or_else(|| bad(cmd, "a vertex snap on an `edge` pick names its `vertex` (an index)"))?;
+            let index = p
+                .vertices
+                .iter()
+                .enumerate()
+                .min_by(|(_, a), (_, b)| a.p.dist(at).total_cmp(&b.p.dist(at)))
+                .map(|(i, _)| i)
+                .ok_or_else(|| bad(cmd, "the picked polyline has no vertex"))?;
+            AssocSnap::Vertex { index }
+        }
+        _ => {
+            return Err(bad(
+                cmd,
+                "that snap is not on the picked curve (a line has start, end and mid; an arc also center; a circle center; a polyline start, end and vertex)",
+            ));
+        }
     };
     let assoc = cadcraft_doc::DimAssoc { point: String::new(), handle: pk.handle, snap };
     let at = drawing::assoc::snap_point(paper, &assoc).ok_or_else(|| bad(cmd, "the picked curve has no such point"))?;
