@@ -191,7 +191,7 @@ fn properties_set_fills_every_title_block() {
     assert_eq!((m.properties.title.as_str(), m.properties.rev.as_str(), m.properties.checked_by.as_str()), ("BRACKET", "A", "KP"));
     assert!(err(&mut s, "drawing.properties.set", json!({"qa": "x"})).contains("unknown title block field qa"));
     assert!(err(&mut s, "drawing.properties.set", json!({"size": "B"})).contains("SIZE is computed (drawing.sheet.set_size)"));
-    assert!(err(&mut s, "drawing.properties.set", json!({"rev": 2})).contains("`properties.rev` must be text"));
+    assert!(err(&mut s, "drawing.properties.set", json!({"rev": 2})).contains("`rev` must be text"));
     assert_eq!(s.undo.len(), undo + 1, "a refused call adds no step");
     assert_eq!(field(model(&s), 0, "REV"), "A");
     run(&mut s, "edit.undo", json!({}));

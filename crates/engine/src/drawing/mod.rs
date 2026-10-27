@@ -141,7 +141,9 @@ fn computed_by(key: &str) -> Option<&'static str> {
 
 /// Sets the title block fields named in `given` (an object of `DrawingProps` fields, each text)
 /// on `props`; the computed fields (`COMPUTED_FIELDS`) are not properties and are refused.
-pub(crate) fn set_properties(props: &mut DrawingProps, given: &Value, cmd: &str) -> Result<()> {
+/// `prefix` is the fields' key path in the command's parameters (`"properties."` for
+/// `drawing.new`, `""` for `drawing.properties.set`), for the messages.
+pub(crate) fn set_properties(props: &mut DrawingProps, given: &Value, prefix: &str, cmd: &str) -> Result<()> {
     let Value::Object(given) = given else {
         return Err(crate::params::bad(cmd, "`properties` must be an object of title block fields"));
     };
@@ -154,7 +156,7 @@ pub(crate) fn set_properties(props: &mut DrawingProps, given: &Value, cmd: &str)
         if !fields.contains_key(key) {
             return Err(crate::params::bad(cmd, format!("unknown title block field {key}")));
         }
-        let Some(text) = value.as_str() else { return Err(crate::params::bad(cmd, format!("`properties.{key}` must be text"))) };
+        let Some(text) = value.as_str() else { return Err(crate::params::bad(cmd, format!("`{prefix}{key}` must be text"))) };
         fields.insert(key.clone(), Value::String(text.to_string()));
     }
     *props = serde_json::from_value(current).map_err(|e| EngineError::Other(format!("{cmd}: {e}")))?;

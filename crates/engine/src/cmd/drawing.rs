@@ -21,17 +21,17 @@ pub static COMMANDS: &[CommandSpec] = &[
      → kind, sheets, size: a new, unsaved drawing with one sheet (our border and title block)",
     ),
     CommandSpec::new("drawing.sheet.add", "New Sheet", sheet_add).icon("new").params(
-        "size?: A|B|C|D|E and landscape?: bool (default: the active sheet's)          → sheet: the new sheet's index (0-based), now the active sheet; every title block's SHEET is renumbered",
+        "size?: A|B|C|D|E and landscape?: bool (default: the active sheet's) → sheet: the new sheet's index (0-based), now the active sheet; every title block's SHEET is renumbered",
     ),
     CommandSpec::new("drawing.sheet.activate", "Activate Sheet", sheet_activate)
         .icon("activate")
         .noundo()
         .params("sheet: the sheet's index (0-based) → sheet: the active sheet (view state, no undo step)"),
     CommandSpec::new("drawing.sheet.set_size", "Sheet Size", sheet_set_size).icon("settings").params(
-        "sheet?: index (0-based; default the active sheet); size: A|B|C|D|E; landscape?: bool (default the sheet's)          → sheet, size, landscape: the page, border and title block follow the new size",
+        "sheet?: index (0-based; default the active sheet); size: A|B|C|D|E; landscape?: bool (default the sheet's) → sheet, size, landscape: the page, border and title block follow the new size",
     ),
     CommandSpec::new("drawing.properties.set", "Drawing Properties", properties_set).icon("settings").params(
-        "title?, company?, dwg_no?, rev?, drawn_by?, drawn_date?, checked_by?, checked_date?, approved_by?, approved_date?, material?: text          → properties: every title block field; SIZE, SCALE and SHEET are computed and refused",
+        "title?, company?, dwg_no?, rev?, drawn_by?, drawn_date?, checked_by?, checked_date?, approved_by?, approved_date?, material?: text → properties: every title block field; SIZE, SCALE and SHEET are computed and refused",
     ),
 ];
 
@@ -114,7 +114,7 @@ fn properties_set(s: &mut Session, p: &Value) -> Result<Value> {
     if p.as_object().is_none_or(serde_json::Map::is_empty) {
         return Err(bad(cmd, "name at least one title block field, e.g. {\"title\": \"BRACKET\"}"));
     }
-    drawing::set_properties(&mut props, p, cmd)?;
+    drawing::set_properties(&mut props, p, "", cmd)?;
     let shown = serde_json::to_value(&props).map_err(|e| EngineError::Other(format!("{cmd}: {e}")))?;
     drawing::edit(s, cmd, |m, _| {
         m.properties = props;
@@ -194,7 +194,7 @@ fn new_drawing(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     if let Some(given) = p.get("properties").filter(|v| !v.is_null()) {
-        drawing::set_properties(&mut props, given, cmd)?;
+        drawing::set_properties(&mut props, given, "properties.", cmd)?;
     }
     let mut doc = Document::new_with_kind(super::file::DEFAULT_NAME, DocumentKind::Drawing);
     doc.drawing = Some(Arc::new(template::new_model()));

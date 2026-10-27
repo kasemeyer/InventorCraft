@@ -11,10 +11,10 @@ use crate::{EngineError, Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("drawing.export.pdf", "Export Drawing as PDF", export_pdf).icon("export").noundo().params(
-        "path: the .pdf file to write; sheets?: [index, ...] (0-based; default every sheet, in order)          → path, pages, images, bytes: one page per sheet at its ANSI size (D = 2448 x 1584 pt); shaded views as pictures under their curves",
+        "path: the .pdf file to write; sheets?: [index, ...] (0-based; default every sheet, in order) → path, pages, images, bytes: one page per sheet at its ANSI size (D = 2448 x 1584 pt); shaded views as pictures under their curves",
     ),
     CommandSpec::new("drawing.export.dxf", "Export Drawing as DXF", export_dxf).icon("dxf").noundo().params(
-        "path: the .dxf file to write; sheet?: index (0-based; default the active sheet); version?: R2018|R2000 (default R2018)          → path, sheet, version, entities, bytes: the sheet's paper space (no pictures; what the view styles suppress is left out)",
+        "path: the .dxf file to write; sheet?: index (0-based; default the active sheet); version?: R2018|R2000 (default R2018) → path, sheet, version, entities, bytes: the sheet's paper space (no pictures; what the view styles suppress is left out)",
     ),
 ];
 
