@@ -110,6 +110,8 @@ pub(crate) fn resolve(s: &Session, m: &DrawingModel, v: &DrawingView, p: &Value,
         layout
             .entities
             .iter()
+            // A curve the style suppresses (invisible, R61) is not shown.
+            .filter(|e| e.common.visible)
             .filter_map(|e| xkey_of(e).filter(|k| k.view == v.id && k.edge == edge))
             .filter_map(|k| match k.seg {
                 Seg::Index(i) => Some(i),
@@ -120,6 +122,7 @@ pub(crate) fn resolve(s: &Session, m: &DrawingModel, v: &DrawingView, p: &Value,
     segment
         .or_else(first)
         .and_then(|seg| mapper::handle_of(m, &XKey { view: v.id, edge: edge.to_string(), seg: Seg::Index(seg) }))
+        .filter(|h| m.paper.entity(*h).is_some_and(|e| e.common.visible))
         .ok_or_else(|| bad(cmd, format!("view {} shows no edge {edge}", v.id)))
 }
 

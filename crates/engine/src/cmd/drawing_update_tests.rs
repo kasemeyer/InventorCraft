@@ -48,8 +48,14 @@ fn handles(s: &Session, id: u64) -> BTreeSet<Handle> {
     curves(s, id).into_iter().map(|(h, ..)| h).collect()
 }
 
-fn hidden(s: &Session, id: u64) -> usize {
-    curves(s, id).iter().filter(|(_, layer, _)| layer == "HIDDEN").count()
+/// View `id`'s entities on HIDDEN: (visible, invisible). Hidden Line Removed keeps hidden curves
+/// as invisible entities (R61).
+fn hidden(s: &Session, id: u64) -> (usize, usize) {
+    let m = model(s);
+    let layout = m.paper.layout(&m.sheets[view(s, id).sheet].layout).unwrap();
+    let on: Vec<bool> =
+        layout.entities.iter().filter(|e| xkey_of(e).is_some_and(|k| k.view == id) && e.common.layer == "HIDDEN").map(|e| e.common.visible).collect();
+    (on.iter().filter(|v| **v).count(), on.iter().filter(|v| !**v).count())
 }
 
 /// The circle of view `id`: (handle, centre, radius).
@@ -113,19 +119,19 @@ fn notes(s: &Session) -> Vec<(String, [f64; 2])> {
 #[test]
 fn set_style_children_follow() {
     let (mut s, _, [v1, v2, v3]) = three_views("set_style_children_follow");
-    assert_eq!((hidden(&s, v2), hidden(&s, v3)), (2, 2));
+    assert_eq!((hidden(&s, v2), hidden(&s, v3)), ((2, 0), (2, 0)));
     let undo = s.undo.len();
     run(&mut s, "drawing.view.set_style", json!({"view": v1, "lines": "removed"}));
     assert_eq!(s.undo.len(), undo + 1);
     assert_eq!((view(&s, v1).lines, view(&s, v2).lines, view(&s, v3).lines), (LineStyle::Removed, LineStyle::Removed, LineStyle::Removed));
-    assert_eq!((hidden(&s, v2), hidden(&s, v3)), (0, 0));
+    assert_eq!((hidden(&s, v2), hidden(&s, v3)), ((0, 2), (0, 2)));
     run(&mut s, "drawing.view.set_style", json!({"view": v2, "style_from_base": false, "lines": "hidden"}));
-    assert_eq!((view(&s, v2).style_from_base, view(&s, v2).lines, hidden(&s, v2)), (false, LineStyle::Hidden, 2));
+    assert_eq!((view(&s, v2).style_from_base, view(&s, v2).lines, hidden(&s, v2)), (false, LineStyle::Hidden, (2, 0)));
     // V1 changes again: V3 follows, V2 no longer does.
     run(&mut s, "drawing.view.set_style", json!({"view": v1, "lines": "hidden"}));
-    assert_eq!((hidden(&s, v2), hidden(&s, v3)), (2, 2));
+    assert_eq!((hidden(&s, v2), hidden(&s, v3)), ((2, 0), (2, 0)));
     run(&mut s, "drawing.view.set_style", json!({"view": v1, "lines": "removed"}));
-    assert_eq!((hidden(&s, v2), hidden(&s, v3)), (2, 0));
+    assert_eq!((hidden(&s, v2), hidden(&s, v3)), ((2, 0), (0, 2)));
     assert_eq!(view(&s, v2).lines, LineStyle::Hidden);
     assert_eq!(s.undo.len(), undo + 4);
     // Nothing to set is refused.

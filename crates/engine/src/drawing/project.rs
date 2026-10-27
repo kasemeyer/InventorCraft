@@ -83,6 +83,10 @@ pub struct ViewGeometry {
     pub curves: Vec<ViewCurve>,
     pub min: Vec2,
     pub max: Vec2,
+    /// The hidden curves the view's style does not draw (Hidden Line Removed), moved like
+    /// `curves`: placed as invisible entities, so the annotations on them keep their handles and
+    /// come back with the style (R58, R61).
+    pub suppressed: Vec<ViewCurve>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -156,11 +160,15 @@ pub(crate) fn project_view(model: &Session, o: &Orientation, opts: &ProjectOptio
     }
     let built = join_circles(built);
     let mut curves = visible_wins(built.into_iter().map(|b| b.curve).collect());
+    let mut suppressed = Vec::new();
     if opts.lines == LineStyle::Removed {
-        curves.retain(|c| !c.hidden);
+        // R61: kept aside, not dropped (`ViewGeometry::suppressed`).
+        (suppressed, curves) = curves.into_iter().partition(|c| c.hidden);
     }
-    curves.sort_by(|a, b| a.edge.cmp(&b.edge).then(a.segment.cmp(&b.segment)).then(a.hidden.cmp(&b.hidden)));
-    Ok(centred(curves))
+    let order = |a: &ViewCurve, b: &ViewCurve| a.edge.cmp(&b.edge).then(a.segment.cmp(&b.segment)).then(a.hidden.cmp(&b.hidden));
+    curves.sort_by(order);
+    suppressed.sort_by(order);
+    Ok(centred(curves, suppressed))
 }
 
 /// R52: moves each silhouette piece of a cylindrical face onto the exact generator it runs
@@ -535,22 +543,24 @@ fn visible_wins(curves: Vec<ViewCurve>) -> Vec<ViewCurve> {
 }
 
 /// The curves moved so the box of the visible ones (all of them when none is visible) is
-/// centred on the origin.
-fn centred(mut curves: Vec<ViewCurve>) -> ViewGeometry {
+/// centred on the origin; the suppressed ones move with them.
+fn centred(mut curves: Vec<ViewCurve>, mut suppressed: Vec<ViewCurve>) -> ViewGeometry {
     let mut lo = Vec2::new(f64::INFINITY, f64::INFINITY);
     let mut hi = Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
     let any_visible = curves.iter().any(|c| !c.hidden);
-    for c in curves.iter().filter(|c| !any_visible || !c.hidden) {
+    // With nothing drawn, the suppressed curves frame it, as they would under Hidden Line.
+    let framing = if curves.is_empty() { &suppressed } else { &curves };
+    for c in framing.iter().filter(|c| !any_visible || !c.hidden) {
         for p in extreme_points(&c.curve) {
             lo = Vec2::new(lo.x.min(p.x), lo.y.min(p.y));
             hi = Vec2::new(hi.x.max(p.x), hi.y.max(p.y));
         }
     }
     if !(lo.x <= hi.x && lo.y <= hi.y) {
-        return ViewGeometry { curves, min: Vec2::ZERO, max: Vec2::ZERO };
+        return ViewGeometry { curves, min: Vec2::ZERO, max: Vec2::ZERO, suppressed };
     }
     let mid = (lo + hi) * 0.5;
-    for c in &mut curves {
+    for c in curves.iter_mut().chain(suppressed.iter_mut()) {
         match &mut c.curve {
             PaperCurve::Line { a, b } => {
                 *a -= mid;
@@ -560,7 +570,7 @@ fn centred(mut curves: Vec<ViewCurve>) -> ViewGeometry {
             PaperCurve::Poly { points } => points.iter_mut().for_each(|p| *p -= mid),
         }
     }
-    ViewGeometry { curves, min: lo - mid, max: hi - mid }
+    ViewGeometry { curves, min: lo - mid, max: hi - mid, suppressed }
 }
 
 /// Points whose box is the curve's box.

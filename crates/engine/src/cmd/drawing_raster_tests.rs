@@ -100,10 +100,14 @@ fn decoded(s: &Session, id: u64) -> image::RgbaImage {
 }
 
 /// The handles of view `id`'s keyed curves and how many are on `layer`.
-fn on_layer(s: &Session, id: u64, layer: &str) -> usize {
+/// View `id`'s entities on `layer`: (visible, invisible). Hidden Line Removed keeps hidden
+/// curves as invisible entities (R61).
+fn on_layer(s: &Session, id: u64, layer: &str) -> (usize, usize) {
     let m = model(s);
     let layout = m.paper.layout(&m.sheets[0].layout).unwrap();
-    layout.entities.iter().filter(|e| xkey_of(e).is_some_and(|k| k.view == id) && e.common.layer == layer).count()
+    let on: Vec<bool> =
+        layout.entities.iter().filter(|e| xkey_of(e).is_some_and(|k| k.view == id) && e.common.layer == layer).map(|e| e.common.visible).collect();
+    (on.iter().filter(|v| **v).count(), on.iter().filter(|v| !**v).count())
 }
 
 fn handles(s: &Session) -> BTreeSet<Handle> {
@@ -157,12 +161,12 @@ fn without_a_rasterizer_the_raster_goes_stale() {
     let (v1, _) = shaded_view(&mut s, &block, json!({"orientation": "top"}));
     let png = view(&s, v1).raster.clone().unwrap().png;
     let shown_hidden = on_layer(&s, v1, "HIDDEN");
-    assert_eq!(shown_hidden, 2);
+    assert_eq!(shown_hidden, (2, 0));
     s.view_rasterizer = None;
     let r = run(&mut s, "drawing.view.set_style", json!({"view": v1, "lines": "removed"}));
     assert_eq!(r["raster"], "stale");
     assert_eq!(view(&s, v1).raster.as_ref().unwrap().png, png);
-    assert_eq!(on_layer(&s, v1, "HIDDEN"), 0);
+    assert_eq!(on_layer(&s, v1, "HIDDEN"), (0, 2));
     // A rasterizer that fails is the same as none.
     struct Failing;
     impl ViewRasterizer for Failing {
@@ -204,8 +208,9 @@ fn lines_still_draw_over_the_shading() {
     let (mut s, block, rec) = recorded("lines_still_draw_over_the_shading");
     let (v1, r) = shaded_view(&mut s, &block, json!({"orientation": "top"}));
     assert_eq!(r["raster"], "fresh");
-    assert_eq!(on_layer(&s, v1, "HIDDEN"), 2);
-    assert!(on_layer(&s, v1, "VISIBLE") >= 4);
+    assert_eq!(on_layer(&s, v1, "HIDDEN"), (2, 0));
+    assert!(on_layer(&s, v1, "VISIBLE").0 >= 4);
+    assert_eq!(on_layer(&s, v1, "VISIBLE").1, 0);
     // The top view is 4 x 1 in.
     assert_eq!(rec.calls().iter().map(|c| (c.width, c.height)).collect::<Vec<_>>(), vec![(800, 200)]);
 }

@@ -62,8 +62,61 @@ pub(crate) fn edit<T>(s: &mut Session, cmd: &str, f: impl FnOnce(&mut DrawingMod
     dims::sync_factors(edited);
     // Attached leaders follow their edges (`assoc::update` handles dimensions only).
     notes::follow(&mut edited.paper);
+    sync_suppressed(&mut edited.paper);
     s.doc_mut().drawing = Some(model);
     Ok(out)
+}
+
+/// R58, R61: a dimension or an attached note on a curve the view's style suppresses (an
+/// invisible view entity, Hidden Line Removed) is suppressed too: kept with its handle and its
+/// attachment, invisible, never sick or orphaned; it is shown again with the curve. Returns how
+/// many entities changed.
+pub(crate) fn sync_suppressed(paper: &mut cadcraft_doc::Drawing) -> usize {
+    use std::collections::BTreeMap;
+
+    use cadcraft_doc::{EntityKind, Handle};
+    let hidden = |h: Handle| paper.entity(h).is_some_and(|t| !t.common.visible);
+    // Each annotation's visibility as it should be.
+    let mut want: BTreeMap<Handle, bool> = BTreeMap::new();
+    for store in std::iter::once(&paper.model).chain(paper.layouts.iter().map(|l| &l.entities)) {
+        for e in store.iter() {
+            if let EntityKind::Dimension(d) = &e.kind {
+                if !d.assoc.is_empty() {
+                    want.insert(e.handle, !d.assoc.iter().any(|a| hidden(a.handle)));
+                }
+            } else if let Some(n) = notes::note_of(e)
+                && let Some(a) = n.attach
+            {
+                let shown = !hidden(a.handle);
+                for h in std::iter::once(e.handle).chain(n.partner) {
+                    let w = want.entry(h).or_insert(true);
+                    *w = *w && shown;
+                }
+            }
+        }
+    }
+    let changes: Vec<(Handle, bool)> = want.into_iter().filter(|(h, shown)| paper.entity(*h).is_some_and(|e| e.common.visible != *shown)).collect();
+    for (h, shown) in &changes {
+        let _ = paper.modify_entity(*h, |e| e.common.visible = *shown);
+    }
+    changes.len()
+}
+
+/// The annotations (dimensions, notes and leaders, centre marks and centrelines) the view styles
+/// suppress now (R58, R61): kept, invisible, not sick ([`sick_dimensions`] never lists them).
+pub fn suppressed_annotations(m: &DrawingModel) -> std::collections::BTreeSet<u64> {
+    let paper = &m.paper;
+    std::iter::once(&paper.model)
+        .chain(paper.layouts.iter().map(|l| &l.entities))
+        .flat_map(|s| s.iter())
+        .filter(|e| !e.common.visible)
+        .filter(|e| {
+            matches!(e.kind, cadcraft_doc::EntityKind::Dimension(_))
+                || notes::note_of(e).is_some()
+                || mapper::xkey_of(e).is_some_and(|k| k.seg == mapper::Seg::Mark)
+        })
+        .map(|e| e.handle.0)
+        .collect()
 }
 
 /// `<model folder>/<model stem>.tcidrw` (owner default; §8.6). Only the extension changes, so

@@ -475,7 +475,9 @@ fn set_style(s: &mut Session, p: &Value) -> Result<Value> {
         install(m, changed, regenerated, &texts);
         Ok(())
     })?;
-    Ok(json!({"view": id, "changed": updated, "raster": state}))
+    // The annotations the styles now suppress (R58, R61): kept, not drawn, not sick.
+    let suppressed = s.doc.drawing.as_deref().map_or(0, |m| drawing::suppressed_annotations(m).len());
+    Ok(json!({"view": id, "changed": updated, "raster": state, "suppressed": suppressed}))
 }
 
 fn set_scale(s: &mut Session, p: &Value) -> Result<Value> {

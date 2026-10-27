@@ -340,7 +340,8 @@ fn same_key_arcs_never_trade_handles() {
     // The first arc (from the feature that will go) is listed first.
     let first = arc(0.0, 1.0);
     let second = arc(3.0, 4.0);
-    let geometry = |curves: Vec<ViewCurve>| ViewGeometry { curves, min: MmVec2::new(-10.0, -10.0), max: MmVec2::new(10.0, 10.0) };
+    let geometry =
+        |curves: Vec<ViewCurve>| ViewGeometry { curves, min: MmVec2::new(-10.0, -10.0), max: MmVec2::new(10.0, 10.0), suppressed: Vec::new() };
     let both = geometry(vec![first.clone(), second.clone()]);
     crate::drawing::edit(&mut s, "test", |m, _| {
         let view = m.views.get(&v).unwrap().clone();
@@ -447,7 +448,7 @@ fn bumped_keys_fit_dxf_1071_and_round_trip() {
             curve: PaperCurve::Poly { points: vec![MmVec2::new(f64::from(i), 0.0), MmVec2::new(f64::from(i), 1.0)] },
         })
         .collect();
-    let geometry = ViewGeometry { curves: polys, min: MmVec2::new(0.0, 0.0), max: MmVec2::new(258.0, 1.0) };
+    let geometry = ViewGeometry { curves: polys, min: MmVec2::new(0.0, 0.0), max: MmVec2::new(258.0, 1.0), suppressed: Vec::new() };
     crate::drawing::edit(&mut s, "test", |m, _| {
         let view = m.views.get(&v).unwrap().clone();
         mapper::place(m, &view, &geometry);

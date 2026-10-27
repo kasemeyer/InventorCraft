@@ -197,7 +197,7 @@ fn order_key(c: &PaperCurve) -> [f64; 4] {
 /// << 8 | rank`. So a regenerated piece can take over a handle only when it is the same
 /// geometry: when one of them goes, the other's key changes and the dimensions on both go
 /// sick instead of following the wrong curve.
-fn segments(curves: &[super::project::ViewCurve]) -> Vec<u32> {
+fn segments(curves: &[&ViewCurve]) -> Vec<u32> {
     let mut by_key: BTreeMap<(&str, u32), Vec<usize>> = BTreeMap::new();
     for (i, c) in curves.iter().enumerate() {
         by_key.entry((c.edge.as_str(), c.segment)).or_default().push(i);
@@ -205,7 +205,7 @@ fn segments(curves: &[super::project::ViewCurve]) -> Vec<u32> {
     let mut out: Vec<u32> = curves.iter().map(|c| c.segment).collect();
     for ((_, segment), mut group) in by_key.into_iter().filter(|(_, g)| g.len() > 1) {
         group.sort_by(|&i, &j| {
-            let (a, b) = (&curves[i], &curves[j]);
+            let (a, b) = (curves[i], curves[j]);
             kind_rank(&a.curve)
                 .cmp(&kind_rank(&b.curve))
                 .then_with(|| {
@@ -229,9 +229,14 @@ fn segments(curves: &[super::project::ViewCurve]) -> Vec<u32> {
 /// Writes `g` for view `v` into its sheet's layout: modify_entity for keys that exist, Drawing::add for new
 /// keys, remove_entity for keys no longer produced; `v.group` then lists exactly the view's entities.
 ///
+/// The curves the style suppresses (`g.suppressed`, R61) are placed too, as invisible entities
+/// keyed exactly as under Hidden Line (keys are made over all the curves in one order), so
+/// switching the style back shows the same handles again.
+///
 /// Centre marks and centrelines (`Seg::Mark`) are not curves of `g`: they are regenerated from
 /// the curves they mark (in place, handles kept) and stay in the group; a mark whose circle or
-/// edges are gone is removed (`place_marks`).
+/// edges are only suppressed is kept invisible (R58); one whose circle or edges are gone is
+/// removed (`place_marks`).
 pub(crate) fn place(m: &mut DrawingModel, v: &DrawingView, g: &ViewGeometry) {
     let Some(layout) = m.sheets.get(v.sheet).map(|s| s.layout.clone()) else { return };
     let space = Space::Paper(layout.clone());
@@ -239,7 +244,11 @@ pub(crate) fn place(m: &mut DrawingModel, v: &DrawingView, g: &ViewGeometry) {
     let position = v.position;
     let mut members: Vec<Handle> = Vec::new();
     let mut produced: BTreeSet<XKey> = BTreeSet::new();
-    for (curve, segment) in g.curves.iter().zip(segments(&g.curves)) {
+    // Every curve with whether it is drawn, in the order the projection sorts them (R61).
+    let mut all: Vec<(&ViewCurve, bool)> = g.curves.iter().map(|c| (c, true)).chain(g.suppressed.iter().map(|c| (c, false))).collect();
+    all.sort_by(|(a, _), (b, _)| a.edge.cmp(&b.edge).then(a.segment.cmp(&b.segment)).then(a.hidden.cmp(&b.hidden)));
+    let list: Vec<&ViewCurve> = all.iter().map(|(c, _)| *c).collect();
+    for (&(curve, drawn), segment) in all.iter().zip(segments(&list)) {
         let mut key = XKey { view: v.id, edge: curve.edge.clone(), seg: Seg::Index(segment) };
         // Only within the bumped keys' range (module `segments`), wrapping at `MAX_SEGMENT`:
         // still unique, deterministic, and a signed 32-bit integer.
@@ -252,17 +261,18 @@ pub(crate) fn place(m: &mut DrawingModel, v: &DrawingView, g: &ViewGeometry) {
         let layer = if curve.hidden { HIDDEN_LAYER } else { VISIBLE_LAYER };
         let handle = match before.get(&key) {
             Some(&h) => {
-                let same = m.paper.entity(h).is_some_and(|e| e.kind == kind && e.common.layer == layer);
+                let same = m.paper.entity(h).is_some_and(|e| e.kind == kind && e.common.layer == layer && e.common.visible == drawn);
                 if !same {
                     let _ = m.paper.modify_entity(h, |e| {
                         e.kind = kind;
                         e.common.layer = layer.to_string();
+                        e.common.visible = drawn;
                     });
                 }
                 Some(h)
             }
             None => {
-                let common = Common { layer: layer.to_string(), xdata: key.tags(), ..Common::default() };
+                let common = Common { layer: layer.to_string(), visible: drawn, xdata: key.tags(), ..Common::default() };
                 m.paper.add(&space, common, kind).ok()
             }
         };
@@ -279,8 +289,9 @@ pub(crate) fn place(m: &mut DrawingModel, v: &DrawingView, g: &ViewGeometry) {
             m.paper.remove_entity(*h);
         }
     }
-    let on_paper: Vec<(&ViewCurve, PaperCurve)> = g.curves.iter().map(|c| (c, to_paper(&c.curve, position, v.scale))).collect();
-    members.extend(place_marks(m, &layout, v.id, &on_paper));
+    let drawn: Vec<(&ViewCurve, PaperCurve)> = g.curves.iter().map(|c| (c, to_paper(&c.curve, position, v.scale))).collect();
+    let every: Vec<(&ViewCurve, PaperCurve)> = list.iter().map(|c| (*c, to_paper(&c.curve, position, v.scale))).collect();
+    members.extend(place_marks(m, &layout, v.id, &drawn, &every));
     set_group(m, v, members);
 }
 
@@ -335,9 +346,16 @@ fn mark_lines(curves: &[(&ViewCurve, PaperCurve)], edge: &str) -> Option<Vec<(Pa
 }
 
 /// Regenerates view `view`'s centre marks and centrelines from its curves on paper: each line is
-/// changed in place (a mark's line across stays across), and the marks whose edges are gone
-/// are removed. Returns the handles kept.
-fn place_marks(m: &mut DrawingModel, layout: &str, view: ViewId, curves: &[(&ViewCurve, PaperCurve)]) -> Vec<Handle> {
+/// changed in place (a mark's line across stays across); a mark on curves that are only
+/// suppressed by the style (in `every`, not in `drawn`) is kept, invisible (R58, R61); the
+/// marks whose edges are gone are removed. Returns the handles kept.
+fn place_marks(
+    m: &mut DrawingModel,
+    layout: &str,
+    view: ViewId,
+    drawn: &[(&ViewCurve, PaperCurve)],
+    every: &[(&ViewCurve, PaperCurve)],
+) -> Vec<Handle> {
     let mut marks: BTreeMap<String, Vec<(Handle, bool)>> = BTreeMap::new();
     if let Some(l) = m.paper.layout(layout) {
         for e in l.entities.iter() {
@@ -351,7 +369,11 @@ fn place_marks(m: &mut DrawingModel, layout: &str, view: ViewId, curves: &[(&Vie
     }
     let mut kept = Vec::new();
     for (edge, handles) in marks {
-        let Some(lines) = mark_lines(curves, &edge) else {
+        let found = match mark_lines(drawn, &edge) {
+            Some(lines) => Some((lines, true)),
+            None => mark_lines(every, &edge).map(|lines| (lines, false)),
+        };
+        let Some((lines, visible)) = found else {
             for (h, _) in handles {
                 m.paper.remove_entity(h);
             }
@@ -361,8 +383,11 @@ fn place_marks(m: &mut DrawingModel, layout: &str, view: ViewId, curves: &[(&Vie
             let pick = if across { lines.first() } else { lines.get(1).or_else(|| lines.first()) };
             let Some(&(a, b)) = pick else { continue };
             let kind = EntityKind::Line(Line { a: PaperVec3::new(a.x, a.y, 0.0), b: PaperVec3::new(b.x, b.y, 0.0) });
-            if m.paper.entity(h).is_some_and(|e| e.kind != kind) {
-                let _ = m.paper.modify_entity(h, |e| e.kind = kind);
+            if m.paper.entity(h).is_some_and(|e| e.kind != kind || e.common.visible != visible) {
+                let _ = m.paper.modify_entity(h, |e| {
+                    e.kind = kind;
+                    e.common.visible = visible;
+                });
             }
             kept.push(h);
         }
@@ -445,6 +470,10 @@ pub(crate) fn place_label(m: &mut DrawingModel, v: &DrawingView) {
                 }
             } else if xkey_of(e).is_some_and(|k| k.view == v.id) {
                 members.push(e.handle);
+                if !e.common.visible {
+                    // Suppressed curves (R61) do not place the label.
+                    continue;
+                }
                 let b = cadcraft_doc::entity_bounds(&m.paper, e, 0);
                 if !b.is_empty() {
                     bottom = bottom.min(b.min.y);

@@ -14,7 +14,7 @@ use solidcraft_doc::DrawingModel;
 
 use crate::cmd::drawing::drawing_fixture::{block_drawing, edge_at, edit_model, front_view};
 use crate::drawing::mapper::{Seg, xkey_of};
-use crate::drawing::{LEADER_ARROW, MARK_OVERSHOOT_IN, NOTE_HEIGHT_IN, dimension_text, sick_dimensions};
+use crate::drawing::{LEADER_ARROW, MARK_OVERSHOOT_IN, NOTE_HEIGHT_IN, PaperPick, dimension_text, pick, sick_dimensions, suppressed_annotations};
 use crate::{EngineError, Session};
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
@@ -394,4 +394,81 @@ fn note_commands_need_a_drawing() {
         let e = s.execute(id, &p).unwrap_err().to_string();
         assert!(e.contains("not a drawing"), "{id}: {e}");
     }
+}
+
+/// View `id`'s entities on HIDDEN: handle and whether it is visible.
+fn hidden_curves(s: &Session, id: u64) -> Vec<(u64, bool)> {
+    let m = model(s);
+    let layout = m.paper.layout(&m.sheets[0].layout).unwrap();
+    layout
+        .entities
+        .iter()
+        .filter(|e| xkey_of(e).is_some_and(|k| k.view == id && k.seg != Seg::Mark) && e.common.layer == "HIDDEN")
+        .map(|e| (e.handle.0, e.common.visible))
+        .collect()
+}
+
+fn visible(s: &Session, h: u64) -> bool {
+    model(s).paper.entity(Handle(h)).unwrap_or_else(|| panic!("entity {h} is gone")).common.visible
+}
+
+/// R58, R61: annotations on the hole's hidden lines in VIEW3 (a centreline, a dimension, an
+/// attached leader note) are SUPPRESSED by Hidden Line Removed: kept with their handles,
+/// invisible, not sick, not picked; the hidden curves stay as invisible entities with their
+/// handles; Hidden Line brings everything back as it was.
+#[test]
+fn style_suppressed_annotations_are_kept_not_orphaned() {
+    let (mut s, _, v1) = front("style_suppressed_annotations_are_kept_not_orphaned");
+    let v3 = run(&mut s, "drawing.view.projected", json!({"parent": v1, "position": [20, 8]}))["view"].as_u64().unwrap();
+    let a = edge_at(&s, v3, [20.0, 7.625]);
+    let b = edge_at(&s, v3, [20.0, 8.375]);
+    let cl = handle(&run(&mut s, "drawing.centerline.bisector", json!({"view": v3, "a": a, "b": b})));
+    let dim = handle(&run(&mut s, "drawing.dim.general", json!({"view": v3, "picks": [{"edge": a}], "placement": [20, 6]})));
+    assert_eq!(dimension_text(model(&s), dim).as_deref(), Some("1.00"));
+    let r = run(&mut s, "drawing.note.leader", json!({"points": [[20, 8.375], [21.5, 9.5]], "text": "SEE NOTE", "attach": {"view": v3, "edge": b}}));
+    let (ld, txt) = (handle(&r), r["text_handle"].as_u64().unwrap());
+    let curves = hidden_curves(&s, v3);
+    assert_eq!(curves.len(), 2);
+    assert!(curves.iter().all(|(_, v)| *v));
+    let annotations = [cl, dim, ld, txt];
+    assert!(suppressed_annotations(model(&s)).is_empty());
+
+    let r = run(&mut s, "drawing.view.set_style", json!({"view": v3, "lines": "removed"}));
+    assert_eq!(r["suppressed"], 4);
+    // The hidden curves are kept, invisible, with their handles.
+    assert_eq!(hidden_curves(&s, v3), curves.iter().map(|(h, _)| (*h, false)).collect::<Vec<_>>());
+    // Every annotation is kept with its handle, not drawn, not sick.
+    for h in annotations {
+        assert!(!visible(&s, h), "{h} is still drawn");
+    }
+    assert_eq!(suppressed_annotations(model(&s)).into_iter().collect::<Vec<_>>(), {
+        let mut v = annotations.to_vec();
+        v.sort();
+        v
+    });
+    assert!(sick_dimensions(model(&s)).is_empty());
+    // A suppressed curve is not picked (pick skips invisible entities) nor dimensioned.
+    assert_eq!(pick(&s, [20.0, 7.625], 0.05), Some(PaperPick::View { view: v3 }));
+    assert_eq!(
+        bad_message(s.execute("drawing.dim.general", &json!({"view": v3, "picks": [{"edge": a}], "placement": [20, 6]}))),
+        format!("view {v3} shows no edge {a}")
+    );
+    // An update keeps them suppressed, not orphaned.
+    let r = run(&mut s, "drawing.update", json!({}));
+    assert_eq!(r["orphans"], 0);
+    assert_eq!(suppressed_annotations(model(&s)).len(), 4);
+
+    let r = run(&mut s, "drawing.view.set_style", json!({"view": v3, "lines": "hidden"}));
+    assert_eq!(r["suppressed"], 0);
+    assert_eq!(hidden_curves(&s, v3), curves);
+    for h in annotations {
+        assert!(visible(&s, h), "{h} did not come back");
+    }
+    assert_eq!(dimension_text(model(&s), dim).as_deref(), Some("1.00"));
+    assert!(sick_dimensions(model(&s)).is_empty());
+    let found = center_lines(&s);
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].0, cl);
+    assert!(close(found[0].1.dist(found[0].2), 1.25) && near(found[0].1.mid(found[0].2), [20.0, 8.0]));
+    assert!(near(leader(&s, ld).0.vertices[0].xy(), [20.0, 8.375]));
 }

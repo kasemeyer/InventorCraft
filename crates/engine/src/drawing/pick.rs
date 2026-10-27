@@ -137,7 +137,8 @@ pub fn pick(s: &crate::Session, at: [f64; 2], tol: f64) -> Option<PaperPick> {
         let group = m.paper.groups.iter().find(|g| g.name == mapper::group_name(v.group))?;
         let mut b = cadcraft_doc::geom::Bounds2::EMPTY;
         for h in &group.members {
-            if let Some(e) = m.paper.entity(*h) {
+            // A suppressed (invisible) curve does not widen the view's box (R61).
+            if let Some(e) = m.paper.entity(*h).filter(|e| e.common.visible) {
                 b = b.union(&cadcraft_doc::entity_bounds(&m.paper, e, 0));
             }
         }
@@ -165,6 +166,7 @@ pub(crate) fn nearest_edge(s: &Session, view: ViewId, at: [f64; 2]) -> Option<St
     layout
         .entities
         .iter()
+        .filter(|e| e.common.visible)
         .filter_map(|e| xkey_of(e).filter(|k| k.view == view && k.seg != Seg::Mark).map(|k| (distance(&m.paper, e, at), k.edge)))
         .min_by(|a, b| a.0.total_cmp(&b.0))
         .map(|(_, edge)| edge)
