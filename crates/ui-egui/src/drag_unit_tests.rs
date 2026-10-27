@@ -205,6 +205,9 @@ fn the_hole_depth_arrow_writes_the_design_unit() {
 fn the_pattern_second_spacing_arrow_writes_the_design_unit() {
     for inv in [true, false] {
         let mut h = inch_box(inv);
+        // The directions are picked on the origin axes: shown from the browser, as an Inventor
+        // user turns them on once the Origin has hidden itself after the first feature.
+        h.app.set_origin_shown(true);
         h.run(&json!([
             {"start": "solid.pattern.rectangular"},
             {"click": {"world": TOP}},
@@ -361,3 +364,4 @@ fn the_sketch_move_arrow_writes_the_design_unit() {
         assert_written(&h, inv, "X Distance", got, &exact(inv, x));
     }
 }
+

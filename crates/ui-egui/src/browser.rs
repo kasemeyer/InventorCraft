@@ -1424,8 +1424,14 @@ fn origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &Actio
     if !open {
         return;
     }
+    // Hidden only by default (never toggled), and by the profile's `workflow.origin_auto_hide`:
+    // each item reads as off, and turning one on shows that item alone, as Inventor's per-item
+    // Visibility does once the origin has hidden itself.
+    let auto = app.session.visibility.origin_hidden.is_none() && !app.origin_shown() && app.origin_auto_hidden();
+    let keys: Vec<&'static str> = items.iter().map(|(k, ..)| *k).collect();
     for (k, label, icon, thing) in items {
-        let visible = !app.session.visibility.hidden_origin.iter().any(|h| h == k);
+        let own = !app.session.visibility.hidden_origin.iter().any(|h| h == k);
+        let visible = own && !auto;
         let sel = match icon {
             "plane" => Some(Sel::Plane { name: k.into() }),
             "axis" => Some(Sel::Axis { name: k.into() }),
@@ -1438,7 +1444,17 @@ fn origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &Actio
             // Faded when hidden itself or with the whole Origin.
             &Row { depth: depth + 1, eye: Some(visible), icon, label, selected, dim: !visible || !app.origin_shown(), mark, ..Default::default() },
         );
-        if r.eye {
+        if r.eye && auto {
+            let others: Vec<&str> =
+                keys.iter().copied().filter(|o| *o != k && !app.session.visibility.hidden_origin.iter().any(|h| h == o)).collect();
+            app.set_origin_shown(true);
+            if !others.is_empty() {
+                let _ = app.run("browser.visibility", json!({ "items": others, "visible": false }));
+            }
+            if !own {
+                let _ = app.run("browser.visibility", json!({ "items": [k], "visible": true }));
+            }
+        } else if r.eye {
             // Through the command, so the Origin row's eye is an undo step (#2219).
             let _ = app.run("browser.visibility", json!({ "items": [k], "visible": !visible }));
         }

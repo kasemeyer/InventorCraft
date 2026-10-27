@@ -17,6 +17,7 @@
     "sectioned_extrude": true,
     "plane_drag": true,
     "sticky_split_buttons": true,
+    "origin_auto_hide": true,
     "marking_menu": {
       "face":   {"ring": ["ui.lookAt", "solid.extrude", "ui.selectOther", "", "sketch.create", "construct.plane.offset", "edit.undo", "inspect.measure"],
                  "overflow": ["ui.repeat", "-", "ui.previousView", "ui.home", "-", "ui.properties"],

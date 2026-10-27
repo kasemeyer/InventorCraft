@@ -45,6 +45,10 @@ pub struct Workflow {
     /// (icon, label, tooltip, enabled state) and its face runs it, unless the drop-down is
     /// `fixed_face`; the picks are kept per profile in the preferences (`split_faces`).
     pub sticky_split_buttons: bool,
+    /// The Origin is shown while the design is empty (a Part with no sketch or feature, an
+    /// Assembly with no component placed) and hidden once it is not, until the browser's Origin
+    /// eye is toggled (that choice is saved with the design and wins). A plane pick still shows it.
+    pub origin_auto_hide: bool,
 }
 
 impl Default for Workflow {
@@ -65,6 +69,7 @@ impl Default for Workflow {
             show_panels_menu: false,
             plane_drag: false,
             sticky_split_buttons: false,
+            origin_auto_hide: false,
         }
     }
 }

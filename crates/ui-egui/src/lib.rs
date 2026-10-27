@@ -98,6 +98,8 @@ mod look_at_tests;
 mod manage_dialogs_tests;
 mod material_card_review;
 mod material_editor;
+#[cfg(test)]
+mod origin_auto_hide_tests;
 
 #[cfg(test)]
 mod measurement_ui_tests;
@@ -1350,9 +1352,24 @@ impl SolveApp {
     }
 
     /// Is the browser's Origin folder shown? The design keeps it once it is toggled; until then
-    /// the Hide Origin by Default preference decides.
+    /// the Hide Origin by Default preference decides, and under the profile's
+    /// `workflow.origin_auto_hide` so does [`SolveApp::origin_auto_hidden`].
     pub fn origin_shown(&self) -> bool {
-        !self.session.visibility.origin_hidden.unwrap_or(self.preferences.hide_origin)
+        !self.session.visibility.origin_hidden.unwrap_or(self.preferences.hide_origin || self.origin_auto_hidden())
+    }
+
+    /// Does the profile's `workflow.origin_auto_hide` hide an untoggled Origin now? Yes once the
+    /// design is no longer empty: a Part (or a sheet-metal or other single-part design) with a
+    /// sketch or feature, an Assembly with a component placed.
+    pub fn origin_auto_hidden(&self) -> bool {
+        if !profile::active(self).workflow.origin_auto_hide {
+            return false;
+        }
+        let doc = &self.session.doc;
+        match doc.kind {
+            solidcraft_engine::doc::DocumentKind::Assembly => !doc.occurrences.is_empty(),
+            _ => !doc.features.is_empty(),
+        }
     }
 
     /// Show or hide the browser's Origin folder (saved with the design).
