@@ -196,6 +196,11 @@ fn half_scale_still_reads_model_units() {
     let (_, d) = dim(&s, handle(&r));
     assert!(close(d.p13.x, 9.25) && close(d.p14.x, 10.75), "{d:?}");
     assert_eq!(style(&s, handle(&r)).linear_factor, 2.0);
+    // Final wave 16: the hole, drawn .375 in across on paper, still reads ⌀.75.
+    let hole = edge_at(&s, v, [10.1875, 8.0]);
+    let r = general(&mut s, v, json!([{"edge": hole}]), [10.6, 8.4]);
+    assert_eq!((r["kind"].as_str(), r["text"].as_str()), (Some("diameter"), Some("⌀.75")));
+    assert_eq!(dimension_text(model(&s), handle(&r)).as_deref(), Some("⌀.75"));
 }
 
 #[test]
@@ -239,6 +244,30 @@ fn edit_sets_precision_and_text() {
     // A view curve is not a dimension.
     let edge = handle_of_edge(&s, v, &bottom).0;
     assert_eq!(bad_message(s.execute("drawing.dim.edit", &json!({"dim": edge, "precision": 2}))), format!("{edge} is not a dimension"));
+}
+
+/// Final wave 16: `justify` sets the overrides `textJust` (DIMJUST: center 0, first 1, second 2)
+/// and `textAbove` (DIMTAD: centered 0, above 1, below 4), read back as the style's `text_just`
+/// and `text_above`.
+#[test]
+fn edit_justifies_the_text() {
+    let (mut s, _, v) = front("edit_justifies_the_text");
+    let bottom = edge_at(&s, v, [10.0, 6.5]);
+    let h = handle(&general(&mut s, v, json!([{"edge": bottom}]), [10.0, 5.8]));
+    for (horizontal, vertical, just, above) in [("first", "above", 1, 1), ("second", "below", 2, 4), ("center", "centered", 0, 0)] {
+        run(&mut s, "drawing.dim.edit", json!({"dim": h, "justify": {"horizontal": horizontal, "vertical": vertical}}));
+        let (_, d) = dim(&s, h);
+        assert_eq!((d.overrides.get("textJust"), d.overrides.get("textAbove")), (Some(&json!(just)), Some(&json!(above))), "{horizontal} {vertical}");
+        let st = style(&s, h);
+        assert_eq!((st.text_just, st.text_above), (just, above), "{horizontal} {vertical}");
+    }
+    // One of the two alone leaves the other as it was.
+    run(&mut s, "drawing.dim.edit", json!({"dim": h, "justify": {"horizontal": "first"}}));
+    assert_eq!((style(&s, h).text_just, style(&s, h).text_above), (1, 0));
+    assert_eq!(
+        bad_message(s.execute("drawing.dim.edit", &json!({"dim": h, "justify": {"vertical": "up"}}))),
+        "`justify.vertical` must be centered, above or below"
+    );
 }
 
 #[test]
