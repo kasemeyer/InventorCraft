@@ -107,6 +107,28 @@ fn a_side_edge_reads_2_00() {
     assert_eq!(dim(&s, handle(&r)).1.assoc[0].handle, handle_of_edge(&s, v, &right));
 }
 
+/// Final wave 15: a forced orientation across which the picks have no extent (a vertical edge
+/// measured horizontally) is refused, not drawn as "0.00"; one along the edge is drawn.
+#[test]
+fn a_forced_orientation_that_measures_nothing_is_refused() {
+    let (mut s, _, v) = front("a_forced_orientation_that_measures_nothing_is_refused");
+    let right = edge_at(&s, v, [12.0, 8.0]);
+    let bottom = edge_at(&s, v, [10.0, 6.5]);
+    let undo = s.undo.len();
+    for (cmd, edge, orientation) in [
+        ("drawing.dim.general", &right, "horizontal"),
+        ("drawing.dim.linear", &right, "horizontal"),
+        ("drawing.dim.general", &bottom, "vertical"),
+        ("drawing.dim.linear", &bottom, "vertical"),
+    ] {
+        let r = s.execute(cmd, &json!({"view": v, "picks": [{"edge": edge}], "placement": [13, 5], "orientation": orientation}));
+        assert_eq!(bad_message(r), format!("a {orientation} dimension here would measure nothing: give another orientation"), "{cmd}");
+    }
+    assert_eq!(s.undo.len(), undo);
+    let r = run(&mut s, "drawing.dim.linear", json!({"view": v, "picks": [{"edge": right}], "placement": [13, 8], "orientation": "vertical"}));
+    assert_eq!(r["text"].as_str(), Some("2.00"));
+}
+
 #[test]
 fn a_circle_gives_a_diameter() {
     let (mut s, _, v) = front("a_circle_gives_a_diameter");

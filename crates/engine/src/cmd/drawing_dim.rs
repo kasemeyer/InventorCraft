@@ -175,6 +175,21 @@ fn orientation(p: &Value, cmd: &str, aligned_ok: bool) -> Result<Option<Directio
     }
 }
 
+/// `d`, a given orientation, when it measures something between `a` and `b`: a horizontal
+/// dimension of two points one above the other (or a vertical one of two side by side) would
+/// read 0 and is refused.
+fn measurable(a: Vec2, b: Vec2, d: Direction, cmd: &str) -> Result<Direction> {
+    let (extent, name) = match d {
+        Direction::Horizontal => ((b.x - a.x).abs(), "horizontal"),
+        Direction::Vertical => ((b.y - a.y).abs(), "vertical"),
+        Direction::Aligned => (a.dist(b), "aligned"),
+    };
+    if extent <= 1e-9 {
+        return Err(bad(cmd, format!("a {name} dimension here would measure nothing: give another orientation")));
+    }
+    Ok(d)
+}
+
 /// Horizontal when `placement` is above or below the box of `a` and `b`, vertical when it is
 /// left or right of it (the larger way out wins); inside, along the box's longer side.
 fn by_placement(a: Vec2, b: Vec2, placement: Vec2) -> Direction {
@@ -253,7 +268,7 @@ fn make(s: &mut Session, p: &Value, want: Want, cmd: &str) -> Result<Value> {
             let end = Anchor { at: l.b.xy(), handle: one.handle, snap: AssocSnap::End };
             let direction = match (want, given) {
                 (Want::Aligned, _) => Direction::Aligned,
-                (_, Some(d)) => d,
+                (_, Some(d)) => measurable(start.at, end.at, d, cmd)?,
                 (Want::General, None) => edge_direction(start.at, end.at),
                 _ => by_placement(start.at, end.at, placement),
             };
@@ -264,9 +279,10 @@ fn make(s: &mut Session, p: &Value, want: Want, cmd: &str) -> Result<Value> {
             if a.at.dist(b.at) <= 1e-9 {
                 return Err(bad(cmd, "the two picks are at the same point"));
             }
-            let direction = match want {
-                Want::Aligned => Direction::Aligned,
-                _ => given.unwrap_or_else(|| by_placement(a.at, b.at, placement)),
+            let direction = match (want, given) {
+                (Want::Aligned, _) => Direction::Aligned,
+                (_, Some(d)) => measurable(a.at, b.at, d, cmd)?,
+                (_, None) => by_placement(a.at, b.at, placement),
             };
             dims::linear(&a, &b, direction, placement, scale)
         }
