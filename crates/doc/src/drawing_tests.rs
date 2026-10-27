@@ -217,7 +217,12 @@ fn rasters_save_as_base64() {
     let back: RasterRef = serde_json::from_value(value).unwrap();
     assert_eq!(back, raster);
     let bad = serde_json::json!({"width": 2, "height": 1, "png": "iVBORw="});
-    assert!(serde_json::from_value::<RasterRef>(bad).is_err());
+    let e = serde_json::from_value::<RasterRef>(bad).unwrap_err().to_string();
+    // The shared decoder's messages name no HDR (final wave 1).
+    assert_eq!(e, "a view's image: base64 exceeds the resource budget or is not canonical");
+    let bad = serde_json::json!({"width": 2, "height": 1, "png": "iVB!Rw=="});
+    let e = serde_json::from_value::<RasterRef>(bad).unwrap_err().to_string();
+    assert_eq!(e, "a view's image: noncanonical base64");
 }
 
 #[test]

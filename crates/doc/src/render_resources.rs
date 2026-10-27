@@ -253,7 +253,7 @@ impl serde::de::Visitor<'_> for PayloadSeed {
         write!(f, "canonical base64 of at most {} HDR bytes", self.0)
     }
     fn visit_str<E: serde::de::Error>(self, value: &str) -> std::result::Result<Vec<u8>, E> {
-        decode_base64(value, self.0).map_err(E::custom)
+        decode_base64(value, self.0).map_err(|e| E::custom(format!("HDR: {e}")))
     }
 }
 
@@ -290,7 +290,7 @@ pub(crate) fn decode_base64(value: &str, maximum: usize) -> Result<Vec<u8>> {
     let length = base64_length(value, maximum)?;
     let padding = if value.ends_with("==") { 2 } else { usize::from(value.ends_with('=')) };
     let mut bytes = Vec::new();
-    bytes.try_reserve_exact(length).map_err(|_| invalid("could not reserve embedded HDR bytes"))?;
+    bytes.try_reserve_exact(length).map_err(|_| invalid("could not reserve embedded bytes"))?;
     for (i, group) in value.as_bytes().as_chunks::<4>().0.iter().enumerate() {
         let last = (i + 1) * 4 == value.len();
         let mut n = 0u32;
@@ -302,12 +302,12 @@ pub(crate) fn decode_base64(value: &str, maximum: usize) -> Result<Vec<u8>> {
                 b'+' => 62,
                 b'/' => 63,
                 b'=' if last && j >= 4 - padding => 0,
-                _ => return Err(invalid("noncanonical HDR base64")),
+                _ => return Err(invalid("noncanonical base64")),
             };
             n = (n << 6) | u32::from(digit);
         }
         if last && ((padding == 2 && n & 0xffff != 0) || (padding == 1 && n & 0xff != 0)) {
-            return Err(invalid("noncanonical HDR base64 padding bits"));
+            return Err(invalid("noncanonical base64 padding bits"));
         }
         for offset in 0..if last { 3 - padding } else { 3 } {
             bytes.push(((n >> (16 - offset * 8)) & 255) as u8);
@@ -318,12 +318,12 @@ pub(crate) fn decode_base64(value: &str, maximum: usize) -> Result<Vec<u8>> {
 
 fn base64_length(value: &str, maximum: usize) -> Result<usize> {
     if value.is_empty() || !value.len().is_multiple_of(4) || value.len() > maximum.div_ceil(3) * 4 {
-        return Err(invalid("HDR base64 exceeds the resource budget or is not canonical"));
+        return Err(invalid("base64 exceeds the resource budget or is not canonical"));
     }
     let padding = if value.ends_with("==") { 2 } else { usize::from(value.ends_with('=')) };
     let length = value.len() / 4 * 3 - padding;
     if length == 0 || length > maximum {
-        return Err(invalid("HDR payload exceeds the remaining resource budget"));
+        return Err(invalid("payload exceeds the remaining resource budget"));
     }
     Ok(length)
 }
