@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 use cadcraft_doc::{Drawing, EntityKind, Handle};
 use cadcraft_geom::Vec2;
 use serde_json::{Value, json};
-use solidcraft_doc::DrawingModel;
+use solidcraft_doc::{CubeTarget, DrawingModel};
 
 use crate::Session;
 use crate::cmd::drawing::drawing_fixture::temp_dir;
@@ -103,6 +103,9 @@ fn the_example_script_makes_the_two_view_drawing() {
     let m = model(&s);
     assert_eq!(m.views.len(), 2);
     assert_eq!(m.views[&top].parent, Some(base));
+    assert_eq!(m.views[&top].orientation.preset, CubeTarget::from_name("top"));
+    let at = m.views[&top].position;
+    assert!(close(at.x, 10.0) && close(at.y, 16.0), "{at:?}");
 
     // Step 4: the four dimensions of spec §7.2, in order.
     let dims = results_of(&script, &results, "drawing.dim.general");
@@ -181,10 +184,10 @@ fn the_example_script_makes_the_two_view_drawing() {
 
 /// The sheet's entities per layer: the border and title block (2 inserts); the centre mark's 2 legs;
 /// the 4 dimensions; the hole's 2 hidden lines in the top view (spec §7.3); the hole note's leader
-/// and text; and 21 visible curves: VIEW1's 4 lines, 1 circle and 4 arcs (§7.3's front golden) and
-/// the top view's 12 lines as observed (its visible count is not yet pinned by a capture, §7.3):
-/// the outline's sides (2), front (3 pieces: the fillets' edges and the top face's), back (5
-/// pieces: the same, the left end split where two fillet edges' names alternate, ledgered), and the
-/// two lines where the top face meets the fillets (the kernel flags no tangent edge on the block,
-/// R50).
-const EXPECTED_LAYERS: &[(&str, usize)] = &[("BORDER", 2), ("CENTER", 2), ("DIMENSION", 4), ("HIDDEN", 2), ("NOTE", 2), ("VISIBLE", 21)];
+/// and text; and 19 visible curves: VIEW1's 4 lines, 1 circle and 4 arcs (§7.3's front golden) and
+/// the top view's 10 lines (`drawing_projection_tests::top_view_has_two_hidden_lines_for_the_hole`):
+/// the outline's sides (2), front (3 pieces: the fillets' edges and the top face's) and back (5
+/// pieces: the same, the left end split where two fillet edges' names alternate). The two lines
+/// where the top face meets the fillets (x = 8.5 and 11.5) are tangent (R64) and the views leave
+/// tangent edges off.
+const EXPECTED_LAYERS: &[(&str, usize)] = &[("BORDER", 2), ("CENTER", 2), ("DIMENSION", 4), ("HIDDEN", 2), ("NOTE", 2), ("VISIBLE", 19)];

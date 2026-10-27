@@ -12,7 +12,7 @@ use solidcraft_render::{Camera, StandardView};
 use crate::Session;
 use crate::cmd::view_dxf::meshes::{self, Keep};
 use crate::cmd::view_dxf::projection::{self, EdgeKind};
-use crate::drawing::edges::{EdgeSource, SourcedLine, sourced_lines};
+use crate::drawing::edges::{EdgeSource, SourcedLine, dihedral_tangent, sourced_lines};
 
 const TOLERANCE: f64 = 0.01;
 
@@ -242,14 +242,42 @@ fn tube() -> Session {
 
 #[test]
 fn tangent_edges_reach_the_drawing_path_flagged() {
-    // The kernel certifies only joins of ruled B-spline faces tangent: the block's fillet joins
-    // (planes and blends) are drawn as ordinary edges, so its top view has no tangent line.
-    assert!(sourced_lines(&block(), &top(), TOLERANCE).unwrap().iter().all(|l| !l.smooth));
+    // The kernel certifies only joins of ruled B-spline faces tangent and flags none of the
+    // block's (R50); the dihedral rule (R64) finds its eight fillet joins, where each round
+    // meets its two planes with their normals equal.
+    let block = block();
+    let state = block.model.state();
+    let body = state.body("Block").unwrap();
+    assert!(body.mesh().smooth_edges.iter().all(|f| !f));
+    let names = naming::edge_names(body);
+    let tangent: BTreeSet<String> = dihedral_tangent(&body.mesh()).iter().zip(&names).filter(|(t, _)| **t).map(|(_, n)| n.clone()).collect();
+    let mut joins = BTreeSet::new();
+    for (p, q) in [("F1:+x", "F1:+z"), ("F1:+z", "F1:-x"), ("F1:+x", "F1:-z"), ("F1:-x", "F1:-z")] {
+        joins.insert(format!("{p}|F3:blend:{p}|{q}"));
+        joins.insert(format!("{q}|F3:blend:{p}|{q}"));
+    }
+    // The bore's two seams (where the kernel halves it) are tangent too; a seam is never drawn.
+    let seams = ["F2:bore:side:0|F2:bore:side:1~1", "F2:bore:side:0|F2:bore:side:1~2"];
+    assert_eq!(tangent, joins.iter().cloned().chain(seams.map(String::from)).collect::<BTreeSet<_>>());
+    // From the top, the top face's joins with the rounds (x = -38.1 and 38.1, front to back) are
+    // drawn flagged smooth; the joins with the sides lie on the outline, and are marked so (R54).
+    let lines = sourced_lines(&block, &top(), TOLERANCE).unwrap();
+    assert!(lines.iter().filter(|l| l.smooth).all(|l| matches!(&l.source, EdgeSource::Brep { edge_name, .. } if joins.contains(edge_name))));
+    let mut inside: Vec<_> = lines.iter().filter(|l| l.smooth && !l.hidden && !l.silhouette).collect();
+    inside.sort_by(|a, b| a.a.x.total_cmp(&b.a.x));
+    assert_eq!(inside.len(), 2, "{inside:#?}");
+    for (l, (x, name)) in inside.iter().zip([(-38.1, "F1:+z|F3:blend:F1:+z|F1:-x"), (38.1, "F1:+z|F3:blend:F1:+x|F1:+z")]) {
+        assert!((l.a.x - x).abs() < 1e-6 && (l.b.x - x).abs() < 1e-6 && (l.a.dist(l.b) - 25.4).abs() < 1e-6, "{l:?}");
+        assert_eq!(l.source.model_edge_id(), format!("0/Block/e/{name}"));
+    }
     let s = tube();
     let state = s.model.state();
     let body = state.body("Tube").unwrap();
     let flagged: BTreeSet<u32> = body.mesh().smooth_edges.iter().enumerate().filter(|(_, f)| **f).map(|(i, _)| i as u32).collect();
     assert_eq!(flagged.len(), 2);
+    // The dihedral rule agrees with the kernel on the tube: its two joins and nothing else.
+    let by_dihedral: BTreeSet<u32> = dihedral_tangent(&body.mesh()).iter().enumerate().filter(|(_, f)| **f).map(|(i, _)| i as u32).collect();
+    assert_eq!(by_dihedral, flagged);
     // From the front the joins are the tube's outline, x = -10 and 10, 10 mm tall.
     let cam = camera(StandardView::Front, Vec3::new(0., 0., 5.));
     let lines = sourced_lines(&s, &cam, TOLERANCE).unwrap();

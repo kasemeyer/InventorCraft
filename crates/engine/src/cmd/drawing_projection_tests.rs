@@ -201,12 +201,43 @@ fn hidden_line_removed_drops_the_hidden_curves() {
 
 #[test]
 fn tangent_edges_appear_only_when_asked() {
-    // R50: the kernel flags none of the block's fillet joins tangent, so the toggle adds nothing.
+    // R64: the block's fillet joins are tangent by the dihedral rule (the kernel flags none,
+    // R50). From the top, the top face's joins with the rounds, x = -38.1 and 38.1 front to back,
+    // are drawn only with tangent edges on; from the right, the right face's, y = -25.4 and 25.4
+    // across. The joins with the faces square to the view lie on the outline, drawn in both.
     let s = block();
-    let off = view(&s, "top", LineStyle::Hidden, false);
-    let on = view(&s, "top", LineStyle::Hidden, true);
-    assert_eq!(on, off);
-    assert_no_visible_duplicates(&on);
+    for (target, joins) in [
+        (
+            "top",
+            [
+                ("0/Block/e/F1:+z|F3:blend:F1:+z|F1:-x", [-38.1, -12.7], [-38.1, 12.7]),
+                ("0/Block/e/F1:+z|F3:blend:F1:+x|F1:+z", [38.1, -12.7], [38.1, 12.7]),
+            ],
+        ),
+        (
+            "right",
+            [
+                ("0/Block/e/F1:+x|F3:blend:F1:+x|F1:-z", [-12.7, -25.4], [12.7, -25.4]),
+                ("0/Block/e/F1:+x|F3:blend:F1:+x|F1:+z", [-12.7, 25.4], [12.7, 25.4]),
+            ],
+        ),
+    ] {
+        let off = view(&s, target, LineStyle::Hidden, false);
+        let on = view(&s, target, LineStyle::Hidden, true);
+        assert_eq!((counts(&off), counts(&on)), ((12, 0, 0, 0, 2), (14, 0, 0, 0, 2)), "{target}");
+        let added: Vec<&ViewCurve> = on.curves.iter().filter(|c| !off.curves.contains(c)).collect();
+        assert_eq!(added.len(), 2, "{target}: {added:#?}");
+        assert!(off.curves.iter().all(|c| on.curves.contains(c)), "{target}");
+        for (edge, a, b) in joins {
+            let c = added.iter().find(|c| c.edge == edge).unwrap_or_else(|| panic!("{target}: {edge} in {added:#?}"));
+            let PaperCurve::Line { a: p, b: q } = c.curve else { panic!("{c:?}") };
+            let (a, b) = (Vec2::new(a[0], a[1]), Vec2::new(b[0], b[1]));
+            assert!(!c.hidden && ((near2(p, a) && near2(q, b)) || (near2(p, b) && near2(q, a))), "{target}: {c:?}");
+        }
+        assert_eq!((off.min, off.max), (on.min, on.max));
+        assert_no_visible_duplicates(&on);
+        assert_no_visible_duplicates(&off);
+    }
     // The tube's two certified tangent joins, seen from the iso corner, where they are not its
     // outline: drawn only with tangent edges on.
     let s = tube();

@@ -13,7 +13,8 @@
 //!   by the piece name that sorts first (R49). `k` numbers that surface's silhouettes in the view
 //!   by the projected x of their midpoints, then y; a silhouette is all its collinear end-to-end
 //!   pieces, hidden or not, so an occluder that splits one renumbers none (R53).
-//! - A tangent edge (`Mesh::smooth_edges`) is drawn, as a `Brep` line with `smooth` set, so a
+//! - A tangent edge (`Mesh::smooth_edges`, or two faces whose normals agree within 1° along it,
+//!   [`dihedral_tangent`], R64) is drawn, as a `Brep` line with `smooth` set, so a
 //!   view can leave it out (R48); an export never draws it. Where it is also a silhouette (a
 //!   tube's outline) it is marked `silhouette`, and a view always draws it (R54).
 // Drawing views (Task 6) are the first caller outside the tests.
@@ -63,7 +64,7 @@ pub(crate) struct SourcedLine {
     pub source: EdgeSource,
     /// The mesh (= B-rep) edge index of a `Brep` source.
     pub mesh_edge: Option<u32>,
-    /// A tangent edge (`Mesh::smooth_edges`), which a view shows only when asked.
+    /// A tangent edge (`Mesh::smooth_edges` or [`dihedral_tangent`]), which a view shows only when asked.
     pub smooth: bool,
     /// A silhouette, or a B-rep edge drawn where a silhouette of the same visibility runs (the
     /// merge names it after the edge): an outline, always drawn, even when `smooth` (R54).
@@ -85,6 +86,8 @@ struct Names {
     mesh: Arc<solidcraft_geom::Mesh>,
     edges: Vec<String>,
     faces: Arc<Vec<String>>,
+    /// Per B-rep edge: tangent by the dihedral rule ([`dihedral_tangent`], R64).
+    tangent: Vec<bool>,
 }
 impl Names {
     /// The name of B-rep face `face`'s whole surface: the first name of the pieces joined to it
@@ -112,7 +115,9 @@ fn name_lines(model: &Session, scene: &Scene, lines: Vec<Line>) -> Result<Vec<So
         if scene.meshes.get(placed.mesh).is_none_or(|m| m.edges.len() != edges.len()) {
             return Err(lost(&placed.body));
         }
-        names.insert(i, Names { mesh: body.mesh(), edges, faces: naming::face_names(body) });
+        let mesh = body.mesh();
+        let tangent = dihedral_tangent(&mesh);
+        names.insert(i, Names { mesh, edges, faces: naming::face_names(body), tangent });
     }
     // Each silhouette's face, by its surface's name (looked up once per face).
     let mut surfaces: BTreeMap<(u32, u32), String> = BTreeMap::new();
@@ -161,7 +166,9 @@ fn name_lines(model: &Session, scene: &Scene, lines: Vec<Line>) -> Result<Vec<So
         let (source, mesh_edge, smooth) = match line.source.kind {
             EdgeKind::Brep(i) => {
                 let edge_name = named.edges.get(i as usize).ok_or_else(|| lost("an edge"))?.clone();
-                let smooth = scene.meshes.get(placed.mesh).and_then(|m| m.smooth_edges.get(i as usize)).copied().unwrap_or(false);
+                // The kernel's smooth flag, or tangent by the dihedral rule (R64).
+                let smooth = scene.meshes.get(placed.mesh).and_then(|m| m.smooth_edges.get(i as usize)).copied().unwrap_or(false)
+                    || named.tangent.get(i as usize).copied().unwrap_or(false);
                 (EdgeSource::Brep { component_path, body_name, edge_name }, Some(i), smooth)
             }
             EdgeKind::Silhouette { face } => {
@@ -172,6 +179,72 @@ fn name_lines(model: &Session, scene: &Scene, lines: Vec<Line>) -> Result<Vec<So
         out.push(SourcedLine { a: line.a, b: line.b, hidden: line.hidden, source, mesh_edge, smooth, silhouette });
     }
     Ok(out)
+}
+
+/// The largest angle (degrees) between two faces' normals along an edge that is tangent (R64).
+pub(crate) const TANGENT_DEGREES: f64 = 1.0;
+
+/// Per B-rep edge of `mesh`: tangent by the dihedral rule (R64), the edge bounding two
+/// different faces whose normals agree within [`TANGENT_DEGREES`] at every point of its
+/// polyline. A face's normal at a point is the per-corner normal (the surface's own, the
+/// tessellator keeps normals per face) of each of its vertices there; a point either face has
+/// no vertex at, or a mesh without normals, leaves the edge not tangent.
+pub(crate) fn dihedral_tangent(mesh: &solidcraft_geom::Mesh) -> Vec<bool> {
+    let mut out = vec![false; mesh.edges.len()];
+    if mesh.normals.len() != mesh.positions.len() || mesh.tri_face.len() != mesh.triangles.len() {
+        return out;
+    }
+    let scale = mesh.positions.iter().flat_map(|p| [p.x.abs(), p.y.abs(), p.z.abs()]).fold(1.0f64, f64::max);
+    let tol = scale * 1e-7;
+    let cell = |p: solidcraft_geom::Vec3| ((p.x / tol).floor() as i64, (p.y / tol).floor() as i64, (p.z / tol).floor() as i64);
+    // Each vertex's face (vertices are per corner, so one face each), filed by position.
+    let mut face_of = vec![u32::MAX; mesh.positions.len()];
+    for (t, face) in mesh.triangles.iter().zip(&mesh.tri_face) {
+        for v in t {
+            if let Some(slot) = face_of.get_mut(*v as usize) {
+                *slot = *face;
+            }
+        }
+    }
+    let mut grid: std::collections::HashMap<(i64, i64, i64), Vec<u32>> = std::collections::HashMap::new();
+    for (v, p) in mesh.positions.iter().enumerate() {
+        if p.is_finite() {
+            grid.entry(cell(*p)).or_default().push(v as u32);
+        }
+    }
+    // The unit normals face `face` has at `p`.
+    let normals_at = |p: solidcraft_geom::Vec3, face: u32| -> Vec<solidcraft_geom::Vec3> {
+        let (x, y, z) = cell(p);
+        let mut found = Vec::new();
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                for dz in -1..=1 {
+                    for v in grid.get(&(x + dx, y + dy, z + dz)).into_iter().flatten() {
+                        let v = *v as usize;
+                        if face_of.get(v) == Some(&face)
+                            && mesh.positions.get(v).is_some_and(|q| q.dist(p) <= tol)
+                            && let Some(n) = mesh.normals.get(v).and_then(|n| n.normalized())
+                        {
+                            found.push(n);
+                        }
+                    }
+                }
+            }
+        }
+        found
+    };
+    let cos = TANGENT_DEGREES.to_radians().cos();
+    for (i, slot) in out.iter_mut().enumerate() {
+        let (Some(line), Some(&[a, b])) = (mesh.edges.get(i), mesh.edge_faces.get(i).map(Vec::as_slice)) else { continue };
+        if a == b || line.is_empty() {
+            continue;
+        }
+        *slot = line.iter().all(|p| {
+            let (na, nb) = (normals_at(*p, a), normals_at(*p, b));
+            !na.is_empty() && !nb.is_empty() && na.iter().all(|m| nb.iter().all(|n| m.dot(*n) >= cos))
+        });
+    }
+    out
 }
 
 /// Two pieces closer than this (mm) to each other's line, and end to end within it, are one
