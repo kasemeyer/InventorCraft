@@ -47,12 +47,13 @@ const LABEL_LINE_IN: f64 = 0.2;
 pub(crate) const MAX_XDATA_STRING: usize = 255;
 
 /// The bytes `c` takes in a `1000` string in the oldest DXF we write (R2000 is not UTF-8: a
-/// character past ASCII is written as `\U+XXXX`, one past the Basic Multilingual Plane longer).
+/// character past ASCII is written as `\U+XXXX`, one past the Basic Multilingual Plane as a
+/// UTF-16 surrogate pair `\U+XXXX\U+XXXX`).
 fn dxf_bytes(c: char) -> usize {
     match u32::from(c) {
         0..=0x7F => 1,
         0x80..=0xFFFF => 7,
-        _ => 8,
+        _ => 14,
     }
 }
 

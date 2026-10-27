@@ -450,8 +450,9 @@ fn long_keys_round_trip_through_dxf() {
     let longest = keys(&model(&s).paper, &layout).iter().map(|k| k.edge.len()).max().unwrap();
     println!("the fixture's longest key: {longest} bytes");
     assert!(longest <= 255);
-    // A synthetic 300-byte key, with two-byte characters across the 255-byte boundary.
-    let long: String = format!("0/Block/e/x{}", "F9:ø".repeat(58));
+    // A synthetic 300-byte key, with two-byte characters across the 255-byte boundary, then
+    // astral characters (R2000 writes each as a surrogate pair `\U+XXXX\U+XXXX`, 14 bytes).
+    let long: String = format!("0/Block/e/x{}{}", "F9:ø".repeat(58), "\u{1F600}".repeat(40));
     assert!(long.len() >= 300 && !long.is_char_boundary(255), "{}", long.len());
     let curve = ViewCurve {
         edge: long.clone(),
