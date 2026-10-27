@@ -246,6 +246,7 @@ pub mod space_mouse;
 pub mod space_mouse_calibration;
 pub mod space_mouse_model;
 pub mod space_mouse_offer;
+mod split_buttons;
 pub mod stand_up;
 mod status_bar;
 #[cfg(test)]

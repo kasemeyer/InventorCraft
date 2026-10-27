@@ -41,6 +41,10 @@ pub struct Workflow {
     /// normal, as the arrow does), and every drag arrow (Extrude's distances, Hole's depth, a
     /// pattern's spacings, a chamfer's distances, the plane's distance) writes the design unit.
     pub plane_drag: bool,
+    /// A ribbon split button (a panel's `dropdowns`) shows the command last picked from its list
+    /// (icon, label, tooltip, enabled state) and its face runs it, unless the drop-down is
+    /// `fixed_face`; the picks are kept per profile in the preferences (`split_faces`).
+    pub sticky_split_buttons: bool,
 }
 
 impl Default for Workflow {
@@ -60,6 +64,7 @@ impl Default for Workflow {
             sectioned_extrude: false,
             show_panels_menu: false,
             plane_drag: false,
+            sticky_split_buttons: false,
         }
     }
 }

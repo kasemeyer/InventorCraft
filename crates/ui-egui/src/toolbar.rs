@@ -1263,8 +1263,10 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                         let c = match item {
                             FaceItem::Large(c) => c,
                             FaceItem::Column(column) => {
-                                let labels: Vec<&str> = column.iter().map(|c| app.tr_label(crate::profile::button_label(app, c))).collect();
-                                let width = column_width(&painter, &labels);
+                                let labels: Vec<&str> = column.iter().map(|c| app.tr_label(face_label(app, &tab, panel, c))).collect();
+                                // A split button's arrow sits beside its label.
+                                let split = column.iter().any(|c| crate::split_buttons::dropdown(app, &tab, panel, c.id).is_some());
+                                let width = column_width(&painter, &labels) + if split { SPLIT_ARROW_WIDTH } else { 0.0 };
                                 return if whole {
                                     let width = width.min(COLUMN_MAX_WIDTH);
                                     ButtonSize { width, min_width: width }
@@ -1275,12 +1277,14 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                         };
                         let family = crate::sketch_families::family(c.id)
                             .filter(|f| tab == "SKETCH" && *panel == "CREATE" && f.commands.first().copied() == Some(c.id));
-                        let label = family.map_or_else(|| crate::profile::button_label(app, c), |f| f.label);
+                        let split = family.is_none() && crate::split_buttons::dropdown(app, &tab, panel, c.id).is_some();
+                        let label = family.map_or_else(|| face_label(app, &tab, panel, c), |f| f.label);
                         if labels {
-                            let width = ribbon_button_width(&painter, app.tr_label(label));
+                            // A split button's caret follows its label.
+                            let width = ribbon_button_width(&painter, app.tr_label(label)) + if split { SPLIT_ARROW_WIDTH } else { 0.0 };
                             ButtonSize { width, min_width: if whole { width } else { BUTTON_MIN_WIDTH } }
                         } else {
-                            let width = if family.is_some() { 50.0 } else { 40.0 };
+                            let width = if family.is_some() || split { 50.0 } else { 40.0 };
                             ButtonSize { width, min_width: width }
                         }
                     })
@@ -1391,21 +1395,37 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                         // Small buttons: a 16 px icon and one line of label, SMALL_ROWS high.
                         // Sketch-family commands draw here as plain rows (no variant arrow).
                         let row_height = button_height / SMALL_ROWS as f32;
-                        for (row, c) in column.iter().copied().enumerate() {
-                            let rect =
+                        for (row, base) in column.iter().copied().enumerate() {
+                            let row_rect =
                                 Rect::from_min_size(pos2(whole.left(), whole.top() + row as f32 * row_height), vec2(whole.width(), row_height));
+                            // A split button: the face shows and runs its (remembered) command, the
+                            // strip at the right opens its list.
+                            let split = crate::split_buttons::dropdown(app, &tab, panel, base.id);
+                            let c = split.and_then(|d| crate::split_buttons::face(app, d)).unwrap_or(base);
+                            let mut rect = row_rect;
+                            if split.is_some() {
+                                rect.max.x -= SPLIT_ARROW_WIDTH;
+                            }
                             let info = crate::render_workspace::interactive_command_info(app, c);
-                            let resp = ribbon_hit(ui, &painter, rect, c, panel, &mut drop, &mut menu);
-                            crate::scenario::publish_rect(&format!("button:{}", c.id), rect);
+                            let resp = ribbon_hit(ui, &painter, rect, base, panel, &mut drop, &mut menu);
+                            crate::scenario::publish_rect(&format!("button:{}", base.id), rect);
+                            if c.id != base.id {
+                                crate::scenario::publish_handle(&format!("button:{}", c.id), rect.center());
+                            }
                             let accent = crate::theme::TabAccent::for_tab(&t, &tab);
-                            if resp.is_pointer_button_down_on() || running.as_deref() == Some(c.id) {
-                                painter.rect(rect, t.radius_sm, accent.soft, Stroke::new(1.0, accent.color), egui::StrokeKind::Inside);
+                            let split_open = split.is_some_and(|d| egui::Popup::is_id_open(ui.ctx(), split_arrow_id(ui, d).with("popup")));
+                            if resp.is_pointer_button_down_on() || running.as_deref() == Some(c.id) || split_open {
+                                painter.rect(row_rect, t.radius_sm, accent.soft, Stroke::new(1.0, accent.color), egui::StrokeKind::Inside);
                             } else if resp.hovered() && info.enabled {
-                                painter.rect_filled(rect, t.radius_sm, t.hover);
+                                painter.rect_filled(row_rect, t.radius_sm, t.hover);
+                            }
+                            if let Some(d) = split {
+                                let ar = Rect::from_min_max(pos2(rect.right(), row_rect.top()), row_rect.right_bottom());
+                                split_arrow(app, ui, &painter, ar, &tab, d, &mut menu, &mut toggle);
                             }
                             let icon_rect = Rect::from_min_size(pos2(rect.left() + 6.0, rect.center().y - 8.0), vec2(16.0, 16.0));
                             icons::paint_icon(&painter, icon_rect, c.icon, if info.enabled { 1.0 } else { 0.35 });
-                            let label = app.tr_label(crate::profile::button_label(app, c));
+                            let label = app.tr_label(face_label(app, &tab, panel, base));
                             let color = if info.enabled { t.text } else { t.text_dim };
                             let text_left = icon_rect.right() + 4.0;
                             let mut job = egui::text::LayoutJob::simple_singleline(label.to_owned(), FontId::proportional(t.font_button), color);
@@ -1428,9 +1448,14 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 // Only the family's default pin follows the part's choice. Explicitly pinned
                 // variants remain exact commands, including in customised toolbars.
                 let family = crate::sketch_families::family(c.id).filter(|f| sketch_create && f.commands.first().copied() == Some(c.id));
-                let selected = family.and_then(|f| app.preferences.sketch_variants.selected(f)).unwrap_or(c);
+                // A profile split button: the face shows and runs its (remembered) command.
+                let split = if family.is_some() { None } else { crate::split_buttons::dropdown(app, &tab, panel, c.id) };
+                let selected = family
+                    .and_then(|f| app.preferences.sketch_variants.selected(f))
+                    .or_else(|| split.and_then(|d| crate::split_buttons::face(app, d)))
+                    .unwrap_or(c);
                 let mut br = whole;
-                if family.is_some() {
+                if family.is_some() || split.is_some() {
                     if labels {
                         br.max.y = whole.top() + 32.0;
                     } else {
@@ -1444,7 +1469,8 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     crate::scenario::publish_handle(&format!("button:{}", selected.id), br.center());
                 }
                 let accent = crate::theme::TabAccent::for_tab(&t, &tab);
-                let family_open = family.is_some_and(|f| egui::Popup::is_id_open(ui.ctx(), ui.id().with(("family", f.label)).with("popup")));
+                let family_open = family.is_some_and(|f| egui::Popup::is_id_open(ui.ctx(), ui.id().with(("family", f.label)).with("popup")))
+                    || split.is_some_and(|d| egui::Popup::is_id_open(ui.ctx(), split_arrow_id(ui, d).with("popup")));
                 if !finish && (resp.is_pointer_button_down_on() || running.as_deref() == Some(selected.id) || family_open) {
                     painter.rect(whole, t.radius_sm, accent.soft, Stroke::new(1.0, accent.color), egui::StrokeKind::Inside);
                 } else if resp.hovered() && info.enabled {
@@ -1487,6 +1513,21 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                         dropdown_keys(app, ui, &variants);
                         sketch_menu_rows(app, ui, &variants, &mut menu, &mut toggle);
                     });
+                } else if let Some(d) = split {
+                    let ar = if labels {
+                        Rect::from_min_max(pos2(whole.left(), whole.top() + 30.0), pos2(whole.right(), whole.top() + 48.0))
+                    } else {
+                        Rect::from_min_max(pos2(br.right(), whole.top()), whole.right_bottom())
+                    };
+                    // The title (the face's label) sits on the same line as the other buttons' labels.
+                    if labels {
+                        let title_y = whole.top() + 39.0;
+                        let color = if info.enabled { t.text } else { t.text_dim };
+                        let title = app.tr_label(crate::split_buttons::face_label(app, d));
+                        let galley = ribbon_button_galley(&painter, title, ar.width() - 16.0, color);
+                        painter.galley(pos2(ar.center().x - 4.0, title_y - galley.size().y / 2.0), galley, color);
+                    }
+                    split_arrow(app, ui, &painter, ar, &tab, d, &mut menu, &mut toggle);
                 } else if labels {
                     let label = app.tr_label(crate::profile::button_label(app, selected));
                     let color = if info.enabled { t.text } else { t.text_dim };
@@ -1822,6 +1863,63 @@ fn gallery_columns(labels: bool, cells: usize) -> usize {
 fn gallery_width(labels: bool, cells: usize) -> f32 {
     let columns = gallery_columns(labels, cells) as f32;
     if labels { CONSTRAINT_GRID_WIDTH + (columns - 3.0) * 27.0 } else { columns * 27.0 }
+}
+
+/// The width a split button's arrow takes beside a small button's label (and adds to a large
+/// button's).
+const SPLIT_ARROW_WIDTH: f32 = 14.0;
+
+/// A face button's ribbon text (English): its split button's face label, else its own.
+fn face_label(app: &SolveApp, tab: &str, panel: &str, c: &'static solidcraft_engine::CommandSpec) -> &'static str {
+    match crate::split_buttons::dropdown(app, tab, panel, c.id) {
+        Some(d) => crate::split_buttons::face_label(app, d),
+        None => crate::profile::button_label(app, c),
+    }
+}
+
+fn split_arrow_id(ui: &egui::Ui, d: &crate::profile::Dropdown) -> egui::Id {
+    ui.id().with(("split", d.id.as_str()))
+}
+
+/// A split button's arrow at `ar` (`split:<drop-down id>`): its caret, and the list it opens.
+/// A row picked runs that command and, where the face follows picks, becomes the face.
+#[allow(clippy::too_many_arguments)]
+fn split_arrow(
+    app: &mut SolveApp,
+    ui: &mut egui::Ui,
+    painter: &egui::Painter,
+    ar: Rect,
+    tab: &str,
+    d: &'static crate::profile::Dropdown,
+    menu: &mut Option<(egui::Pos2, &'static str)>,
+    toggle: &mut Option<&'static str>,
+) {
+    let t = Tokens::get();
+    let arrow = ui.interact(ar, split_arrow_id(ui, d), Sense::click());
+    crate::scenario::publish_handle(&format!("split:{}", d.id), ar.center());
+    if arrow.hovered() {
+        painter.rect_filled(ar, t.radius_sm, t.hover);
+    }
+    dropdown_arrow(painter, pos2(ar.right() - 6.0, ar.center().y + 0.5), t.text_dim);
+    let name = app.tr_label(crate::split_buttons::face_label(app, d)).to_string();
+    arrow.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
+    Container::new(ui.ctx(), Surface::Popup).menu(&arrow).show(|ui| {
+        let rows: Vec<_> = d.commands.iter().filter_map(|id| solidcraft_engine::find_command(id)).collect();
+        dropdown_keys(app, ui, &rows);
+        let width = dropdown_width(app, ui, &rows);
+        for c in rows {
+            let pinned = crate::toolbar_custom::pinned_on(app, tab, c.id).is_some();
+            match dropdown_row(app, ui, c, width, pinned) {
+                RowAction::None => {}
+                RowAction::Menu(at) => *menu = Some((at, c.id)),
+                RowAction::TogglePin => *toggle = Some(c.id),
+                RowAction::Start => {
+                    crate::split_buttons::pick(app, d, c.id);
+                    ui.close();
+                }
+            }
+        }
+    });
 }
 
 /// A ribbon button's interaction: its `toolbar:`/`button:` handles, dragging it to reorder,

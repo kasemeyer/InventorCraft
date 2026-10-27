@@ -547,6 +547,11 @@ preference_settings! {
     ui_profile: String = String::new();
     /// Per profile id, the defaults version last applied (`profile::first_run`); absent = 1.
     profile_defaults: std::collections::BTreeMap<String, u32> = Default::default();
+    /// Per profile id, each ribbon split button's last pick: drop-down id → command id
+    /// (`split_buttons`, under the profile's `workflow.sticky_split_buttons`). Not written while
+    /// empty, so a profile without the switch leaves the file as it was.
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    split_faces: std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>> = Default::default();
     /// Interface language (a registered locale ID).
     language: String = "en".into(), 0;
     /// Shared workspace composition; system windows and popups retain their purpose.

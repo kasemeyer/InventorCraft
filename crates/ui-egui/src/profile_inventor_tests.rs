@@ -598,3 +598,111 @@ fn environments_begin_enters_the_render_workspace() {
         assert_eq!(h.app.ui.tab, "RENDER");
     }
 }
+
+/// The captured split buttons (inventor-ribbon-capture1.json): Plane, Axis and Point are
+/// most-recently-used split buttons (control type 45060), so their faces follow the last pick;
+/// Box (Primitives), sketch Fillet and Place are plain split buttons (45059) whose face is fixed.
+/// Their lists hold the captured variants TCI-CAD has a command for, in the capture's order.
+#[test]
+fn split_buttons_follow_the_capture() {
+    assert!(inventor().workflow.sticky_split_buttons);
+    let dropdowns = |kind: DocumentKind, tab: &str, panel: &str| -> Vec<(&'static str, &'static str, bool, Vec<&'static str>)> {
+        let p = inventor().ribbon(kind).tab(tab).unwrap().panel(panel).unwrap();
+        p.dropdowns.iter().map(|d| (d.id.as_str(), d.face.as_str(), d.fixed_face, d.commands.iter().map(String::as_str).collect())).collect()
+    };
+    let work = vec![
+        (
+            "work_plane",
+            "construct.plane.offset",
+            false,
+            vec![
+                "construct.plane.offset",
+                "construct.plane.midplane",
+                "construct.plane.at_angle",
+                "construct.plane.three_points",
+                "construct.plane.two_edges",
+                "construct.plane.tangent",
+                "construct.plane.perpendicular",
+                "construct.plane.along_path",
+            ],
+        ),
+        (
+            "work_axis",
+            "construct.axis.edge",
+            false,
+            vec![
+                "construct.axis.edge",
+                "construct.axis.two_points",
+                "construct.axis.two_planes",
+                "construct.axis.normal_to_face",
+                "construct.axis.through_cylinder",
+            ],
+        ),
+        (
+            "work_point",
+            "construct.point.vertex",
+            false,
+            vec![
+                "construct.point.vertex",
+                "construct.point.three_planes",
+                "construct.point.two_edges",
+                "construct.point.edge_plane",
+                "construct.point.center",
+            ],
+        ),
+    ];
+    for (kind, tab) in [(Part, "MODEL"), (Part, "SHEET METAL"), (Assembly, "ASSEMBLE"), (Assembly, "MODEL")] {
+        assert_eq!(dropdowns(kind, tab, "WORK FEATURES"), work, "{kind:?} {tab}");
+    }
+    assert_eq!(
+        dropdowns(Part, "MODEL", "PRIMITIVES"),
+        [("primitive", "solid.box", true, vec!["solid.box", "solid.cylinder", "solid.sphere", "solid.torus"])]
+    );
+    assert_eq!(
+        dropdowns(Part, "SKETCH", "CREATE"),
+        [(
+            "sketch_fillet",
+            "sketch.fillet",
+            true,
+            vec!["sketch.fillet", "sketch.chamfer.equal_distance", "sketch.chamfer.two_distance", "sketch.chamfer.distance_angle"]
+        )]
+    );
+    assert_eq!(
+        dropdowns(Assembly, "ASSEMBLE", "COMPONENT"),
+        [("place", "component.insert_design", true, vec!["component.insert_design", "parts.insert", "file.insert_step"])]
+    );
+    // No other panel has a split button.
+    let count: usize =
+        DocumentKind::ALL.into_iter().flat_map(|k| inventor().ribbon(k).tabs.iter()).flat_map(|t| &t.panels).map(|p| p.dropdowns.len()).sum();
+    assert_eq!(count, 3 * 4 + 1 + 1 + 1 + 1, "Work Features on four tabs, Primitives, sketch Fillet on two sketch tabs, Place");
+    assert!(validate(inventor()).is_empty(), "{:?}", validate(inventor()));
+}
+
+/// The Inventor profile's JSON with `edit` applied, parsed.
+fn inventor_with(edit: impl FnOnce(&mut Value)) -> Result<Profile, String> {
+    let mut v: Value = serde_json::from_str(include_str!("../../../assets/profiles/inventor.json")).unwrap();
+    edit(&mut v);
+    parse(&v.to_string(), &solidcraft())
+}
+
+#[test]
+fn validate_rejects_fixed_face_outside_a_drop_down_and_a_face_off_its_list() {
+    // A one-command "drop-down" is a plain button: fixed_face on it is refused.
+    let p = inventor_with(|v| {
+        v["panels"]["work_features"]["dropdowns"] =
+            json!([{"id": "work_plane", "face": "construct.plane.offset", "commands": ["construct.plane.offset"], "fixed_face": true}]);
+    })
+    .unwrap();
+    let problems = validate(&p);
+    assert!(
+        problems.iter().any(|m| m.contains("drop-down work_plane") && m.contains("fixed_face on a button that is not a drop-down")),
+        "{problems:?}"
+    );
+    // fixed_face anywhere but a drop-down entry does not parse.
+    let e = inventor_with(|v| v["panels"]["work_features"]["fixed_face"] = json!(true)).unwrap_err();
+    assert!(e.contains("fixed_face"), "{e}");
+    // The face must be one of its commands.
+    let p = inventor_with(|v| v["panels"]["work_features"]["dropdowns"][0]["face"] = json!("construct.axis.edge")).unwrap();
+    let problems = validate(&p);
+    assert!(problems.iter().any(|m| m.contains("drop-down work_plane: face construct.axis.edge is not in its commands")), "{problems:?}");
+}

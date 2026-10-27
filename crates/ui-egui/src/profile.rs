@@ -190,12 +190,35 @@ pub struct RibbonPanel {
     pub small: Vec<String>,
     /// Not drawn unless the user shows it (C3); set per tab by the tab's panel reference.
     pub hidden: bool,
+    /// Face buttons that are split buttons: the face runs a command, its arrow opens a list.
+    pub dropdowns: Vec<Dropdown>,
 }
 
 impl RibbonPanel {
     pub fn is_small(&self, command: &str) -> bool {
         self.small.iter().any(|c| c == command)
     }
+
+    /// The split button whose default face is `command`.
+    pub fn dropdown(&self, command: &str) -> Option<&Dropdown> {
+        self.dropdowns.iter().find(|d| d.face == command)
+    }
+}
+
+/// A split button on a panel's face (Inventor's Plane, Axis, Point): the face runs `face` (or,
+/// under `workflow.sticky_split_buttons`, the command last picked from the list), the arrow opens
+/// `commands`. Its `id` keys the remembered pick, shared by every tab that shows the panel.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Dropdown {
+    pub id: String,
+    /// The default face command; one of `commands`, and on the panel's face.
+    pub face: String,
+    /// The list, in order.
+    pub commands: Vec<String>,
+    /// The face never follows the last pick (a split button whose top is always the same).
+    #[serde(default)]
+    pub fixed_face: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize)]
@@ -454,6 +477,7 @@ pub fn solidcraft() -> Profile {
                             .collect(),
                         small: Vec::new(),
                         hidden: false,
+                        dropdowns: Vec::new(),
                     })
                 })
                 .collect(),
@@ -549,6 +573,8 @@ struct PanelJson {
     groups: Vec<Group>,
     #[serde(default)]
     small: Vec<String>,
+    #[serde(default)]
+    dropdowns: Vec<Dropdown>,
 }
 
 #[derive(Deserialize)]
@@ -627,6 +653,7 @@ pub fn parse(text: &str, base: &Profile) -> Result<Profile, String> {
                             groups: p.groups.clone(),
                             small: p.small.clone(),
                             hidden,
+                            dropdowns: p.dropdowns.clone(),
                         });
                     }
                     out
@@ -679,6 +706,47 @@ fn inherited(base: &Profile, kind: DocumentKind, key: &str, id: &str, who: &str)
     tab.map(|t| t.panels.clone()).ok_or_else(|| format!("tab \"{key}\" inherits tab \"{id}\", which \"{who}\" lacks"))
 }
 
+/// A panel's split buttons, one message per problem (`at`: "part MODEL/WORK FEATURES").
+fn validate_dropdowns(at: &str, panel: &RibbonPanel, face: &[String], lists: &mut BTreeMap<String, Vec<String>>) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut listed = BTreeSet::new();
+    for d in &panel.dropdowns {
+        let id = &d.id;
+        if d.commands.len() < 2 {
+            // A one-command list is a plain button: there is nothing to fix or remember.
+            let what = if d.fixed_face { "fixed_face on a button that is not a drop-down" } else { "not a drop-down" };
+            out.push(format!("{at}: drop-down {id} lists {} command(s): {what}", d.commands.len()));
+        }
+        if !d.commands.contains(&d.face) {
+            out.push(format!("{at}: drop-down {id}: face {} is not in its commands", d.face));
+        }
+        if !face.contains(&d.face) {
+            out.push(format!("{at}: drop-down {id}: face {} is not on the panel's face", d.face));
+        }
+        for c in &d.commands {
+            if find_command(c).is_none() {
+                out.push(format!("{at}: drop-down {id}: {c} is not a registry command"));
+            } else if !panel.commands.contains(c) {
+                out.push(format!("{at}: drop-down {id}: {c} is not in the panel"));
+            }
+            if *c != d.face && face.contains(c) {
+                out.push(format!("{at}: drop-down {id}: {c} is a face button of its own"));
+            }
+            if !listed.insert(c.as_str()) {
+                out.push(format!("{at}: {c} is in two drop-downs"));
+            }
+        }
+        match lists.get(id) {
+            Some(list) if *list != d.commands => out.push(format!("{at}: drop-down id {id} names two different lists")),
+            Some(_) => {}
+            None => {
+                lists.insert(id.clone(), d.commands.clone());
+            }
+        }
+    }
+    out
+}
+
 /// `^[A-Z][A-Z0-9]{0,3}$`
 fn alias_keys_ok(keys: &str) -> bool {
     let mut chars = keys.chars();
@@ -688,6 +756,8 @@ fn alias_keys_ok(keys: &str) -> bool {
 /// Placement and alias problems, one message per problem naming where it is. Empty: valid.
 pub fn validate(profile: &Profile) -> Vec<String> {
     let mut out = Vec::new();
+    // Drop-down id → its list: one id is one remembered pick, so every panel using it agrees.
+    let mut dropdown_lists: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for (kind, ribbon) in profile.ribbons() {
         let k = kind_name(kind);
         let mut tab_ids = BTreeSet::new();
@@ -738,6 +808,7 @@ pub fn validate(profile: &Profile) -> Vec<String> {
                 for c in panel.small.iter().filter(|c| !face.contains(c)) {
                     out.push(format!("{k} {t}/{p}: small {c} is not among the first {} commands", panel.promoted));
                 }
+                out.extend(validate_dropdowns(&format!("{k} {t}/{p}"), panel, face, &mut dropdown_lists));
             }
         }
         if !ribbon.tabs.iter().any(|t| t.shown == Shown::Always) {
