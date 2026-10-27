@@ -4,8 +4,9 @@
 //! with its entity list (in draw order, handles and xdata as they are), the model entities, the
 //! groups and the handle seed. What a drawing keeps only for a session (`foreign` file data,
 //! `hidden_objects`, `read_notes`, `refedit`, `skipped_records`) reads back as its default; an
-//! in-place block edit in progress is saved as committed (`Drawing::committed`), as CADCraft
-//! writes its own files.
+//! in-place block edit in progress is discarded on save (`Drawing::committed` ends it with
+//! `end_refedit_discard`: the block is saved as it was before the edit), as CADCraft writes its
+//! own files.
 //!
 //! Used as `#[serde(with = "crate::drawing_paper")]` on `DrawingModel::paper`. A field CADCraft
 //! adds on a re-sync is one line in each of `Out`, `In` and [`deserialize`]; the struct literal
