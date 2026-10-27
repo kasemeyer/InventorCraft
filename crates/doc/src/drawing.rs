@@ -152,6 +152,8 @@ impl CubeTarget {
     /// The target's name: its words joined by `_` in the order front/back, top/bottom,
     /// left/right; the four front corners are `iso_<top|bottom>_<left|right>`.
     pub fn name(self) -> String {
+        // A target outside ALL would save a name that does not load.
+        debug_assert!(CubeTarget::ALL.contains(&self), "a non-canonical view cube target {self:?}");
         let front_back = match self.y {
             -1 => Some("front"),
             1 => Some("back"),

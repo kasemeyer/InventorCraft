@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use cadcraft_doc::geom::Vec3 as Vec3Cc;
-use cadcraft_doc::{Block, Circle, Common, Entity, EntityKind, Insert, Layout, Line, RawTag, Space};
+use cadcraft_doc::{Block, Circle, Common, Entity, EntityKind, Group, Insert, Layout, Line, RawTag, Space};
 use solidcraft_geom::Vec3;
 
 use super::*;
@@ -170,6 +170,9 @@ fn sample_paper() -> (cadcraft_doc::Drawing, cadcraft_doc::Handle) {
         row_spacing: 0.0,
     };
     paper.add(&sheet, Common::default(), EntityKind::Insert(insert)).unwrap();
+    // One model-space entity and one group, so the round trip covers both.
+    paper.add(&Space::Model, Common::default(), EntityKind::Line(Line { a: Vec3Cc::new(-1.0, 0.0, 0.0), b: Vec3Cc::new(-1.0, 3.0, 0.0) })).unwrap();
+    paper.groups.push(Group { name: "VIEW7".into(), description: "a view".into(), selectable: true, members: vec![line] });
     (paper, line)
 }
 
@@ -183,7 +186,13 @@ fn the_paper_keeps_entities_handles_and_xdata() {
     assert_eq!(back.paper, paper);
     assert_eq!(back, model);
     assert_eq!(back.paper.handseed, paper.handseed);
-    assert_eq!(back.paper.handseed, 0x103);
+    assert_eq!(back.paper.handseed, 0x104);
+    let model_lines: Vec<&Entity> = back.paper.model.iter().map(|e| &**e).collect();
+    assert_eq!(model_lines.len(), 1);
+    assert!(matches!(&model_lines[0].kind, EntityKind::Line(l) if l.b.y == 3.0), "{model_lines:?}");
+    assert_eq!(back.paper.groups.len(), 1);
+    let g = &back.paper.groups[0];
+    assert_eq!((g.name.as_str(), g.description.as_str(), g.selectable, g.members.as_slice()), ("VIEW7", "a view", true, &[line][..]));
     let layout = back.paper.layouts.iter().find(|l| l.name == "Sheet:1").unwrap();
     assert_eq!(layout.entities.len(), 2);
     let kept = layout.entities.get(line).unwrap();
@@ -254,4 +263,19 @@ fn a_projected_view_saves_its_projection() {
     for p in [Projection::Top, Projection::Bottom, Projection::Left, Projection::Right, Projection::Iso { sx: -1, sy: 1 }] {
         assert_eq!(serde_json::from_value::<Projection>(text(p)).unwrap(), p);
     }
+}
+
+/// Final wave 4: only the 26 canonical targets have names (each loads back as itself).
+#[test]
+fn every_cube_target_name_loads_back() {
+    for t in CubeTarget::ALL {
+        assert_eq!(CubeTarget::from_name(&t.name()), Some(t));
+    }
+}
+
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "a non-canonical view cube target")]
+fn a_non_canonical_cube_target_has_no_name() {
+    let _ = CubeTarget { x: 2, y: 0, z: 0 }.name();
 }
