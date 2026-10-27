@@ -417,3 +417,26 @@ fn camera_for_matches_the_orientation() {
         assert!(cam.is_valid());
     }
 }
+
+/// Final wave 8: a hidden polyline is dropped only where a visible chord draws over each of its
+/// chords; a hidden run whose two ends lie on two separate visible outlines stays.
+#[test]
+fn a_hidden_polyline_between_two_outlines_stays() {
+    use crate::drawing::project::visible_wins;
+    let curve = |hidden: bool, curve: PaperCurve| ViewCurve { edge: "e".into(), sources: vec!["e".into()], segment: 0, hidden, curve };
+    let line = |a: [f64; 2], b: [f64; 2]| PaperCurve::Line { a: Vec2::new(a[0], a[1]), b: Vec2::new(b[0], b[1]) };
+    let poly = |p: &[[f64; 2]]| PaperCurve::Poly { points: p.iter().map(|q| Vec2::new(q[0], q[1])).collect() };
+    // Two visible outlines at x = 0 and 10; a hidden 2-point run from one to the other.
+    let across = curve(true, poly(&[[0.0, 0.0], [10.0, 0.0]]));
+    let kept = visible_wins(vec![curve(false, line([0.0, -5.0], [0.0, 5.0])), curve(false, line([10.0, -5.0], [10.0, 5.0])), across.clone()]);
+    assert_eq!(kept.len(), 3);
+    assert!(kept.contains(&across));
+    // Under one visible line, or a visible polyline it crosses a vertex of: dropped.
+    let under = curve(true, poly(&[[1.0, 0.0], [4.0, 0.0], [9.0, 0.0]]));
+    assert_eq!(visible_wins(vec![curve(false, line([0.0, 0.0], [10.0, 0.0])), under.clone()]).len(), 1);
+    let bent = curve(false, poly(&[[0.0, 0.0], [5.0, 0.0], [10.0, 0.0]]));
+    assert_eq!(visible_wins(vec![bent, curve(true, poly(&[[2.0, 0.0], [8.0, 0.0]]))]).len(), 1);
+    // A hidden run with one chord off every visible chord stays.
+    let partly = curve(true, poly(&[[1.0, 0.0], [4.0, 0.0], [4.0, 3.0]]));
+    assert_eq!(visible_wins(vec![curve(false, line([0.0, 0.0], [10.0, 0.0])), partly]).len(), 2);
+}

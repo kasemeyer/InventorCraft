@@ -504,8 +504,11 @@ fn join_circles(built: Vec<Built>) -> Vec<Built> {
     built.into_iter().enumerate().filter(|(i, _)| !gone.contains(i)).map(|(_, b)| b).chain(joined.into_iter().map(|(_, b)| b)).collect()
 }
 
-/// Drops each hidden curve that a visible curve draws over (module comment).
-fn visible_wins(curves: Vec<ViewCurve>) -> Vec<ViewCurve> {
+/// Drops each hidden curve that a visible curve draws over (module comment). A hidden
+/// polyline is drawn over when each of its chords is: both its ends on one visible chord, or
+/// each end on a visible chord and its midpoint too (a chord across a visible polyline's
+/// vertex); a chord between two separate visible outlines is not.
+pub(crate) fn visible_wins(curves: Vec<ViewCurve>) -> Vec<ViewCurve> {
     let visible: Vec<PaperCurve> = curves.iter().filter(|c| !c.hidden).map(|c| c.curve.clone()).collect();
     let on_segment = |p: Vec2, a: Vec2, b: Vec2| {
         let d = b - a;
@@ -526,7 +529,17 @@ fn visible_wins(curves: Vec<ViewCurve>) -> Vec<ViewCurve> {
             PaperCurve::Line { a, b } => {
                 visible.iter().any(|v| matches!(v, PaperCurve::Line { a: p, b: q } if on_segment(*a, *p, *q) && on_segment(*b, *p, *q)))
             }
-            PaperCurve::Poly { points } => points.iter().all(|p| chords.iter().any(|(a, b)| on_segment(*p, *a, *b))),
+            PaperCurve::Poly { points } => {
+                let on_any = |p: Vec2| chords.iter().any(|(a, b)| on_segment(p, *a, *b));
+                let chord_covered = |p: Vec2, q: Vec2| {
+                    chords.iter().any(|(a, b)| on_segment(p, *a, *b) && on_segment(q, *a, *b)) || (on_any(p) && on_any(q) && on_any((p + q) * 0.5))
+                };
+                match points.as_slice() {
+                    [] => false,
+                    [p] => on_any(*p),
+                    _ => points.windows(2).all(|w| matches!(w, [p, q] if chord_covered(*p, *q))),
+                }
+            }
             PaperCurve::Circle { c, r } => visible.iter().any(|v| matches!(v, PaperCurve::Circle { c: d, r: s } if same_circle(*c, *r, *d, *s))),
             PaperCurve::Arc { c, r, start, end } => visible.iter().any(|v| match v {
                 PaperCurve::Circle { c: d, r: s } => same_circle(*c, *r, *d, *s),
