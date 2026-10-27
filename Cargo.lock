@@ -4559,6 +4559,7 @@ dependencies = [
 name = "solidcraft-doc"
 version = "0.22.0"
 dependencies = [
+ "cadcraft-doc",
  "log",
  "serde",
  "serde_json",

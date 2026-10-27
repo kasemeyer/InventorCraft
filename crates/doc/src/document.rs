@@ -2481,6 +2481,10 @@ pub struct Document {
     /// existed has none and reads as an assembly (`DocumentKind::default`).
     #[serde(default)]
     pub kind: crate::DocumentKind,
+    /// A drawing's sheets, views and annotations (`kind: Drawing` only); `None` for a part or an
+    /// assembly, and in every design saved before drawings existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drawing: Option<std::sync::Arc<crate::drawing::DrawingModel>>,
     /// Design properties (project, author…) and other tools' data, kept as they are (#1015).
     #[serde(default, skip_serializing_if = "crate::Metadata::is_empty")]
     pub metadata: crate::Metadata,
@@ -2763,6 +2767,7 @@ impl Document {
             name: name.into(),
             units: default_units(),
             kind,
+            drawing: None,
             metadata: Default::default(),
             params: Vec::new(),
             features: Vec::new(),

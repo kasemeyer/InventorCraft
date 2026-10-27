@@ -262,9 +262,14 @@ pub fn encode_hdr_base64(bytes: &[u8]) -> Result<String> {
     if bytes.is_empty() || bytes.len() > MAX_HDR_BYTES {
         return Err(invalid("HDR source must contain at most 16 MiB"));
     }
+    encode_base64(bytes)
+}
+
+/// Canonical padded base64 of `bytes` (any length), the encoding [`decode_base64`] reads.
+pub(crate) fn encode_base64(bytes: &[u8]) -> Result<String> {
     const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut encoded = String::new();
-    encoded.try_reserve_exact(bytes.len().div_ceil(3) * 4).map_err(|_| invalid("could not reserve HDR base64"))?;
+    encoded.try_reserve_exact(bytes.len().div_ceil(3) * 4).map_err(|_| invalid("could not reserve base64"))?;
     for triple in bytes.chunks(3) {
         let n = triple.iter().fold(0u32, |n, byte| (n << 8) | u32::from(*byte)) << ((3 - triple.len()) * 8);
         for i in 0..4 {
@@ -280,7 +285,8 @@ pub fn encode_hdr_base64(bytes: &[u8]) -> Result<String> {
     Ok(encoded)
 }
 
-fn decode_base64(value: &str, maximum: usize) -> Result<Vec<u8>> {
+/// Decode canonical padded base64 of 1..=`maximum` bytes.
+pub(crate) fn decode_base64(value: &str, maximum: usize) -> Result<Vec<u8>> {
     let length = base64_length(value, maximum)?;
     let padding = if value.ends_with("==") { 2 } else { usize::from(value.ends_with('=')) };
     let mut bytes = Vec::new();

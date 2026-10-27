@@ -13,7 +13,8 @@ pub enum DocumentKind {
     /// Linked components (Inventor's `.iam`).
     #[default]
     Assembly,
-    /// A drawing (Inventor's `.idw`): declared now, populated in the Drawings phase.
+    /// A drawing (Inventor's `.idw`): its sheets, views and annotations are `Document::drawing`,
+    /// populated by Plan D.
     Drawing,
 }
 
