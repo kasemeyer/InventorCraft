@@ -388,3 +388,94 @@ fn same_key_arcs_never_trade_handles() {
     assert!(now[0].0 != on_first, "the second arc took over the first arc's handle");
     assert_eq!(sick_dimensions(model(&s)).into_iter().collect::<Vec<_>>(), [dim_first, dim_second]);
 }
+
+/// Every view key's segment as written (group 1071) and its key, for the view entities of `d`'s
+/// layout `layout`.
+fn written_keys(d: &cadcraft_doc::Drawing, layout: &str) -> Vec<(crate::drawing::mapper::XKey, String)> {
+    let l = d.layout(layout).unwrap_or_else(|| panic!("no layout {layout}"));
+    let mut out: Vec<_> = l
+        .entities
+        .iter()
+        .filter_map(|e| {
+            let key = xkey_of(e)?;
+            let raw = e.common.xdata.iter().find(|t| t.code == 1071)?.value.clone();
+            Some((key, raw))
+        })
+        .collect();
+    out.sort();
+    out
+}
+
+/// Task 11 review carry: a segment is DXF group 1071, a signed 32-bit integer, so bumped keys
+/// (R51 collisions) must stay at most `i32::MAX`, and round-trip through DXF write → read
+/// (ASCII and binary, R2018 and R2000) with the same value. Synthetic worst case: 258 polylines
+/// on one (edge, segment 0xFFFFF): ranks clamp at 0xFF, so the largest is `i32::MAX` exactly and
+/// the two past it take the overflow loop, which wraps inside the bumped range.
+#[test]
+fn bumped_keys_fit_dxf_1071_and_round_trip() {
+    use crate::drawing::mapper::{self, Seg};
+    use crate::drawing::project::{PaperCurve, ViewCurve, ViewGeometry};
+    use solidcraft_geom::Vec2 as MmVec2;
+
+    let (mut s, block, v) = front("bumped_keys_fit_dxf_1071_and_round_trip");
+    // The fixture's own collisions: the back view's far rim (R51) and an iso view.
+    for (orientation, at) in [("back", [24, 8]), ("iso_top_right", [24, 18])] {
+        run(
+            &mut s,
+            "drawing.view.base",
+            json!({"model": block, "orientation": orientation, "lines": "hidden", "shaded": false, "scale": 1, "position": at}),
+        );
+    }
+    let layout = model(&s).sheets[0].layout.clone();
+    let fixture_max = written_keys(&model(&s).paper, &layout)
+        .iter()
+        .filter_map(|(k, _)| match k.seg {
+            Seg::Index(i) => Some(i),
+            Seg::Mark => None,
+        })
+        .max()
+        .unwrap();
+    println!("largest fixture segment: {fixture_max:#x}");
+    assert!(fixture_max <= i32::MAX as u32, "fixture segment {fixture_max:#x} overflows DXF 1071");
+
+    let polys: Vec<ViewCurve> = (0..258)
+        .map(|i| ViewCurve {
+            edge: "0/Block/e/F9:synthetic".into(),
+            sources: vec!["0/Block/e/F9:synthetic".into()],
+            segment: 0xF_FFFF,
+            hidden: false,
+            curve: PaperCurve::Poly { points: vec![MmVec2::new(f64::from(i), 0.0), MmVec2::new(f64::from(i), 1.0)] },
+        })
+        .collect();
+    let geometry = ViewGeometry { curves: polys, min: MmVec2::new(0.0, 0.0), max: MmVec2::new(258.0, 1.0) };
+    crate::drawing::edit(&mut s, "test", |m, _| {
+        let view = m.views.get(&v).unwrap().clone();
+        mapper::place(m, &view, &geometry);
+        Ok(())
+    })
+    .unwrap();
+    let before = written_keys(&model(&s).paper, &layout);
+    let synthetic: Vec<u32> = before
+        .iter()
+        .filter(|(k, _)| k.view == v)
+        .filter_map(|(k, _)| match k.seg {
+            Seg::Index(i) => Some(i),
+            Seg::Mark => None,
+        })
+        .collect();
+    assert_eq!(synthetic.len(), 258, "every polyline keeps a distinct key");
+    assert_eq!(synthetic.iter().max(), Some(&(i32::MAX as u32)));
+    for (k, raw) in &before {
+        assert!(raw.parse::<i32>().is_ok(), "{k:?} writes 1071 {raw}, not a signed 32-bit integer");
+    }
+
+    for version in [cadcraft_io::Version::R2018, cadcraft_io::Version::R2000] {
+        for binary in [false, true] {
+            let bytes = cadcraft_io::write_with(&model(&s).paper, "keys.dxf", &cadcraft_io::SaveOptions { version: Some(version), binary }).unwrap();
+            let back = cadcraft_io::read(&bytes, "keys.dxf").unwrap();
+            let after: Vec<_> = written_keys(&back, &layout).into_iter().map(|(k, _)| k).collect();
+            let expected: Vec<_> = before.iter().map(|(k, _)| k.clone()).collect();
+            assert_eq!(after, expected, "{version:?} binary {binary}");
+        }
+    }
+}

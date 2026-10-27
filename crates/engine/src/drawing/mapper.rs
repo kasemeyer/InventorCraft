@@ -159,8 +159,13 @@ fn placed(m: &DrawingModel, layout: &str, view: ViewId) -> BTreeMap<XKey, Handle
         .unwrap_or_default()
 }
 
-/// The first bit of a bumped segment (R56): above every run index the projection makes.
-const BUMPED: u32 = 1 << 31;
+/// The first bit of a bumped segment (R56): above every run index the projection makes. Bit 30,
+/// not 31: the segment is written as DXF group 1071, a signed 32-bit integer, so every key stays
+/// at most `i32::MAX` (kind in bits 28-29, segment in bits 8-27, rank in bits 0-7).
+const BUMPED: u32 = 1 << 30;
+
+/// The largest segment a key holds (DXF 1071 is a signed 32-bit integer).
+const MAX_SEGMENT: u32 = i32::MAX as u32;
 
 /// A curve kind's rank in a bumped segment (R56).
 fn kind_rank(c: &PaperCurve) -> u32 {
@@ -236,10 +241,11 @@ pub(crate) fn place(m: &mut DrawingModel, v: &DrawingView, g: &ViewGeometry) {
     let mut produced: BTreeSet<XKey> = BTreeSet::new();
     for (curve, segment) in g.curves.iter().zip(segments(&g.curves)) {
         let mut key = XKey { view: v.id, edge: curve.edge.clone(), seg: Seg::Index(segment) };
-        // Only past the bumped keys' range (module `segments`): still unique, deterministic.
+        // Only within the bumped keys' range (module `segments`), wrapping at `MAX_SEGMENT`:
+        // still unique, deterministic, and a signed 32-bit integer.
         let mut segment = segment;
         while produced.contains(&key) {
-            segment = segment.wrapping_add(1) | BUMPED;
+            segment = if segment >= MAX_SEGMENT { BUMPED } else { (segment + 1) | BUMPED };
             key.seg = Seg::Index(segment);
         }
         let kind = kind_of(&to_paper(&curve.curve, position, v.scale));
