@@ -221,6 +221,8 @@ fn centermark_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     let v = view_of(m, p, cmd)?.clone();
     let (e, key) = edge_entity(s, m, &v, p, "edge", cmd)?;
     // An arc is marked as its circle (R51).
+    // TCI-CAD: CADCraft's circle/arc dispatch from `draw2/centermark.rs` (see `drawing::centermark`),
+    // moved here to read the picked view entity.
     let (c, r) = match &e.kind {
         EntityKind::Circle(c) => (c.center.xy(), c.radius),
         EntityKind::Arc(a) => (a.center.xy(), a.radius),

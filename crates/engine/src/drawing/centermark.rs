@@ -38,6 +38,7 @@ pub(crate) fn center_line(first: (Vec2, Vec2), second: (Vec2, Vec2)) -> Option<(
     }
     let (st, en) = (a1.mid(a2), b1.mid(b2));
     let dir = (en - st).normalized();
+    // TCI-CAD: `|| !dir.is_finite()` added: a non-finite direction (from non-finite ends) gives none.
     if dir == Vec2::ZERO || !dir.is_finite() {
         return None;
     }
