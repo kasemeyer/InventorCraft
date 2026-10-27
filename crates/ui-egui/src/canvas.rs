@@ -399,7 +399,7 @@ fn format_len_in(v: f64, unit: &str) -> String {
 /// The unit a dragged length is written in, and its size in millimetres. Upstream's arrows write
 /// millimetres; under a profile's `workflow.plane_drag` every drag arrow writes the design unit.
 /// The unit is always written out: a bare stored length is millimetres.
-struct DragUnit {
+pub(crate) struct DragUnit {
     name: String,
     mm: f64,
 }
@@ -420,18 +420,18 @@ impl DragUnit {
 
     /// The unit the drag arrows write: the design unit under the profile's `workflow.plane_drag`
     /// (an inch Part drags inches), millimetres otherwise (upstream).
-    fn arrows(app: &SolveApp) -> Self {
+    pub(crate) fn arrows(app: &SolveApp) -> Self {
         if crate::profile::active(app).workflow.plane_drag { DragUnit::design(app) } else { DragUnit::mm() }
     }
 
     /// A length `v` (mm) written in this unit, unrounded.
-    fn text(&self, v: f64) -> String {
+    pub(crate) fn text(&self, v: f64) -> String {
         format_len_in(v / self.mm, &self.name)
     }
 
     /// A dragged length `v` (mm) in this unit: snapped to a round step of the unit at this zoom
     /// unless `free`, kept positive unless `signed`. The text written, and its length in mm.
-    fn snap(&self, v: f64, half_height: f64, free: bool, signed: bool) -> (String, f64) {
+    pub(crate) fn snap(&self, v: f64, half_height: f64, free: bool, signed: bool) -> (String, f64) {
         let step = snap_step(half_height / self.mm);
         let u = v / self.mm;
         let mut u = if free { u } else { (u / step).round() * step };
@@ -439,6 +439,12 @@ impl DragUnit {
             u = u.max(if free { 1e-3 } else { step });
         }
         (format_len_in(u, &self.name), u * self.mm)
+    }
+
+    /// The round step a drag snaps to at this zoom, in millimetres: a 1, 2 or 5 step of this
+    /// unit (`snap_step` of the view's height in the unit).
+    pub(crate) fn step_mm(&self, half_height: f64) -> f64 {
+        snap_step(half_height / self.mm) * self.mm
     }
 }
 
@@ -987,6 +993,9 @@ fn radius_spline_handles(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Pain
         }
     }
     let half_height = app.cam.half_height();
+    // The radii are dragged and written in the arrows' unit (the design unit under the profile's
+    // `workflow.plane_drag`), snapped to its round step.
+    let unit = DragUnit::arrows(app);
     let last = base.radii.len().saturating_sub(1);
     for (i, e) in drawn.iter().enumerate() {
         let at = |u: f64| e.start + (e.other - e.start) * u;
@@ -1015,7 +1024,7 @@ fn radius_spline_handles(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Pain
             {
                 crate::tool_modifiers::set_manipulator_dragging(true);
                 let free = crate::tool_modifiers::manipulator_free();
-                let step = snap_step(half_height);
+                let step = unit.step_mm(half_height);
                 let v = if free { v } else { (v / step).round() * step };
                 // Zero only at an end, where the round closes to a point.
                 let floor = if k == 0 || k == last {
@@ -1035,12 +1044,12 @@ fn radius_spline_handles(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Pain
         Some(Edit::Set(k, v)) if !taper => {
             if k == 0 {
                 if let Kind::Fillet { radius, .. } = &mut d.kind {
-                    *radius = format_len(v);
+                    *radius = unit.text(v);
                 }
             } else if let Some(Value::Array(rs)) = d.extra.get_mut("radii")
                 && let Some(slot) = rs.get_mut(k - 1)
             {
-                *slot = json!(format_len(v));
+                *slot = json!(unit.text(v));
             }
             None
         }
@@ -1060,9 +1069,9 @@ fn radius_spline_handles(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Pain
         d.extra.remove("fit");
         d.extra.insert("knots".into(), json!(law.knots));
         d.extra.insert("swap_ends".into(), json!(swap));
-        d.extra.insert("radii".into(), json!(law.radii.iter().skip(1).map(|r| format_len(*r)).collect::<Vec<_>>()));
+        d.extra.insert("radii".into(), json!(law.radii.iter().skip(1).map(|r| unit.text(*r)).collect::<Vec<_>>()));
         if let Kind::Fillet { radius, .. } = &mut d.kind {
-            *radius = format_len(law.radii.first().copied().unwrap_or(0.0));
+            *radius = unit.text(law.radii.first().copied().unwrap_or(0.0));
         }
     }
     true

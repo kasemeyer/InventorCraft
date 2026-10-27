@@ -256,3 +256,108 @@ fn the_chamfer_second_distance_arrow_writes_the_design_unit() {
         assert_written(&h, inv, "Distance 2", distance2, &want);
     }
 }
+
+// Fix wave 5: the remaining drags (fillet radius-spline handles, the face press-pull, the
+// sketch Move arrow) write the design unit under `workflow.plane_drag`, millimetres otherwise.
+
+/// `steps` round drag steps at this zoom, in inches: the inch step under Inventor, the
+/// millimetre step under SolidCraft (so the drag lands mid-bin for the profile's own snapping).
+fn whole_steps(h: &Harness, inventor_profile: bool, steps: f64) -> f64 {
+    let hh = h.app.cam.half_height();
+    if inventor_profile { steps * super::snap_step(hh / MM_PER_IN) } else { steps * super::snap_step(hh) / MM_PER_IN }
+}
+
+/// What a drag landing exactly on `inches` writes: inch text under Inventor, mm otherwise.
+fn exact(inventor_profile: bool, inches: f64) -> String {
+    if inventor_profile { inch_text(inches) } else { super::format_len(inches * MM_PER_IN) }
+}
+
+#[test]
+fn a_fillet_radius_spline_handle_writes_the_design_unit() {
+    for inv in [true, false] {
+        let mut h = inch_box(inv);
+        let p = Vec3::new(FRONT_EDGE[0], FRONT_EDGE[1], FRONT_EDGE[2]);
+        let st = h.app.session.world_state();
+        let body = st.bodies.first().unwrap();
+        let m = body.mesh();
+        let index = m.edges.iter().position(|e| e.windows(2).any(|w| p.dist_to_segment(w[0], w[1]) < 1e-9)).expect("the front top edge");
+        let (a, b) = (*m.edges[index].first().unwrap(), *m.edges[index].last().unwrap());
+        let edge = Sel::Edge { body: body.name.clone(), index, point: p };
+        drop(st);
+        h.app.session.selection = vec![edge];
+        h.app.start("solid.fillet");
+        let d = h.app.dialog.as_mut().expect("the Fillet dialog");
+        let Kind::Fillet { chamfer: false, radius, .. } = &mut d.kind else { panic!("Fillet opened {:?}", d.kind) };
+        *radius = "0.1 in".into();
+        // One cubic span from the edge's first end: control radii 0.1 in at Greville 0, 1/3, 2/3, 1.
+        d.extra.insert("type".into(), json!("spline"));
+        d.extra.insert("knots".into(), json!([0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]));
+        d.extra.insert("radii".into(), json!(["0.1 in", "0.1 in", "0.1 in"]));
+        d.extra.insert("swap_ends".into(), json!(false));
+        h.settle();
+        let at = a + (b - a) * (1.0 / 3.0);
+        h.call("ui.camera", json!({"target": [at.x, at.y, at.z], "distance": 250}));
+        h.settle();
+        // Outside top front edge: the radius grows into the body, up the face and down the side.
+        let into = Vec3::new(0.0, 1.0, -1.0) * std::f64::consts::FRAC_1_SQRT_2;
+        let r = whole_steps(&h, inv, 16.0);
+        let from = handle_at("fillet_r1").expect("the second control radius's handle");
+        let to = screen(&mut h, at + into * (r * MM_PER_IN));
+        assert!(from.distance(to) > 20.0, "a drag of {} px", from.distance(to));
+        h.call("ui.drag", json!({"x0": from.x, "y0": from.y, "x1": to.x, "y1": to.y, "steps": 8}));
+        h.settle();
+        let d = h.app.dialog.as_ref().expect("the Fillet dialog stays open");
+        let got = d.extra["radii"][0].as_str().expect("a radius expression").to_string();
+        assert_written(&h, inv, "control radius 1", &got, &exact(inv, r));
+        let Kind::Fillet { radius, .. } = &d.kind else { panic!() };
+        assert_eq!(radius, "0.1 in", "the first control radius is left alone");
+    }
+}
+
+#[test]
+fn the_face_press_pull_writes_the_design_unit_in_the_arrows_round_step() {
+    for inv in [true, false] {
+        let mut h = inch_box(inv);
+        h.app.preferences.direct_interaction = true;
+        let top = Vec3::new(TOP[0], TOP[1], TOP[2]);
+        h.call("ui.camera", json!({"target": [top.x, top.y, top.z], "distance": 250}));
+        h.settle();
+        let up = whole_steps(&h, inv, 4.0);
+        h.step(&json!({"drag": [{"world": TOP}, {"world": [TOP[0], TOP[1], TOP[2] + up * MM_PER_IN]}]})).unwrap();
+        h.frames(4);
+        let (distance, _) = extrude_fields(&h);
+        assert_written(&h, inv, "pulled Distance", &distance, &exact(inv, up));
+        // The step note is the arrows' step in the same unit (no ladder under Inventor).
+        let step = whole_steps(&h, inv, 1.0);
+        assert_eq!(crate::drag_extrude::step_note(&h.app), Some(format!("Step {}", exact(inv, step))));
+    }
+}
+
+#[test]
+fn the_sketch_move_arrow_writes_the_design_unit() {
+    for inv in [true, false] {
+        let mut h = inch_box(inv);
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        let made = h.app.run("sketch.line", json!({"points": [[3, 0.5], [4, 0.5]]})).unwrap();
+        h.settle();
+        let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+        let picks: Vec<Sel> = sk.curves.iter().map(|c| Sel::SketchCurve { id: c.id.clone() }).collect();
+        assert!(!picks.is_empty(), "the line was drawn: {made}");
+        h.app.start("sketch.move");
+        {
+            let d = h.app.dialog.as_mut().expect("the Move dialog");
+            d.inputs[0].items = picks;
+            let Kind::SketchModify(crate::sketch_modify_ui::Mod::Move { x, .. }) = &mut d.kind else { panic!("Move opened {:?}", d.kind) };
+            *x = "0.25 in".into();
+        }
+        h.settle();
+        let (base, n) = close_up(&mut h);
+        assert!(n.dist(Vec3::X) < 1e-6, "the arrow runs along the sketch's x: {n:?}");
+        let x = whole_steps(&h, inv, 3.0);
+        drag_tip(&mut h, "arrow", base, n, x);
+        let Some(Kind::SketchModify(crate::sketch_modify_ui::Mod::Move { x: got, .. })) = h.app.dialog.as_ref().map(|d| &d.kind) else {
+            panic!("the Move dialog closed")
+        };
+        assert_written(&h, inv, "X Distance", got, &exact(inv, x));
+    }
+}

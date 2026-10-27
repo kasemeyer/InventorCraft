@@ -4,7 +4,9 @@
 //! while pulling sets the step: to the right it grows (1, 2, 3 ... 10 mm), to the left it
 //! shrinks (0.8, 0.5 ... 0.1 mm). The step and the distance show beside the pointer. Letting go
 //! leaves the Extrude window open to adjust and confirm with OK. A press that goes any other
-//! way stays a box selection.
+//! way stays a box selection. Under the profile's `workflow.plane_drag` the pull snaps as the
+//! drag arrows do instead (a round step of the design unit at this zoom, no ladder) and writes
+//! the design unit.
 
 use egui::Pos2;
 use solidcraft_engine::Sel;
@@ -139,7 +141,10 @@ pub fn to(app: &mut SolveApp, proj: &Proj, p: Pos2) {
         g = Gesture { started: true, x0: p.x, ..g };
     }
     g.at = p;
-    g.step = STEPS[step_index(g.step0, p.x - g.x0)];
+    // Under plane_drag the pull is the arrows' drag: their unit and round step, no ladder.
+    let ladder = !crate::profile::active(app).workflow.plane_drag;
+    let unit = crate::canvas::DragUnit::arrows(app);
+    g.step = if ladder { STEPS[step_index(g.step0, p.x - g.x0)] } else { unit.step_mm(app.cam.half_height()) };
     let Some(v) = crate::canvas::along(proj, p, g.base, g.normal) else {
         app.viewport.drag_extrude.gesture = Some(g);
         return;
@@ -152,7 +157,7 @@ pub fn to(app: &mut SolveApp, proj: &Proj, p: Pos2) {
     let Some(Kind::Extrude { distance, direction, .. }) = app.dialog.as_mut().map(|d| &mut d.kind) else { return };
     // A reversed extrude measures its distance against the normal.
     let sign = if matches!(*direction, 1 | crate::dialogs::TWO_SIDES_REVERSED) { -1.0 } else { 1.0 };
-    *distance = crate::canvas::format_len(travelled * sign);
+    *distance = unit.text(travelled * sign);
 }
 
 /// The button is up: the window stays open for the user to adjust and confirm.
@@ -170,13 +175,17 @@ pub fn tick(app: &mut SolveApp) {
 /// The step of the last pull, for the value box next to the distance.
 pub fn step_note(app: &SolveApp) -> Option<String> {
     let step = app.viewport.drag_extrude.last_step?;
-    Some(format!("Step {}", crate::canvas::format_len(step)))
+    Some(format!("Step {}", crate::canvas::DragUnit::arrows(app).text(step)))
 }
 
 /// The ladder of steps beside the pointer while pulling: the one in use between its neighbours.
 /// It sits below the pointer, clear of the distance box at the arrow tip.
 pub fn show(app: &SolveApp, painter: &egui::Painter) {
     let Some(g) = app.viewport.drag_extrude.gesture.as_ref().filter(|g| g.started) else { return };
+    // Under plane_drag the pull snaps as the arrows do: there is no ladder to show.
+    if crate::profile::active(app).workflow.plane_drag {
+        return;
+    }
     let t = crate::theme::Tokens::get();
     let now = nearest_step(g.step);
     let galley = |i: usize, current: bool| {
