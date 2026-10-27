@@ -4,6 +4,10 @@
 //! block fields.
 
 pub(crate) mod edges;
+pub(crate) mod mapper;
+pub(crate) mod model_ref;
+pub mod orient;
+pub mod pick;
 pub(crate) mod project;
 pub mod template;
 
@@ -12,6 +16,9 @@ use std::sync::Arc;
 use serde_json::Value;
 use solidcraft_doc::{DocumentKind, DrawingModel, DrawingProps};
 
+pub use model_ref::ModelProvider;
+pub use orient::{Projection, aligned_position, projected_orientation, projection_at};
+pub use pick::{CurveKind, PaperPick, pick, preview_view};
 pub use project::{PaperCurve, camera_for};
 pub use template::*;
 

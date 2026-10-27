@@ -341,6 +341,11 @@ pub struct Session {
     /// The drawing sheet shown (an index into the drawing's sheets): view state, not saved, 0
     /// when a design opens.
     pub drawing_sheet: usize,
+    /// What the host knows of open documents, asked first for a drawing view's model (an open
+    /// tab's unsaved changes win over its file). The app installs one; none headless.
+    pub model_provider: Option<Arc<dyn drawing::ModelProvider>>,
+    /// The models drawing views show, evaluated, by absolute path (shared with scratch copies).
+    pub(crate) loaded_models: drawing::model_ref::ModelCache,
     /// Full model evaluations (`refresh`), for tests.
     #[cfg(test)]
     pub(crate) evaluations: usize,
@@ -491,6 +496,8 @@ impl Session {
             render_viewport: None,
             render_jobs: Default::default(),
             drawing_sheet: 0,
+            model_provider: None,
+            loaded_models: Default::default(),
             #[cfg(test)]
             evaluations: 0,
             motion_traces: Default::default(),
@@ -513,7 +520,11 @@ impl Session {
         let render_jobs = self.render_jobs.scratch();
         let checkpoints = std::mem::take(&mut self.checkpoints);
         let next_checkpoint = self.next_checkpoint;
+        let model_provider = self.model_provider.take();
+        let loaded_models = std::mem::take(&mut self.loaded_models);
         *self = fresh;
+        self.model_provider = model_provider;
+        self.loaded_models = loaded_models;
         self.auto_project = auto_project;
         self.project_file = project_file;
         self.param_check = param_check;
@@ -1145,6 +1156,8 @@ impl Session {
             render_jobs: self.render_jobs.scratch(),
             saved_visibility: self.saved_visibility.clone(),
             drawing_sheet: self.drawing_sheet,
+            model_provider: self.model_provider.clone(),
+            loaded_models: self.loaded_models.clone(),
             #[cfg(test)]
             evaluations: 0,
             motion_traces: self.motion_traces.clone(),

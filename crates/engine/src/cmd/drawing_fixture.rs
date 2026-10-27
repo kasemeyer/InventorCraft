@@ -58,3 +58,18 @@ pub(crate) fn edit_model(path: &str, commands: &[(&str, Value)]) {
     }
     run(&mut s, "file.save", json!({"path": path}));
 }
+
+/// `drawing.view.base` of the block: front, hidden lines, unshaded, scale 1, at [10, 8]; the view id.
+pub(crate) fn front_view(s: &mut Session, model: &str) -> u64 {
+    let r = run(
+        s,
+        "drawing.view.base",
+        json!({"model": model, "orientation": "front", "lines": "hidden", "shaded": false, "scale": 1, "position": [10, 8]}),
+    );
+    r["view"].as_u64().unwrap_or_else(|| panic!("drawing.view.base gave no view: {r}"))
+}
+
+/// The model_edge_id of the view curve nearest paper point `at`.
+pub(crate) fn edge_at(s: &Session, view: u64, at: [f64; 2]) -> String {
+    crate::drawing::pick::nearest_edge(s, view, at).unwrap_or_else(|| panic!("view {view} has no curves"))
+}
