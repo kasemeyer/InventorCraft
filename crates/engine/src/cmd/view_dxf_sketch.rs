@@ -14,7 +14,7 @@ use crate::view::{sketch_curve_visible, sketch_shown};
 const MAX_POINTS: usize = 4_000_000;
 
 /// One connected run of a sketch curve in world coordinates.
-pub(super) struct Part {
+pub(crate) struct Part {
     pub points: Vec<Vec3>,
     /// Drawn over the bodies (the sketch being edited) rather than hidden behind them.
     pub on_top: bool,

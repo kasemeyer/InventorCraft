@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 #[path = "view_dxf_scene.rs"]
 mod scene;
 
-pub(super) struct Drawing {
+pub(crate) struct Drawing {
     pub lines: Vec<Line>,
     pub work: usize,
     pub segments: usize,
@@ -22,12 +22,12 @@ pub(super) struct Drawing {
 
 /// A connected run of a projected sketch curve.
 #[derive(Clone, Debug)]
-pub(super) struct Path {
+pub(crate) struct Path {
     pub points: Vec<Vec2>,
     pub hidden: bool,
 }
 
-pub(super) fn drawing(meshes: &super::meshes::Scene, sketch: &[super::sketch::Part], cam: &Camera) -> Result<Drawing, &'static str> {
+pub(crate) fn drawing(meshes: &super::meshes::Scene, sketch: &[super::sketch::Part], cam: &Camera) -> Result<Drawing, &'static str> {
     scene::drawing(meshes, sketch, cam)
 }
 
@@ -77,10 +77,34 @@ pub(super) fn connect(entities: Vec<DxfEntity>) -> Vec<DxfEntity> {
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct Line {
+pub(crate) struct Line {
     pub a: Vec2,
     pub b: Vec2,
     pub hidden: bool,
+    /// What the line was projected from. `file.export_view_dxf` never writes it.
+    pub source: EdgeRef,
+}
+
+/// The model edge a projected line comes from: of placement `placement` of the scene.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct EdgeRef {
+    pub placement: u32,
+    pub kind: EdgeKind,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum EdgeKind {
+    /// A chord of mesh edge `i` (the mesh edge index is the B-rep edge index).
+    Brep(u32),
+    /// A silhouette chord, on B-rep face `face` (of its front-facing triangle; `u32::MAX` when
+    /// the scene kept no face ids, as an export does).
+    Silhouette { face: u32 },
+}
+impl EdgeRef {
+    /// Where collinear strokes overlap, the line is named after a B-rep edge before a
+    /// silhouette, then the first placement and edge.
+    fn rank(&self) -> (bool, Self) {
+        (matches!(self.kind, EdgeKind::Silhouette { .. }), *self)
+    }
 }
 
 fn xy(p: Vec3) -> Vec2 {
@@ -190,8 +214,11 @@ fn key(p: Vec3, eps: f64) -> [i64; 3] {
 
 /// Merge collinear projected intervals, giving visible strokes precedence. This also removes
 /// a rear edge underneath only part of a visible edge, and rejoins subdivided silhouettes.
-fn merge_lines(lines: Vec<Line>, eps: f64) -> Vec<Line> {
-    type Events = (Vec2, Vec2, Vec<(f64, i32, i32)>);
+/// `by_source` (a drawing view) also ends a line where its source changes, naming each piece
+/// after the best-ranked ([`EdgeRef::rank`]) source drawn there; without it (an export) the
+/// strokes join as they always have and the source is only carried along.
+fn merge_lines(lines: Vec<Line>, eps: f64, by_source: bool) -> Vec<Line> {
+    type Events = (Vec2, Vec2, Vec<(f64, i32, i32, EdgeRef)>);
     let mut groups: BTreeMap<[i64; 3], Events> = BTreeMap::new();
     for line in lines {
         let delta = line.b - line.a;
@@ -204,27 +231,34 @@ fn merge_lines(lines: Vec<Line>, eps: f64) -> Vec<Line> {
         let (origin, dir, events) = groups.entry(k).or_insert((line.a, dir, Vec::new()));
         let (a, b) = ((line.a - *origin).dot(*dir), (line.b - *origin).dot(*dir));
         let (v, h) = if line.hidden { (0, 1) } else { (1, 0) };
-        events.push((a.min(b), v, h));
-        events.push((a.max(b), -v, -h));
+        events.push((a.min(b), v, h, line.source));
+        events.push((a.max(b), -v, -h, line.source));
     }
     let mut result = Vec::new();
     for (_, (origin, dir, mut events)) in groups {
         events.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
         let (mut visible, mut hidden, mut last) = (0, 0, 0.0);
         let mut path: Option<Line> = None;
-        for (at, v, h) in events {
+        // With `by_source`: the source of each open stroke, and whether it is hidden.
+        let mut open: Vec<(EdgeRef, bool)> = Vec::new();
+        for (at, v, h, source) in events {
             if at - last > eps {
                 if visible > 0 || hidden > 0 {
                     let is_hidden = visible == 0;
                     let a = origin + dir * last;
                     let b = origin + dir * at;
-                    if let Some(p) = path.as_mut().filter(|p| p.hidden == is_hidden && p.b.dist(a) <= eps) {
+                    let named = if by_source {
+                        open.iter().filter(|(_, h)| *h == is_hidden).map(|(s, _)| *s).min_by_key(EdgeRef::rank).unwrap_or(source)
+                    } else {
+                        source
+                    };
+                    if let Some(p) = path.as_mut().filter(|p| p.hidden == is_hidden && p.b.dist(a) <= eps && (!by_source || p.source == named)) {
                         p.b = b;
                     } else {
                         if let Some(p) = path.take() {
                             result.push(p);
                         }
-                        path = Some(Line { a, b, hidden: is_hidden });
+                        path = Some(Line { a, b, hidden: is_hidden, source: named });
                     }
                 } else if let Some(p) = path.take() {
                     result.push(p);
@@ -233,6 +267,13 @@ fn merge_lines(lines: Vec<Line>, eps: f64) -> Vec<Line> {
             visible += v;
             hidden += h;
             last = at;
+            if by_source {
+                if v + h > 0 {
+                    open.push((source, h > 0));
+                } else if let Some(i) = open.iter().position(|e| *e == (source, h < 0)) {
+                    open.swap_remove(i);
+                }
+            }
         }
         if let Some(p) = path {
             result.push(p);
@@ -334,7 +375,7 @@ fn reference_drawing(meshes: &[Mesh], cam: &Camera) -> Result<Vec<Line>, &'stati
             if a.dist(b) <= eps {
                 return;
             }
-            result.push(Line { a, b, hidden });
+            result.push(Line { a, b, hidden, source: EdgeRef { placement: 0, kind: EdgeKind::Brep(0) } });
         };
         let mut cursor = 0.0;
         for (lo, hi) in merged {
@@ -347,7 +388,7 @@ fn reference_drawing(meshes: &[Mesh], cam: &Camera) -> Result<Vec<Line>, &'stati
             return Err("view too complex to export; hide some bodies");
         }
     }
-    Ok(merge_lines(result, eps))
+    Ok(merge_lines(result, eps, false))
 }
 
 #[cfg(test)]
@@ -355,9 +396,12 @@ mod tests {
     use super::*;
     #[test]
     fn a_visible_edge_overrides_only_the_overlapping_part_of_a_hidden_edge() {
-        let lines =
-            vec![Line { a: Vec2::ZERO, b: Vec2::new(10., 0.), hidden: true }, Line { a: Vec2::new(3., 0.), b: Vec2::new(7., 0.), hidden: false }];
-        let merged = merge_lines(lines, 1e-8);
+        let source = EdgeRef { placement: 0, kind: EdgeKind::Brep(0) };
+        let lines = vec![
+            Line { a: Vec2::ZERO, b: Vec2::new(10., 0.), hidden: true, source },
+            Line { a: Vec2::new(3., 0.), b: Vec2::new(7., 0.), hidden: false, source },
+        ];
+        let merged = merge_lines(lines, 1e-8, false);
         assert_eq!(merged.len(), 3);
         let length = |hidden| merged.iter().filter(|l| l.hidden == hidden).map(|l| l.a.dist(l.b)).sum::<f64>();
         assert!((length(false) - 4.).abs() < 1e-8 && (length(true) - 6.).abs() < 1e-8);

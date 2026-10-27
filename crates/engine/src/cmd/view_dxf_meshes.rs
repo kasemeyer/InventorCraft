@@ -21,16 +21,35 @@ pub(super) const WORKERS: usize = 1;
 const MESH_BYTES: usize = 512 * 1024 * 1024;
 const MAX_BODIES: usize = 100_000;
 
-pub(super) struct Placement {
+/// What [`prepare`] keeps of each mesh.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Keep {
+    /// `file.export_view_dxf`: only what vector occlusion reads; the shaded edges are drawn.
+    Export,
+    /// A drawing view: also the B-rep face of each triangle (a silhouette's face) and the
+    /// tangent-edge flags, and every pickable or tangent edge is drawn (tangent ones flagged,
+    /// not dropped; R5, R48).
+    Identity,
+}
+
+pub(crate) struct Placement {
     pub mesh: usize,
     pub transform: Mat,
     pub visibility: Vec<bool>,
+    /// The placed body's world name ([`Keep::Identity`] only; empty for an export).
+    #[cfg_attr(not(test), allow(dead_code))] // read by `drawing::edges`, first called by drawing views (Task 6)
+    pub body: String,
+    /// The occurrence ids from the root to the body's occurrence, empty for a root body
+    /// ([`Keep::Identity`] only; empty for an export).
+    #[cfg_attr(not(test), allow(dead_code))] // read by `drawing::edges`, first called by drawing views (Task 6)
+    pub component_path: Vec<u64>,
 }
-pub(super) struct Scene {
+pub(crate) struct Scene {
     pub meshes: Vec<Arc<Mesh>>,
     pub placements: Vec<Placement>,
     pub triangles: usize,
     pub bytes: usize,
+    pub keep: Keep,
 }
 
 struct Group {
@@ -89,7 +108,7 @@ fn rigid(m: &Mat) -> bool {
         && (x.cross(y).dot(z) - 1.).abs() < 1e-9
 }
 
-pub(super) fn prepare(s: &Session, tolerance: f64) -> Result<Scene> {
+pub(crate) fn prepare(s: &Session, tolerance: f64, keep: Keep) -> Result<Scene> {
     let world = s.world_state();
     let state = s.model.state();
     let mut definitions = BTreeMap::new();
@@ -131,15 +150,23 @@ pub(super) fn prepare(s: &Session, tolerance: f64) -> Result<Scene> {
         if mesh.triangles.is_empty() {
             return Err(KernelError::Invalid(format!("{} has no exportable surface", item.body.name)));
         }
-        let visibility = (0..mesh.edges.len()).map(|i| mesh.shaded_edge_visible(i)).collect();
+        let visibility = match keep {
+            Keep::Export => (0..mesh.edges.len()).map(|i| mesh.shaded_edge_visible(i)).collect(),
+            // Tangent joins are drawn too, flagged (R48): the kernel also calls every one a seam.
+            Keep::Identity => (0..mesh.edges.len()).map(|i| mesh.edge_pickable(i) || mesh.smooth_edges.get(i).copied().unwrap_or(false)).collect(),
+        };
         let triangles = mesh.triangles.len();
         let mesh = if item.keep {
             // These are owned export buffers, not the document's cached mesh. Picking and
             // shading data are unused by vector occlusion; edge choices were captured above.
             mesh.normals = Vec::new();
-            mesh.tri_face = Vec::new();
+            if keep == Keep::Export {
+                mesh.tri_face = Vec::new();
+            }
             mesh.seams = Vec::new();
-            mesh.smooth_edges = Vec::new();
+            if keep == Keep::Export {
+                mesh.smooth_edges = Vec::new();
+            }
             mesh.sharp_edges = Vec::new();
             mesh.edge_faces = Vec::new();
             if !claim(&bytes, buffer_bytes(&mesh), MESH_BYTES) {
@@ -162,6 +189,10 @@ pub(super) fn prepare(s: &Session, tolerance: f64) -> Result<Scene> {
         }
     }
     let meshes = meshes.into_iter().map(|m| m.ok_or_else(|| bad(CMD, "missing export geometry"))).collect::<Result<Vec<_>>>()?;
+    let paths = match keep {
+        Keep::Export => BTreeMap::new(),
+        Keep::Identity => occurrence_paths(s, &state),
+    };
     let mut placements = Vec::with_capacity(items.len());
     let mut triangles = 0usize;
     for (item, p) in items.iter().zip(prepared) {
@@ -169,9 +200,28 @@ pub(super) fn prepare(s: &Session, tolerance: f64) -> Result<Scene> {
             return Err(bad(CMD, "placed edge identity changed"));
         }
         triangles = triangles.saturating_add(p.triangles);
-        placements.push(Placement { mesh: item.group, transform: item.transform, visibility: p.visibility });
+        let (body, component_path) = match keep {
+            Keep::Export => (String::new(), Vec::new()),
+            Keep::Identity => (item.body.name.clone(), paths.get(item.body.name.as_str()).cloned().unwrap_or_default()),
+        };
+        placements.push(Placement { mesh: item.group, transform: item.transform, visibility: p.visibility, body, component_path });
     }
-    Ok(Scene { meshes, placements, triangles, bytes: bytes.load(Ordering::Relaxed) })
+    Ok(Scene { meshes, placements, triangles, bytes: bytes.load(Ordering::Relaxed), keep })
+}
+
+/// Each placed body's occurrence path by its world name (none in a design without occurrences:
+/// every body is the root's). The world state names each placement's bodies this way.
+fn occurrence_paths(s: &Session, state: &solidcraft_doc::ModelState) -> BTreeMap<String, Vec<u64>> {
+    let mut paths = BTreeMap::new();
+    if s.doc.occurrences.is_empty() {
+        return paths;
+    }
+    for (component, path, _) in s.doc.placements() {
+        for body in state.bodies.iter().filter(|b| s.doc.model_body_component(b) == component) {
+            paths.insert(s.doc.world_body_name(state, &body.name, component, &path), path.clone());
+        }
+    }
+    paths
 }
 
 pub(super) fn transformed_bounds(mesh: &Mesh, m: &Mat) -> Aabb3 {

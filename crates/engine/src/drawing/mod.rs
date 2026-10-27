@@ -3,6 +3,7 @@
 //! [`DrawingModel`]: its paper (a vendored CADCraft drawing, in inches), sheets, views and title
 //! block fields.
 
+pub(crate) mod edges;
 pub mod template;
 
 use std::sync::Arc;

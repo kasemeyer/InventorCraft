@@ -92,7 +92,7 @@ mod surface;
 mod surface_analysis;
 mod surface_boundary;
 mod surface_match;
-mod view_dxf;
+pub(crate) mod view_dxf;
 mod view_navigation;
 
 use serde::Serialize;

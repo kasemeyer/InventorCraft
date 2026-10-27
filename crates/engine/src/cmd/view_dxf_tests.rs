@@ -233,3 +233,26 @@ fn view_dxf_hides_finished_sketches_behind_bodies_but_draws_the_active_sketch_on
     assert_eq!(dashed["sketch"], 2);
     assert!((length(&dashed) - 80.).abs() < 1e-3, "{}", length(&dashed));
 }
+
+#[test]
+fn export_view_dxf_is_byte_identical() {
+    // The goldens were written by this command before edge identity was threaded through the
+    // hidden-line removal (Task 5, R36): the export must not change by one byte.
+    let dir = std::env::temp_dir().join(format!("solidcraft-dxf-export_view_dxf_is_byte_identical-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let golden = [
+        (StandardView::Front, include_bytes!("testdata/view_dxf_sample_front.dxf").as_slice()),
+        (StandardView::Iso, include_bytes!("testdata/view_dxf_sample_iso.dxf").as_slice()),
+    ];
+    for (view, expected) in golden {
+        let mut s = Session::default();
+        s.run_script(&crate::sample::script()).unwrap();
+        let path = dir.join("view.dxf");
+        let result = run(&mut s, CMD, json!({"camera":camera(view),"hidden":"dashed","path":path.to_string_lossy()}));
+        assert!(result["hidden"].as_u64().unwrap() > 0, "{view:?}: {result}");
+        let written = std::fs::read(&path).unwrap();
+        assert_eq!(written.len(), expected.len(), "{view:?}");
+        assert!(written == expected, "{view:?}: export_view_dxf output changed");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

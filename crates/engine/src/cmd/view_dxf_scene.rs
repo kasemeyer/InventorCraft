@@ -10,10 +10,10 @@ use solidcraft_doc::apply_point;
 use solidcraft_geom::{Aabb3, Mesh, Vec3};
 use solidcraft_render::Camera;
 
-use super::super::meshes::{Placement, Scene, WORKERS, claim, transformed_bounds};
+use super::super::meshes::{Keep, Placement, Scene, WORKERS, claim, transformed_bounds};
 use super::super::progress::Stage;
 use super::super::sketch::Part;
-use super::{Drawing, Line, Path, bounds, clip, key, merge_lines, occluded, overlap, xy};
+use super::{Drawing, EdgeKind, EdgeRef, Line, Path, bounds, clip, key, merge_lines, occluded, overlap, xy};
 
 const TOO_COMPLEX: &str = "view exceeds export work budget; hide bodies or increase tolerance";
 const MAX_LINES: usize = 1_000_000;
@@ -182,10 +182,18 @@ impl<'a> View<'a> {
 
 struct Projected {
     nodes: Vec<Aabb3>,
-    segments: Vec<(Vec3, Vec3)>,
+    /// Each projected chord with the edge it belongs to.
+    segments: Vec<(Vec3, Vec3, EdgeRef)>,
 }
 impl Projected {
-    fn new(shared: &Shared, placed: &Placement, view: &View<'_>, eps: f64, segments: &AtomicUsize, progress: &Stage) -> Result<Self, &'static str> {
+    fn new(
+        shared: &Shared,
+        (index, placed): (u32, &Placement),
+        view: &View<'_>,
+        eps: f64,
+        segments: &AtomicUsize,
+        progress: &Stage,
+    ) -> Result<Self, &'static str> {
         let mut nodes = vec![Aabb3::EMPTY; shared.tree.nodes.len()];
         // Exact projected leaf bounds avoid false near-eye errors from empty corners of a
         // rotated model-space box. Interior bounds are just unions of the child bounds.
@@ -212,13 +220,13 @@ impl Projected {
             }
         }
         let mut result = Vec::new();
-        let mut add = |a: Vec3, b: Vec3| -> Result<(), &'static str> {
+        let mut add = |a: Vec3, b: Vec3, kind: EdgeKind| -> Result<(), &'static str> {
             let (a, b) = (view.project(apply_point(&placed.transform, a))?, view.project(apply_point(&placed.transform, b))?);
             if xy(a).dist(xy(b)) > eps {
                 if !claim(segments, 1, MAX_SEGMENTS) {
                     return Err(TOO_COMPLEX);
                 }
-                result.push((a, b));
+                result.push((a, b, EdgeRef { placement: index, kind }));
             }
             Ok(())
         };
@@ -226,18 +234,23 @@ impl Projected {
             if !placed.visibility.get(i).copied().unwrap_or(false) {
                 continue;
             }
+            let kind = EdgeKind::Brep(u32::try_from(i).map_err(|_| "too many edges to export")?);
             for w in edge.windows(2) {
                 if let (Some(a), Some(b)) = (w.first(), w.get(1)) {
-                    add(*a, *b)?;
+                    add(*a, *b, kind)?;
                 }
             }
         }
         for edge in &shared.edges {
             let mut positive = false;
             let mut negative = false;
+            // The silhouette's face is that of its first front-facing triangle (of its only
+            // triangle on an open boundary).
+            let mut facing = None;
             for id in shared.incident.get(edge.start..edge.end).ok_or("invalid export adjacency")? {
                 if front.get(*id).copied().ok_or("invalid export adjacency")? {
                     positive = true;
+                    facing = facing.or(Some(*id));
                 } else {
                     negative = true;
                 }
@@ -245,7 +258,9 @@ impl Projected {
             if (positive && negative) || edge.end - edge.start == 1 {
                 let a = shared.mesh.positions.get(edge.vertices[0] as usize).ok_or("invalid silhouette")?;
                 let b = shared.mesh.positions.get(edge.vertices[1] as usize).ok_or("invalid silhouette")?;
-                add(*a, *b)?;
+                let triangle = facing.or_else(|| shared.incident.get(edge.start).copied());
+                let face = triangle.and_then(|t| shared.mesh.tri_face.get(t)).copied().unwrap_or(u32::MAX);
+                add(*a, *b, EdgeKind::Silhouette { face })?;
             }
         }
         Ok(Self { nodes, segments: result })
@@ -440,9 +455,15 @@ pub(super) fn drawing(scene: &Scene, sketch: &[Part], cam: &Camera) -> Result<Dr
     let view = View::new(cam);
     let count = AtomicUsize::new(0);
     let progress = Stage::new("dxf_projection", scene.placements.len());
-    let projected = parallel(&scene.placements, |p| {
+    let placements = scene
+        .placements
+        .iter()
+        .enumerate()
+        .map(|(i, p)| Ok((u32::try_from(i).map_err(|_| TOO_COMPLEX)?, p)))
+        .collect::<Result<Vec<_>, &'static str>>()?;
+    let projected = parallel(&placements, |&(i, p)| {
         progress.check()?;
-        let projected = Projected::new(shared.get(p.mesh).ok_or("missing shared geometry")?, p, &view, eps, &count, &progress)?;
+        let projected = Projected::new(shared.get(p.mesh).ok_or("missing shared geometry")?, (i, p), &view, eps, &count, &progress)?;
         progress.advance(1)?;
         Ok(projected)
     })?;
@@ -473,7 +494,7 @@ pub(super) fn drawing(scene: &Scene, sketch: &[Part], cam: &Camera) -> Result<Dr
         progress.check()?;
         let mut budget = Budget::new(&global, &progress);
         let mut lines = Vec::new();
-        for &(a, b) in *chunk {
+        for &(a, b, source) in *chunk {
             let mut query = Query {
                 shared: &shared,
                 scene,
@@ -495,7 +516,7 @@ pub(super) fn drawing(scene: &Scene, sketch: &[Part], cam: &Camera) -> Result<Dr
                     if !claim(&output, 1, MAX_LINES) {
                         return Err(TOO_COMPLEX);
                     }
-                    lines.push(Line { a: p, b: q, hidden });
+                    lines.push(Line { a: p, b: q, hidden, source });
                 }
                 Ok(())
             };
@@ -510,7 +531,7 @@ pub(super) fn drawing(scene: &Scene, sketch: &[Part], cam: &Camera) -> Result<Dr
         Ok((lines, budget.spent))
     })?;
     let work = results.iter().map(|(_, n)| *n).sum();
-    let lines = merge_lines(results.into_iter().flat_map(|(lines, _)| lines).collect(), eps);
+    let lines = merge_lines(results.into_iter().flat_map(|(lines, _)| lines).collect(), eps, scene.keep == Keep::Identity);
     progress.check()?;
     // Shown sketch curves: finished sketches are split where bodies cover them, like body
     // edges; the active sketch is drawn on top, as in the viewport. Each curve run stays one
@@ -637,13 +658,19 @@ mod tests {
         let mut flat = Vec::new();
         for (offset, angle) in [(Vec3::ZERO, 0.), (Vec3::new(3., 2., 4.), 0.3), (Vec3::new(2., 1., -4.), -0.6)] {
             let transform = solidcraft_doc::rigid(offset, Vec3::ZERO, Vec3::Z, angle);
-            placements.push(Placement { mesh: 0, transform, visibility: vec![true; mesh.edges.len()] });
+            placements.push(Placement {
+                mesh: 0,
+                transform,
+                visibility: vec![true; mesh.edges.len()],
+                body: String::new(),
+                component_path: Vec::new(),
+            });
             let mut placed = mesh.clone();
             placed.positions = placed.positions.iter().map(|p| apply_point(&transform, *p)).collect();
             placed.edges = placed.edges.iter().map(|e| e.iter().map(|p| apply_point(&transform, *p)).collect()).collect();
             flat.push(placed);
         }
-        let scene = Scene { meshes: vec![Arc::new(mesh)], placements, triangles: 36, bytes: 0 };
+        let scene = Scene { meshes: vec![Arc::new(mesh)], placements, triangles: 36, bytes: 0, keep: Keep::Export };
         for (yaw, pitch, roll) in [(0., std::f64::consts::FRAC_PI_2, 0.), (0.7, 0.4, 0.2), (0., 0., 0.)] {
             for fov in [0., 0.6] {
                 let cam = Camera { target: Vec3::new(4., 3., 1.), yaw, pitch, roll, fov, distance: 100., ..Default::default() };
@@ -681,9 +708,11 @@ mod tests {
                 mesh: 0,
                 transform: solidcraft_doc::rigid(Vec3::new((i % 10) as f64 * 20., (i / 10) as f64 * 20., 0.), Vec3::ZERO, Vec3::Z, 0.),
                 visibility: vec![true; 4],
+                body: String::new(),
+                component_path: Vec::new(),
             })
             .collect();
-        let scene = Scene { meshes: vec![Arc::new(mesh)], placements, triangles: 1_200_000, bytes: 0 };
+        let scene = Scene { meshes: vec![Arc::new(mesh)], placements, triangles: 1_200_000, bytes: 0, keep: Keep::Export };
         let mut cam = Camera { target: Vec3::new(95., 55., 0.), fov: 0., distance: 300., ..Default::default() };
         cam.set_view(StandardView::Top);
         let result = drawing(&scene, &[], &cam).unwrap();
