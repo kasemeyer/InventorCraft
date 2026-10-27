@@ -238,3 +238,15 @@ fn revision_is_the_documents_sha256() {
 fn format_pending_lists_the_drawing_model() {
     assert!(crate::format::pending_names().iter().any(|n| n == "drawing-model"), "{:?}", crate::format::pending_names());
 }
+
+#[test]
+fn a_projected_view_saves_its_projection() {
+    use crate::drawing::Projection;
+    let text = |p: Projection| serde_json::to_value(p).unwrap();
+    assert_eq!(text(Projection::Top), serde_json::json!("top"));
+    assert_eq!(text(Projection::Left), serde_json::json!("left"));
+    assert_eq!(text(Projection::Iso { sx: 1, sy: -1 }), serde_json::json!({"iso": {"sx": 1, "sy": -1}}));
+    for p in [Projection::Top, Projection::Bottom, Projection::Left, Projection::Right, Projection::Iso { sx: -1, sy: 1 }] {
+        assert_eq!(serde_json::from_value::<Projection>(text(p)).unwrap(), p);
+    }
+}

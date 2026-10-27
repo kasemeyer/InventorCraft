@@ -4,16 +4,7 @@
 use solidcraft_doc::{CubeTarget, Orientation};
 use solidcraft_geom::Vec3;
 
-/// The view projected from a parent: one of the four orthographic neighbours, or an isometric
-/// toward the corner `sx` (right +1, left −1) and `sy` (up +1, down −1).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Projection {
-    Top,
-    Bottom,
-    Left,
-    Right,
-    Iso { sx: i8, sy: i8 },
-}
+pub use solidcraft_doc::Projection;
 
 /// The projection a click at `at` makes from a parent centred at `parent`: 45-degree sectors centred on the axes.
 pub fn projection_at(parent: [f64; 2], at: [f64; 2]) -> Projection {

@@ -24,7 +24,7 @@ pub mod display_units;
 pub mod drawing;
 mod drawing_paper;
 pub use drawing::{
-    AnsiSize, CubeTarget, DrawingModel, DrawingProps, DrawingView, LineStyle, ModelKind, ModelRef, ModelRevision, Orientation, RasterRef,
+    AnsiSize, CubeTarget, DrawingModel, DrawingProps, DrawingView, LineStyle, ModelKind, ModelRef, ModelRevision, Orientation, Projection, RasterRef,
     SCALE_PRESETS, SheetMeta, TemplateId, ViewId, format_scale, parse_scale, revision_of,
 };
 mod document;

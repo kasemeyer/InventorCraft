@@ -417,3 +417,23 @@ fn a_view_inside_another_views_box_is_picked_first() {
     }
     assert!(seen > 0);
 }
+
+#[test]
+fn a_projected_view_moved_past_its_parent_keeps_its_projection() {
+    // R55: VIEW2 is the top view; dragged below VIEW1 it is still the top view.
+    let (mut s, _, [v1, v2, _]) = three_views("a_projected_view_moved_past_its_parent_keeps_its_projection");
+    let top = view(&s, v2).orientation;
+    run(&mut s, "drawing.view.set_position", json!({"view": v2, "position": [13, 2]}));
+    assert!(near(position(&s, v2), [10.0, 2.0], 1e-6), "{:?}", position(&s, v2));
+    run(&mut s, "drawing.update", json!({"views": [v2]}));
+    assert_eq!(view(&s, v2).orientation, top);
+    assert_box(&s, v2, [8.0, 1.5], [12.0, 2.5]);
+    // Turning the parent re-derives the child as a top view, not a bottom one.
+    run(&mut s, "drawing.view.set_orientation", json!({"view": v1, "orientation": "top"}));
+    let o = &view(&s, v2).orientation;
+    let close = |a: Vec3, b: Vec3| (a - b).len() <= 1e-9;
+    assert!(close(o.dir, Vec3::new(0.0, -1.0, 0.0)) && close(o.up, Vec3::new(0.0, 0.0, -1.0)), "{o:?}");
+    // Moving it again keeps it on the vertical axis through VIEW1.
+    run(&mut s, "drawing.view.set_position", json!({"view": v2, "position": [15, 3]}));
+    assert!(near(position(&s, v2), [10.0, 3.0], 1e-6), "{:?}", position(&s, v2));
+}

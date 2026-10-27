@@ -193,6 +193,7 @@ fn unplaced(model: ModelRef, orientation: Orientation, at: Vec2) -> DrawingView 
         identifier: String::new(),
         sheet: 0,
         parent: None,
+        projection: None,
         model,
         model_state: None,
         orientation,
@@ -254,6 +255,7 @@ pub(crate) fn plan(s: &Session, cmd: &str, p: &Value) -> Result<Planned> {
             let mut v = unplaced(parent.model.clone(), projected_orientation(&parent.orientation, projection), Vec2::new(x, y));
             v.sheet = parent.sheet;
             v.parent = Some(parent.id);
+            v.projection = Some(projection);
             v.model_state.clone_from(&parent.model_state);
             (v.scale, v.lines, v.shaded, v.tangent_edges) = (parent.scale, parent.lines, parent.shaded, parent.tangent_edges);
             (v.style_from_base, v.scale_from_base) = (true, true);
@@ -331,9 +333,10 @@ fn descendants(views: &BTreeMap<ViewId, DrawingView>, id: ViewId) -> Vec<ViewId>
     out
 }
 
-/// The projection that places `child` beside `parent`.
+/// The projection `child` is of `parent`: the one stored when it was projected (R55); a view
+/// without one (a base view made projected by hand) is read from where it sits.
 fn projection_of(parent: &DrawingView, child: &DrawingView) -> Projection {
-    projection_at([parent.position.x, parent.position.y], [child.position.x, child.position.y])
+    child.projection.unwrap_or_else(|| projection_at([parent.position.x, parent.position.y], [child.position.x, child.position.y]))
 }
 
 /// `views` projected again from their (possibly changed) models, each with its new revision
@@ -584,7 +587,7 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
             .filter(|c| c.parent == Some(id))
             .map(|c| {
                 let mut c = c.clone();
-                (c.parent, c.style_from_base, c.scale_from_base) = (None, false, false);
+                (c.parent, c.projection, c.style_from_base, c.scale_from_base) = (None, None, false, false);
                 c
             })
             .collect()

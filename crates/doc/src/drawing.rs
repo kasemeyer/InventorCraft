@@ -67,6 +67,10 @@ pub struct DrawingView {
     pub sheet: usize,
     /// The view this one is projected from.
     pub parent: Option<ViewId>,
+    /// Which projection of `parent` this view is (None for a base view). Set when the view is
+    /// projected and kept by every edit: moving the view never changes what it is (R55).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub projection: Option<Projection>,
     pub model: ModelRef,
     /// `None`: the model's only state.
     pub model_state: Option<String>,
@@ -87,6 +91,19 @@ pub struct DrawingView {
     pub revision: ModelRevision,
     /// The shaded image.
     pub raster: Option<RasterRef>,
+}
+
+/// The view projected from a parent: one of the four orthographic neighbours, or an isometric
+/// toward the corner `sx` (right +1, left −1) and `sy` (up +1, down −1). Saved as `top`,
+/// `bottom`, `left`, `right` or `{"iso": {"sx": 1, "sy": -1}}`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Projection {
+    Top,
+    Bottom,
+    Left,
+    Right,
+    Iso { sx: i8, sy: i8 },
 }
 
 /// The direction a view looks along (`dir`, model space, unit) and the model direction shown
