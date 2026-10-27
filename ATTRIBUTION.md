@@ -531,6 +531,10 @@ Editable drawing code, native projects and shipped exports are collected under `
 | apps/solidcraft/src/open_documents.rs (macOS: files opened from Finder and the Dock, its test) | VectorCraft `apps/vectorcraft/src/open_documents.rs` (https://github.com/storytold/vectorcraft) | MIT OR Apache-2.0 |
 | LICENSE-MIT, LICENSE-APACHE (licence text) | CADCraft | — |
 | .github/workflows/release.yml, .github/workflows/packaging-lint.yml and packaging/ (release pipeline: Linux AppImage/deb/rpm/Flatpak/tar.gz, FreeBSD, macOS dmg, Windows MSI/portable zip, web zip; AppRun, nfpm, Flatpak, WiX and Info.plist templates) | PhotoCraft (https://github.com/storytold/photocraft) `.github/workflows/{release,packaging-lint}.yml`, `packaging/` | Apache-2.0 |
+| crates/cadcraft-doc/ (vendored) | CADCraft `crates/doc` @ d864a08b013353143086bd8bb568c26cb6256796 (https://github.com/storytold/cadcraft) | MIT OR Apache-2.0 |
+| crates/cadcraft-render/ (vendored) | CADCraft `crates/render` @ d864a08b013353143086bd8bb568c26cb6256796 | MIT OR Apache-2.0 |
+| crates/cadcraft-io/ (vendored; DWG bridge removed; PDF image patch) | CADCraft `crates/io` @ d864a08b013353143086bd8bb568c26cb6256796 | MIT OR Apache-2.0 |
+| crates/cadcraft-{color,geom,dxf,fonts}/ (vendored) | CADCraft `crates/{color,geom,dxf,fonts}` @ d864a08b013353143086bd8bb568c26cb6256796 | MIT OR Apache-2.0 |
 
 ## Incremental HDR codec adapter
 
@@ -578,6 +582,21 @@ copied into SolidCraft.
 | vendor/truck-shapeops | truck-shapeops 0.4.0, https://github.com/ricosjp/truck (RICOS Co. Ltd.) | Apache-2.0 | robust meshing and nearest-parameter fallback in booleans; degenerate intersection-curve rejection; face and edge history of booleans; trace macro; corner choice at vertices several intersection curves end on; reuse of an operand's meshes (vendor/README.md) |
 | vendor/truck-geometry | truck-geometry 0.5.0, https://github.com/ricosjp/truck (RICOS Co. Ltd.) | Apache-2.0 | intersection curves divided from their neighbours' surface parameters; surface second derivatives (vendor/README.md) |
 | vendor/matext4cgmath | matext4cgmath 0.1.0, https://github.com/ricosjp/matext4cgmath (RICOS Co. Ltd.) | Apache-2.0 | root refinement stops after 100 Newton steps (vendor/README.md) |
+| vendor/craft-pdf | craft-libs `crates/pdf` (craft-pdf 0.1.0) @ 9f89fe8f6d72ab4db4cc06f186381a6a254463ab, https://github.com/storytold/craft-libs (an Apache-2.0 repository shipping MIT and Apache licence files) | MIT OR Apache-2.0 | manifest de-workspaced, each line marked `TCI-CAD:` (vendor/README.md); PDF writer of crates/cadcraft-io |
+| vendor/hayro-syntax | hayro-syntax 0.7.2 as vendored in craft-libs `vendor/hayro-syntax` @ 9f89fe8f6d72ab4db4cc06f186381a6a254463ab (Laurenz Stampfl, https://github.com/LaurenzV/hayro) | Apache-2.0 OR MIT | none (CADCraft's root `[patch.crates-io]` entry, by path; vendor/README.md) |
+| vendor/hayro-jbig2 | hayro-jbig2 0.3.0 as vendored in craft-libs `vendor/hayro-jbig2` @ 9f89fe8f6d72ab4db4cc06f186381a6a254463ab (Laurenz Stampfl, https://github.com/LaurenzV/hayro) | Apache-2.0 OR MIT | none (CADCraft's root `[patch.crates-io]` entry, by path; vendor/README.md) |
+| vendor/krilla | krilla 0.8.2 as patched in craft-libs `vendor/krilla` @ 9f89fe8f6d72ab4db4cc06f186381a6a254463ab (Laurenz Stampfl, https://github.com/LaurenzV/krilla; craft-libs' 16 patches listed in its README.craft.md) | MIT OR Apache-2.0 | none of ours; licence texts copied from craft-libs `licenses/pdf-writer` (vendor/README.md) |
+
+The four ICC profiles krilla embeds are vendored with it at `vendor/krilla/icc/` (CC0-1.0, its
+`icc/LICENSE`). Their rows, copied exactly from CADCraft's `ATTRIBUTION.md:27-30` at
+d864a08b013353143086bd8bb568c26cb6256796:
+
+| Asset | Author | Source | Licence | Notes |
+|---|---|---|---|---|
+| `krilla 0.8.2 / icc/sGrey-v2-magic.icc` (dependency-embedded) | Clinton Ingram | [craft-libs 9f89fe8 vendor/krilla/icc/sGrey-v2-magic.icc](https://github.com/storytold/craft-libs/blob/9f89fe8f6d72ab4db4cc06f186381a6a254463ab/vendor/krilla/icc/sGrey-v2-magic.icc) (Krilla 0.8.2 upstream 3ffdf0588cf98050aad6edba51ca70162e1fb5b5) | CC0-1.0 | Embedded by the pinned PDF writer (`craft-pdf` 0.1.0, Krilla 0.8.2); unmodified dependency asset, no file copied into this repository. SHA-256 `4110169287e5f1b5149ca9f1da1814d32943905bba8030e849d1a3b729a19481`. |
+| `krilla 0.8.2 / icc/sGrey-v4.icc` (dependency-embedded) | Clinton Ingram | [craft-libs 9f89fe8 vendor/krilla/icc/sGrey-v4.icc](https://github.com/storytold/craft-libs/blob/9f89fe8f6d72ab4db4cc06f186381a6a254463ab/vendor/krilla/icc/sGrey-v4.icc) (Krilla 0.8.2 upstream 3ffdf0588cf98050aad6edba51ca70162e1fb5b5) | CC0-1.0 | Embedded by the pinned PDF writer (`craft-pdf` 0.1.0, Krilla 0.8.2); unmodified dependency asset, no file copied into this repository. SHA-256 `00c0f94e09127520a17dc0e1d9264b5702081d96dbdb1549ee88e3631ce42a9d`. |
+| `krilla 0.8.2 / icc/sRGB-v2-magic.icc` (dependency-embedded) | Clinton Ingram | [craft-libs 9f89fe8 vendor/krilla/icc/sRGB-v2-magic.icc](https://github.com/storytold/craft-libs/blob/9f89fe8f6d72ab4db4cc06f186381a6a254463ab/vendor/krilla/icc/sRGB-v2-magic.icc) (Krilla 0.8.2 upstream 3ffdf0588cf98050aad6edba51ca70162e1fb5b5) | CC0-1.0 | Embedded by the pinned PDF writer (`craft-pdf` 0.1.0, Krilla 0.8.2); unmodified dependency asset, no file copied into this repository. SHA-256 `af4efe28f6d311799865f325ba39184a2e978b113ca74124d60af7de22b105f4`. |
+| `krilla 0.8.2 / icc/sRGB-v4.icc` (dependency-embedded) | Clinton Ingram | [craft-libs 9f89fe8 vendor/krilla/icc/sRGB-v4.icc](https://github.com/storytold/craft-libs/blob/9f89fe8f6d72ab4db4cc06f186381a6a254463ab/vendor/krilla/icc/sRGB-v4.icc) (Krilla 0.8.2 upstream 3ffdf0588cf98050aad6edba51ca70162e1fb5b5) | CC0-1.0 | Embedded by the pinned PDF writer (`craft-pdf` 0.1.0, Krilla 0.8.2); unmodified dependency asset, no file copied into this repository. SHA-256 `c56e1685d888f5edb92fe07f2750f387f8fe8e91b32ff8fb0b56bfbbb9458353`. |
 
 ## Vendored renderer compatibility fix
 

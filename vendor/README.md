@@ -301,3 +301,100 @@ SolidCraft changes:
   submits nothing (`DeviceLost::probe`), so a device the driver lost is found by that
   submission rather than by the first queue write, which panicked inside wgpu-core
   (`PendingWrites::activate`, #4172).
+
+## CADCraft drawing crates (`crates/cadcraft-*`)
+
+TCI-CAD's drawing environment uses seven crates of CADCraft (https://github.com/storytold/cadcraft,
+MIT OR Apache-2.0), taken at **`d864a08b013353143086bd8bb568c26cb6256796`**, and the PDF writer
+they pin from craft-libs (https://github.com/storytold/craft-libs), taken at
+**`9f89fe8f6d72ab4db4cc06f186381a6a254463ab`**. Re-sync crate by crate, deliberately, at a new
+pinned sha; never track CADCraft `main`. Every edited vendored line is marked `TCI-CAD:` (`//` in
+Rust, `#` in TOML), so a re-sync can find and re-apply them.
+
+Crates (package names are upstream's, `cadcraft-*`; they are workspace members under `crates/`
+and sit in `xtask/src/layers.rs` `TABLE` below the engine):
+
+| Directory | Upstream at the CADCraft pin | Layer |
+|---|---|---|
+| `crates/cadcraft-color` | `crates/color` | L0 |
+| `crates/cadcraft-geom` | `crates/geom` | L0 |
+| `crates/cadcraft-dxf` | `crates/dxf` | L0 |
+| `crates/cadcraft-doc` | `crates/doc` | L1 |
+| `crates/cadcraft-fonts` | `crates/fonts` | L1 |
+| `crates/cadcraft-render` | `crates/render` | L2 |
+| `crates/cadcraft-io` | `crates/io` | L3 |
+
+Not taken: CADCraft's `dwg` (acadrust, MPL-2.0), `engine`, `ui-egui`, `mcp`, `constraints`. Each
+crate directory also holds CADCraft's root `LICENSE-MIT` and `LICENSE-APACHE` (the crates ship
+none of their own).
+
+From craft-libs (outside the workspace, `exclude = ["vendor"]`):
+
+| Directory | Upstream at the craft-libs pin | Wired by |
+|---|---|---|
+| `vendor/craft-pdf` | `crates/pdf` (craft-pdf 0.1.0), plus the repository's `LICENSE-MIT`/`LICENSE-APACHE` | path dependency of `cadcraft-io` (`write`; `read` for its tests) |
+| `vendor/krilla` | `vendor/krilla` (krilla 0.8.2 with craft-libs' patches, `README.craft.md`), plus `LICENSE_MIT`/`LICENSE_APACHE` from craft-libs `licenses/pdf-writer` | root `[patch.crates-io]` |
+| `vendor/hayro-syntax` | `vendor/hayro-syntax` (0.7.2) | root `[patch.crates-io]` |
+| `vendor/hayro-jbig2` | `vendor/hayro-jbig2` (0.3.0) | root `[patch.crates-io]` |
+
+The three patches are CADCraft's root `[patch.crates-io]` entries at its pin, by path instead of
+craft-libs git (`deny.toml` forbids unknown git sources).
+
+Changes:
+- Manifests de-workspaced: `version = "0.13.0"`, `edition = "2024"`, `license = "MIT OR
+  Apache-2.0"` and every `{ workspace = true }` dependency written out from CADCraft's root
+  `Cargo.toml` at the pin; the seven crates depend on each other by path; `[lints] workspace = true`
+  dropped. `vendor/craft-pdf/Cargo.toml` likewise from craft-libs' root `Cargo.toml` (version,
+  edition, licence, repository, rust-version and its six optional dependencies).
+- `cadcraft-fonts`: unchanged; its `build.rs` still reads `CRAFT_FONTS_DIR`, which stays unset (no
+  OFL fonts embedded).
+- `cadcraft-io` DWG stub: the `cadcraft-dwg` dependency and the `acadrust` dev-dependency
+  (MPL-2.0) are removed. `src/lib.rs`: `read` refuses bytes that start with the DWG version prefix
+  `AC1` (was `cadcraft_dwg::is_dwg` and the conversion), and `write_with` to `.dwg` (so `write` to
+  `.dwg` and `.dwt`) returns the same error (was the bridge), both
+  `IoError::Format("DWG is not supported in TCI-CAD (PDF and DXF only)")` (`DWG_UNSUPPORTED`).
+  `src/dxf_write.rs`: `dwg_bridge`, now uncalled, carries `#[allow(dead_code)]`.
+  `tests/tci_dwg_stub.rs` (ours) holds the stub to that text.
+- DWG tests removed (they need the bridge); each removal leaves a `TCI-CAD:` line where it was:
+  - files: `tests/dwg_active_layout.rs`, `tests/dwg_polyline_vertex_order.rs`,
+    `tests/dwg_required_dictionaries.rs`, `tests/it/dwg_header_vars.rs`,
+    `tests/it/dwg_layout_owner.rs`, `tests/it/dwg_roundtrip_losses.rs`,
+    `tests/it/groups_roundtrip.rs` (and their `mod` lines in `tests/it/main.rs`);
+  - `src/tests.rs`: `viewport_frozen_layers_survive_dwg`, `many_entities`, `ac1024_dwg`,
+    `ac1024_dwg_with_many_entities_opens`, `damaged_dwg_opens_partially_and_says_what_it_left_out`,
+    `dwg_roundtrip_keeps_non_ascii_text`, `dwg_roundtrip_keeps_extension_data`,
+    `gradient_hatch_roundtrips_through_dwg`; the DWG legs of
+    `generated_arrowhead_blocks_are_not_kept_as_user_blocks`,
+    `file_arrowhead_blocks_with_standard_names_are_kept`, `oversized_dwg_and_dxf_are_rejected_early`
+    (its DXF case stays), `layer_states_roundtrip_next_to_constraints` and
+    `arc_length_dimension_keeps_its_kind_and_centre_on_roundtrip`;
+  - `tests/it/acad_interop.rs`: `dwg_roundtrip`, `a_rotated_linear_dimension_stores_its_projected_length`,
+    `stored_measurement`, `an_angular_dimension_stores_its_angle_in_radians`, `polar`, and the DWG
+    legs of `justified_text_is_written_with_its_baseline_start_as_insertion_point` and
+    `the_current_dimension_style_and_its_variables_reach_autocad` (its `use` line trimmed);
+  - one test each: `acis_data_store::dwg_keeps_the_solids_geometry`,
+    `codepages::pre_2007_dwg_text_decodes_through_the_bridge`,
+    `dim_block_resave_roundtrip::dwg_reopen_and_save_keeps_one_block_per_dimension`,
+    `dim_block_text::dwg_angular_block_text_keeps_the_decimal_separator`,
+    `dwt_template::dwt_is_written_as_dwg_and_read_back`,
+    `dxf_versions::{dwg_at_every_version_reads_back, dwg_default_is_at_least_2004}` (and the helper
+    `first_table`), `followups_626::multileader_in_dwg_follows_the_dwg_version`,
+    `helix_roundtrip::helix_survives_dwg_save_and_reopen`, `mleader_roundtrip::multileader_through_dwg`,
+    `mline_roundtrip::mline_survives_dwg_save_and_reopen`,
+    `model_layout_plot_type::model_layout_plot_type_survives_the_dwg_bridge`,
+    `passthrough_image_roundtrip::image_survives_dwg_save_and_reopen`,
+    `roundtrip_audit::dwg_keeps_extension_dictionaries_xrecords_and_entity_xdata`;
+  - DWG legs only: `attrib_modes::modes_survive_dxf_and_dwg`,
+    `dim_block_resave_roundtrip::an_unedited_dimension_keeps_the_block_it_was_read_with`,
+    `dynblock_read::a_saved_drawing_keeps_the_dynamic_block_as_read`,
+    `hatch_assoc_roundtrip::a_hatch_in_a_block_keeps_its_boundary_and_the_boundary_its_reactor`,
+    `low_handseed::faces_made_while_reading_do_not_take_the_files_handles`, and
+    `tests/dimassoc_angular_radial.rs::standard_dimassoc_associates_in_dxf_and_dwg` (its `use` line
+    trimmed).
+- Crate-root clippy allows (`cargo clippy --workspace --all-targets -- -D warnings`; CADCraft's own
+  workspace lints allowed `type_complexity`, which ours do not), each marked `TCI-CAD:`:
+  - `#![allow(clippy::type_complexity)]` in `crates/cadcraft-doc/src/lib.rs`,
+    `crates/cadcraft-render/src/lib.rs`, `crates/cadcraft-io/src/lib.rs` and
+    `crates/cadcraft-io/tests/it/main.rs`;
+  - `#![allow(clippy::single_element_loop)]` in `crates/cadcraft-io/src/lib.rs` (for `src/tests.rs`)
+    and `crates/cadcraft-io/tests/it/main.rs`: the loops that kept only their DXF leg.

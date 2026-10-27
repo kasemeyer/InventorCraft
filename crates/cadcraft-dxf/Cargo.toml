@@ -1,0 +1,13 @@
+[package]
+name = "cadcraft-dxf"
+description = "Standalone DXF tag reader/writer (ASCII and binary, pre-2007 code pages), from the published DXF reference"
+version = "0.13.0" # TCI-CAD: was `version.workspace = true` (CADCraft root Cargo.toml at d864a08b)
+edition = "2024" # TCI-CAD: was `edition.workspace = true`
+license = "MIT OR Apache-2.0" # TCI-CAD: was `license.workspace = true`
+
+# TCI-CAD: `[lints] workspace = true` dropped (CADCraft's workspace lints are not ours).
+
+[dependencies]
+thiserror = "2" # TCI-CAD: was `{ workspace = true }`
+log = "0.4" # TCI-CAD: was `{ workspace = true }`
+encoding_rs = "0.8.35" # TCI-CAD: was `{ workspace = true }`

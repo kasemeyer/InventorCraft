@@ -1,0 +1,37 @@
+[package]
+name = "craft-pdf"
+description = "Shared PDF reading, rendering and optional writing for Craft apps"
+version = "0.1.0" # TCI-CAD: was `version.workspace = true` (craft-libs root Cargo.toml at 9f89fe8f)
+edition = "2024" # TCI-CAD: was `edition.workspace = true`
+license = "MIT OR Apache-2.0" # TCI-CAD: was `license.workspace = true`
+repository = "https://github.com/storytold/craft-libs" # TCI-CAD: was `repository.workspace = true`
+rust-version = "1.95" # TCI-CAD: was `rust-version.workspace = true`
+
+# TCI-CAD: `[lints] workspace = true` dropped (vendored outside our workspace).
+
+[features]
+default = []
+read = ["dep:hayro-syntax", "dep:thiserror"]
+interpret = ["read", "dep:hayro-interpret"]
+raster = ["interpret", "dep:hayro", "dep:bytemuck"]
+write = ["dep:krilla", "dep:thiserror"]
+write-pdf = ["write", "krilla/pdf"]
+write-simple-text = ["write", "krilla/simple-text"]
+
+[dependencies]
+hayro-syntax = { version = "=0.7.2", default-features = false, features = ["std"], optional = true } # TCI-CAD: was `{ workspace = true, optional = true }`
+hayro-interpret = { version = "=0.7.0", default-features = false, features = ["embed-fonts", "embed-cmaps"], optional = true } # TCI-CAD: was `{ workspace = true, optional = true }`
+hayro = { version = "=0.7.1", default-features = false, optional = true } # TCI-CAD: was `{ workspace = true, optional = true }`
+bytemuck = { version = "1", optional = true } # TCI-CAD: was `{ workspace = true, optional = true }`
+krilla = { version = "=0.8.2", default-features = false, features = ["raster-images"], optional = true } # TCI-CAD: was `{ workspace = true, optional = true }`
+thiserror = { version = "2", optional = true } # TCI-CAD: was `{ workspace = true, optional = true }`
+
+[dev-dependencies]
+hayro-syntax = "=0.7.2"
+hayro-interpret = { version = "=0.7.0", default-features = false }
+hayro-cmap = "=0.1.0"
+kurbo = "0.13"
+ttf-parser = "=0.25.1"
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.3"

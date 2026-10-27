@@ -158,6 +158,13 @@ matext4cgmath = { path = "vendor/matext4cgmath" }
 # Keep OpenGL pipelines, resolve textures and CAD callbacks at the same safe sample count.
 egui-wgpu = { path = "vendor/egui-wgpu" }
 
+# PDF backends of the vendored craft-pdf (vendor/craft-pdf, used by crates/cadcraft-io): CADCraft's
+# root patches at d864a08b, pinned to craft-libs 9f89fe8f and vendored by path (deny.toml forbids
+# unknown git sources; Cargo ignores dependency-local patches). See vendor/README.md.
+krilla = { path = "vendor/krilla" }
+hayro-syntax = { path = "vendor/hayro-syntax" }
+hayro-jbig2 = { path = "vendor/hayro-jbig2" }
+
 # Mutation testing (cargo-mutants, docs/mutation-testing.md): the ci profile with incremental
 # builds, since every mutant rebuilds the crates above the one it changes.
 [profile.mutants]

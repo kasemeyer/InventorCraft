@@ -51,6 +51,14 @@ pub const TABLE: &[(&str, Class)] = &[
     ("ui-egui", Class::Layer(5)),
     ("gpu", Class::Layer(5)),
     ("mcp", Class::Layer(5)),
+    // CADCraft's drawing crates, vendored at d864a08b (vendor/README.md): below the engine
+    ("cadcraft-color", Class::Layer(0)),
+    ("cadcraft-geom", Class::Layer(0)),
+    ("cadcraft-dxf", Class::Layer(0)),
+    ("cadcraft-doc", Class::Layer(1)),
+    ("cadcraft-fonts", Class::Layer(1)),
+    ("cadcraft-render", Class::Layer(2)),
+    ("cadcraft-io", Class::Layer(3)),
     ("testkit", Class::Testkit),
     // apps and tooling
     ("solidcraft", Class::Exempt),
@@ -232,6 +240,10 @@ pub fn describe(class: Option<Class>) -> String {
         None => "UNREGISTERED".into(),
     }
 }
+
+#[cfg(test)]
+#[path = "layers_cadcraft_tests.rs"]
+mod layers_cadcraft_tests;
 
 #[cfg(test)]
 mod tests {

@@ -1,0 +1,23 @@
+[package]
+name = "cadcraft-render"
+description = "CADCraft rendering: display lists (linetypes, hatches, text, blocks, dimensions) and a CPU rasteriser"
+version = "0.13.0" # TCI-CAD: was `version.workspace = true` (CADCraft root Cargo.toml at d864a08b)
+edition = "2024" # TCI-CAD: was `edition.workspace = true`
+license = "MIT OR Apache-2.0" # TCI-CAD: was `license.workspace = true`
+
+# TCI-CAD: `[lints] workspace = true` dropped (CADCraft's workspace lints are not ours).
+
+[dependencies]
+cadcraft-geom = { path = "../cadcraft-geom" } # TCI-CAD: was `{ workspace = true }`
+cadcraft-color = { path = "../cadcraft-color" } # TCI-CAD: was `{ workspace = true }`
+cadcraft-doc = { path = "../cadcraft-doc" } # TCI-CAD: was `{ workspace = true }`
+cadcraft-fonts = { path = "../cadcraft-fonts" } # TCI-CAD: was `{ workspace = true }`
+tiny-skia = { version = "0.12", default-features = false, features = ["std", "simd", "png-format"] } # TCI-CAD: was `{ workspace = true }`
+lyon_tessellation = "1.0.22" # TCI-CAD: was `{ workspace = true }`
+
+# Display lists of large drawings are built on all cores (not on the web, which has no threads).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rayon = "1" # TCI-CAD: was `{ workspace = true }`
+
+[dev-dependencies]
+serde_json = { version = "1", features = ["float_roundtrip"] } # TCI-CAD: was `{ workspace = true }`

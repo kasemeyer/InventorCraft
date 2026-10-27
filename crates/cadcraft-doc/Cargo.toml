@@ -1,0 +1,15 @@
+[package]
+name = "cadcraft-doc"
+description = "CADCraft drawing database: entities, symbol tables, blocks, layouts, copy-on-write store"
+version = "0.13.0" # TCI-CAD: was `version.workspace = true` (CADCraft root Cargo.toml at d864a08b)
+edition = "2024" # TCI-CAD: was `edition.workspace = true`
+license = "MIT OR Apache-2.0" # TCI-CAD: was `license.workspace = true`
+
+# TCI-CAD: `[lints] workspace = true` dropped (CADCraft's workspace lints are not ours).
+
+[dependencies]
+cadcraft-geom = { path = "../cadcraft-geom" } # TCI-CAD: was `{ workspace = true }`
+cadcraft-color = { path = "../cadcraft-color" } # TCI-CAD: was `{ workspace = true }`
+serde = { version = "1", features = ["derive", "rc"] } # TCI-CAD: was `{ workspace = true }`
+serde_json = { version = "1", features = ["float_roundtrip"] } # TCI-CAD: was `{ workspace = true }`
+thiserror = "2" # TCI-CAD: was `{ workspace = true }`

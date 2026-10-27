@@ -1,0 +1,29 @@
+[package]
+name = "cadcraft-io"
+description = "CADCraft file formats: DXF read/write mapping, SVG, PNG and PDF export"
+version = "0.13.0" # TCI-CAD: was `version.workspace = true` (CADCraft root Cargo.toml at d864a08b)
+edition = "2024" # TCI-CAD: was `edition.workspace = true`
+license = "MIT OR Apache-2.0" # TCI-CAD: was `license.workspace = true`
+
+# TCI-CAD: `[lints] workspace = true` dropped (CADCraft's workspace lints are not ours).
+
+[dependencies]
+cadcraft-geom = { path = "../cadcraft-geom" } # TCI-CAD: was `{ workspace = true }`
+cadcraft-color = { path = "../cadcraft-color" } # TCI-CAD: was `{ workspace = true }`
+cadcraft-doc = { path = "../cadcraft-doc" } # TCI-CAD: was `{ workspace = true }`
+cadcraft-dxf = { path = "../cadcraft-dxf" } # TCI-CAD: was `{ workspace = true }`
+# TCI-CAD: `cadcraft-dwg` (the DWG bridge, acadrust MPL-2.0) removed; DWG is stubbed in src/lib.rs.
+cadcraft-render = { path = "../cadcraft-render" } # TCI-CAD: was `{ workspace = true }`
+cadcraft-fonts = { path = "../cadcraft-fonts" } # TCI-CAD: was `{ workspace = true }`
+thiserror = "2" # TCI-CAD: was `{ workspace = true }`
+serde_json = { version = "1", features = ["float_roundtrip"] } # TCI-CAD: was `{ workspace = true }`
+serde = { version = "1", features = ["derive", "rc"] } # TCI-CAD: was `{ workspace = true }`
+miniz_oxide = "0.9"
+craft-pdf = { path = "../../vendor/craft-pdf", default-features = false, features = ["write"] } # TCI-CAD: was craft-libs git @ 9f89fe8f (workspace)
+quick-xml = "0.42" # TCI-CAD: was `{ workspace = true }`
+
+[dev-dependencies]
+# TCI-CAD: the `acadrust` dev-dependency (MPL-2.0) removed with the DWG bridge.
+tiny-skia = { version = "0.12", default-features = false, features = ["std", "simd", "png-format"] } # TCI-CAD: was `{ workspace = true }`
+# Reads plotted PDFs back.
+craft-pdf = { path = "../../vendor/craft-pdf", default-features = false, features = ["read"] } # TCI-CAD: was craft-libs git @ 9f89fe8f (workspace)

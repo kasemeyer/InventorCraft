@@ -1,0 +1,14 @@
+[package]
+name = "cadcraft-fonts"
+description = "CADCraft text: the built-in single-stroke drafting font and TEXT/MTEXT layout"
+version = "0.13.0" # TCI-CAD: was `version.workspace = true` (CADCraft root Cargo.toml at d864a08b)
+edition = "2024" # TCI-CAD: was `edition.workspace = true`
+license = "MIT OR Apache-2.0" # TCI-CAD: was `license.workspace = true`
+
+# TCI-CAD: `[lints] workspace = true` dropped (CADCraft's workspace lints are not ours).
+
+[dependencies]
+cadcraft-geom = { path = "../cadcraft-geom" } # TCI-CAD: was `{ workspace = true }`
+skrifa = "0.48" # TCI-CAD: was `{ workspace = true }`
+harfrust = "0.14" # TCI-CAD: was `{ workspace = true }`
+unicode-bidi = "0.3.18" # TCI-CAD: was `{ workspace = true }`
