@@ -103,6 +103,10 @@ fn go_to(s: &mut Session, snap: Snapshot) -> Snapshot {
     // Undoing a hide (or a show) leaves the document alone: the model needs no evaluating.
     let display_only = same && s.visibility != snap.visibility;
     s.doc = snap.doc;
+    // The active drawing sheet is view state: undoing `drawing.sheet.add` clamps it (R7).
+    if let Some(m) = s.doc.drawing.as_deref() {
+        s.drawing_sheet = s.drawing_sheet.min(m.sheets.len().saturating_sub(1));
+    }
     s.active_sketch = snap.active_sketch;
     s.pending_moves = snap.pending_moves;
     s.visibility = snap.visibility;

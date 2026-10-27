@@ -45,6 +45,17 @@ pub fn default_drawing_path(model_path: &str) -> String {
     format!("{}.{}", &model_path[..stem_end], DocumentKind::Drawing.extension())
 }
 
+/// What sets a computed title block field (`COMPUTED_FIELDS`), named in any case; None for the
+/// others.
+fn computed_by(key: &str) -> Option<&'static str> {
+    let tag = key.to_ascii_uppercase();
+    COMPUTED_FIELDS.contains(&tag.as_str()).then_some(match tag.as_str() {
+        "SIZE" => "drawing.sheet.set_size",
+        "SCALE" => "the first base view's scale",
+        _ => "the sheet's number and the sheet count",
+    })
+}
+
 /// Sets the title block fields named in `given` (an object of `DrawingProps` fields, each text)
 /// on `props`; the computed fields (`COMPUTED_FIELDS`) are not properties and are refused.
 pub(crate) fn set_properties(props: &mut DrawingProps, given: &Value, cmd: &str) -> Result<()> {
@@ -54,9 +65,11 @@ pub(crate) fn set_properties(props: &mut DrawingProps, given: &Value, cmd: &str)
     let mut current = serde_json::to_value(&*props).map_err(|e| EngineError::Other(format!("{cmd}: {e}")))?;
     let Some(fields) = current.as_object_mut() else { return Err(EngineError::Other(format!("{cmd}: the title block fields are not an object"))) };
     for (key, value) in given {
+        if let Some(why) = computed_by(key) {
+            return Err(crate::params::bad(cmd, format!("{} is computed ({why})", key.to_ascii_uppercase())));
+        }
         if !fields.contains_key(key) {
-            let known: Vec<&str> = fields.keys().map(String::as_str).collect();
-            return Err(crate::params::bad(cmd, format!("no title block field `{key}` (the fields: {})", known.join(", "))));
+            return Err(crate::params::bad(cmd, format!("unknown title block field {key}")));
         }
         let Some(text) = value.as_str() else { return Err(crate::params::bad(cmd, format!("`properties.{key}` must be text"))) };
         fields.insert(key.clone(), Value::String(text.to_string()));

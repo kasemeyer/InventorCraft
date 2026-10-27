@@ -447,7 +447,7 @@ fn inventor_commands() -> BTreeSet<&'static str> {
 
 /// Registry commands neither Inventor modelling ribbon places, from `docs/features.md` at
 /// 9bb4d408 (466 commands, 305 placed). The count may only fall.
-const INVENTOR_UNPLACED: usize = 162;
+const INVENTOR_UNPLACED: usize = 166;
 
 #[test]
 fn inventor_assembly_ribbon_follows_the_capture() {

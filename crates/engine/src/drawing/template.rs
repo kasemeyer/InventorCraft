@@ -184,6 +184,50 @@ pub(crate) fn add_sheet(m: &mut DrawingModel, size: AnsiSize, landscape: bool) -
     index
 }
 
+/// Makes sheet `index` a `size` sheet: its page's paper and size, its border insert pointed at
+/// that size's border block and its title block moved to the new lower-right corner, both through
+/// `modify_entity`, so the sheet keeps its handles. The fields are not refreshed (the caller runs
+/// [`refresh_title_blocks`]). Err names what was missing.
+pub(crate) fn resize_sheet(m: &mut DrawingModel, index: usize, size: AnsiSize, landscape: bool) -> Result<(), String> {
+    let Some(sheet) = m.sheets.get(index).cloned() else { return Err(format!("sheet {index} does not exist ({} sheets)", m.sheets.len())) };
+    let border = ensure_border(&mut m.paper, size, landscape);
+    let fresh = page(size, landscape);
+    let Some(layout) = m.paper.layouts.iter_mut().find(|l| l.name == sheet.layout) else {
+        return Err(format!("sheet {index} has no layout {}", sheet.layout));
+    };
+    // The paper only: the layout's other plot settings stay as they were.
+    layout.page.paper = fresh.paper;
+    layout.page.width_mm = fresh.width_mm;
+    layout.page.height_mm = fresh.height_mm;
+    layout.page.landscape = fresh.landscape;
+    m.paper
+        .modify_entity(sheet.border, |e| {
+            if let EntityKind::Insert(ins) = &mut e.kind {
+                ins.block.clone_from(&border);
+            }
+        })
+        .map_err(|e| format!("sheet {index}'s border: {e}"))?;
+    let (w, _) = size.inches(landscape);
+    let at = Vec3::new(w - BORDER_INSET_IN, BORDER_INSET_IN, 0.0);
+    m.paper
+        .modify_entity(sheet.title_block, |e| {
+            if let EntityKind::Insert(ins) = &mut e.kind {
+                let by = at - ins.insert;
+                ins.insert = at;
+                for a in &mut ins.attribs {
+                    a.text.insert = a.text.insert + by;
+                    a.text.align_pt = a.text.align_pt.map(|q| q + by);
+                }
+            }
+        })
+        .map_err(|e| format!("sheet {index}'s title block: {e}"))?;
+    if let Some(meta) = m.sheets.get_mut(index) {
+        meta.size = size;
+        meta.landscape = landscape;
+    }
+    Ok(())
+}
+
 /// Every sheet's title block attributes from `properties`, the sheet and the views: SIZE the
 /// sheet's letter, SHEET "<n> OF <m>", SCALE the first base view's scale (empty until one
 /// exists), the others the `DrawingProps` field named by the tag in lower case.
@@ -248,7 +292,7 @@ fn insert(block: &str, at: Vec3, attribs: Vec<Attrib>) -> Insert {
 /// The page setup of an ANSI sheet: the paper in millimetres as CADCraft keeps them, the portrait
 /// media size (width the short side) plus the `landscape` flag (R46): the DXF writer emits the
 /// media and the rotation, and the reader takes `landscape = rotated != (w > h)`.
-fn page(size: AnsiSize, landscape: bool) -> PageSetup {
+pub(crate) fn page(size: AnsiSize, landscape: bool) -> PageSetup {
     let (a, b) = size.inches(landscape);
     let (w, h) = (a.min(b), a.max(b));
     let paper = cadcraft_render::paper_size(&format!("ANSI {}", size.letter())).map_or_else(String::new, |p| p.name.to_string());
@@ -315,7 +359,7 @@ fn text(value: &str, at: [f64; 2], height: f64, halign: HAlign, valign: VAlign) 
 /// top and bottom and zone letters down both sides, from `zones()`, numbered from the right and
 /// lettered from the bottom (ASME Y14.1), between ticks into the margin; centring marks mid-side.
 /// Drawn in sheet coordinates (base point the sheet's lower-left corner). Returns its name.
-fn ensure_border(p: &mut Drawing, size: AnsiSize, landscape: bool) -> String {
+pub(crate) fn ensure_border(p: &mut Drawing, size: AnsiSize, landscape: bool) -> String {
     let name = border_name(size, landscape);
     if p.block(&name).is_some() {
         return name;

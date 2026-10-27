@@ -162,8 +162,8 @@ fn new_from_a_model_fills_the_title_block() {
     assert!(today.chars().enumerate().all(|(i, c)| if i == 4 || i == 7 { c == '-' } else { c.is_ascii_digit() }), "{today}");
     // A field the title block doesn't have is refused, and so is a value that isn't text.
     let mut t = Session::default();
-    assert!(err(&mut t, "drawing.new", json!({"properties": {"qa": "x"}})).contains("no title block field `qa`"));
-    assert!(err(&mut t, "drawing.new", json!({"properties": {"size": "E"}})).contains("no title block field `size`"));
+    assert!(err(&mut t, "drawing.new", json!({"properties": {"qa": "x"}})).contains("unknown title block field qa"));
+    assert!(err(&mut t, "drawing.new", json!({"properties": {"size": "E"}})).contains("SIZE is computed (drawing.sheet.set_size)"));
     assert!(err(&mut t, "drawing.new", json!({"properties": {"rev": 2}})).contains("`properties.rev` must be text"));
     assert_eq!(t.doc.kind, DocumentKind::Assembly, "a refused drawing.new leaves the design as it was");
     let _ = std::fs::remove_dir_all(dir);
