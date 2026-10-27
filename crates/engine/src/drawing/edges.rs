@@ -11,7 +11,8 @@
 //!   triangle (`EdgeKind::Silhouette`); it is named after that face's whole surface: the pieces
 //!   joined to it across hidden seams (`Mesh::surface_patch`; a cylinder's side is two halves),
 //!   by the piece name that sorts first (R49). `k` numbers that surface's silhouettes in the view
-//!   by the projected x of their midpoints, then y.
+//!   by the projected x of their midpoints, then y; a silhouette is all its collinear end-to-end
+//!   pieces, hidden or not, so an occluder that splits one renumbers none (R53).
 //! - A tangent edge (`Mesh::smooth_edges`) is drawn, as a `Brep` line with `smooth` set, so a
 //!   view can leave it out (R48); an export never draws it.
 // Drawing views (Task 6) are the first caller outside the tests.
@@ -34,7 +35,7 @@ pub enum EdgeSource {
     /// A B-rep edge, by its persistent name.
     Brep { component_path: Vec<u64>, body_name: String, edge_name: String },
     /// A silhouette of a curved face, which depends on the view: `k` numbers one face's
-    /// silhouettes by the projected x of their midpoints, then y. A surface the kernel splits
+    /// whole silhouettes (all pieces, R53) by the projected x of their midpoints, then y. A surface the kernel splits
     /// into pieces joined across hidden seams (a cylinder's two halves) is one face here, named
     /// after its piece whose name sorts first.
     Silhouette { component_path: Vec<u64>, body_name: String, face_name: String, k: u32 },
@@ -119,7 +120,9 @@ fn name_lines(model: &Session, scene: &Scene, lines: Vec<Line>) -> Result<Vec<So
             surfaces.insert((line.source.placement, face), named.surface(face).ok_or_else(|| lost("a silhouette's face"))?);
         }
     }
-    // k: one face's silhouettes in order of their midpoints' x, then y.
+    // k: one surface's silhouettes in order of their midpoints' x, then y. A silhouette is a
+    // surface's collinear end-to-end pieces, hidden or not (R53), so an occluder that splits
+    // one does not renumber the others; all its pieces share its `k`.
     let mut silhouettes: BTreeMap<(u32, &str), Vec<usize>> = BTreeMap::new();
     for (n, line) in lines.iter().enumerate() {
         if let EdgeKind::Silhouette { face } = line.source.kind
@@ -129,15 +132,19 @@ fn name_lines(model: &Session, scene: &Scene, lines: Vec<Line>) -> Result<Vec<So
         }
     }
     let mut k = vec![0u32; lines.len()];
-    for members in silhouettes.values_mut() {
-        let mid = |n: &usize| lines.get(*n).map_or(Vec2::ZERO, |l| (l.a + l.b) * 0.5);
-        members.sort_by(|a, b| {
-            let (p, q) = (mid(a), mid(b));
-            p.x.total_cmp(&q.x).then(p.y.total_cmp(&q.y)).then(a.cmp(b))
-        });
-        for (rank, n) in members.iter().enumerate() {
-            if let Some(slot) = k.get_mut(*n) {
-                *slot = u32::try_from(rank).map_err(|_| lost("a silhouette"))?;
+    for members in silhouettes.values() {
+        let pieces: Vec<(Vec2, Vec2)> = members.iter().map(|n| lines.get(*n).map_or((Vec2::ZERO, Vec2::ZERO), |l| (l.a, l.b))).collect();
+        let mut groups: Vec<(Vec2, Vec<usize>)> = whole_silhouettes(&pieces)
+            .into_iter()
+            .map(|g| (silhouette_mid(&pieces, &g), g.into_iter().filter_map(|i| members.get(i).copied()).collect()))
+            .collect();
+        groups.sort_by(|(p, a), (q, b)| p.x.total_cmp(&q.x).then(p.y.total_cmp(&q.y)).then(a.cmp(b)));
+        for (rank, (_, group)) in groups.iter().enumerate() {
+            let rank = u32::try_from(rank).map_err(|_| lost("a silhouette"))?;
+            for n in group {
+                if let Some(slot) = k.get_mut(*n) {
+                    *slot = rank;
+                }
             }
         }
     }
@@ -160,4 +167,54 @@ fn name_lines(model: &Session, scene: &Scene, lines: Vec<Line>) -> Result<Vec<So
         out.push(SourcedLine { a: line.a, b: line.b, hidden: line.hidden, source, mesh_edge, smooth });
     }
     Ok(out)
+}
+
+/// Two pieces closer than this (mm) to each other's line, and end to end within it, are one
+/// silhouette.
+const SAME_SILHOUETTE_MM: f64 = 1e-6;
+
+/// The pieces of one surface's silhouettes grouped into whole silhouettes: collinear pieces
+/// that touch or overlap end to end (R53). Each group lists piece indices in ascending order.
+fn whole_silhouettes(pieces: &[(Vec2, Vec2)]) -> Vec<Vec<usize>> {
+    let joined = |(a, b): (Vec2, Vec2), (c, d): (Vec2, Vec2)| {
+        let Some(dir) = (b - a).normalized() else { return a.dist(c) <= SAME_SILHOUETTE_MM || a.dist(d) <= SAME_SILHOUETTE_MM };
+        let off = |p: Vec2| (p - a).cross(dir).abs();
+        if off(c) > SAME_SILHOUETTE_MM || off(d) > SAME_SILHOUETTE_MM {
+            return false;
+        }
+        let (s, t) = ((c - a).dot(dir), (d - a).dot(dir));
+        let len = (b - a).dot(dir);
+        s.max(t) >= -SAME_SILHOUETTE_MM && s.min(t) <= len + SAME_SILHOUETTE_MM
+    };
+    let mut root: Vec<usize> = (0..pieces.len()).collect();
+    fn find(root: &mut [usize], mut i: usize) -> usize {
+        while let Some(&r) = root.get(i).filter(|r| **r != i) {
+            i = r;
+        }
+        i
+    }
+    for (i, p) in pieces.iter().enumerate() {
+        for (j, q) in pieces.iter().enumerate().skip(i + 1) {
+            if joined(*p, *q) && joined(*q, *p) {
+                let (ri, rj) = (find(&mut root, i), find(&mut root, j));
+                if let Some(slot) = root.get_mut(ri.max(rj)) {
+                    *slot = ri.min(rj);
+                }
+            }
+        }
+    }
+    let mut groups: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+    for i in 0..pieces.len() {
+        groups.entry(find(&mut root, i)).or_default().push(i);
+    }
+    groups.into_values().collect()
+}
+
+/// The midpoint of a whole silhouette: halfway between its two outermost piece ends.
+fn silhouette_mid(pieces: &[(Vec2, Vec2)], group: &[usize]) -> Vec2 {
+    let ends: Vec<Vec2> = group.iter().filter_map(|i| pieces.get(*i)).flat_map(|(a, b)| [*a, *b]).collect();
+    let Some(&first) = ends.first() else { return Vec2::ZERO };
+    let far = |from: Vec2| ends.iter().copied().max_by(|p, q| p.dist(from).total_cmp(&q.dist(from))).unwrap_or(from);
+    let a = far(first);
+    (a + far(a)) * 0.5
 }

@@ -278,3 +278,34 @@ fn tangent_edges_reach_the_drawing_path_flagged() {
         );
     }
 }
+
+/// R53: an occluder that splits one silhouette into pieces does not renumber the silhouettes:
+/// `k` ranks whole silhouettes (a surface's collinear end-to-end pieces, hidden or not).
+#[test]
+fn silhouette_ids_survive_an_occluder() {
+    let cam = camera(StandardView::Front, Vec3::new(0., 0., 20.));
+    let silhouettes = |s: &Session| -> BTreeMap<String, Vec<SourcedLine>> {
+        sourced_lines(s, &cam, TOLERANCE).unwrap().into_iter().filter(|l| matches!(l.source, EdgeSource::Silhouette { .. })).fold(
+            BTreeMap::new(),
+            |mut m, l| {
+                m.entry(l.source.model_edge_id()).or_insert_with(Vec::new).push(l);
+                m
+            },
+        )
+    };
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"diameter": 20, "height": 40}));
+    let before = silhouettes(&s);
+    let ids = ["0/Body1/s/F1:side#1/0", "0/Body1/s/F1:side#1/1"];
+    assert_eq!(before.keys().map(String::as_str).collect::<Vec<_>>(), ids);
+    // A box in front of the left silhouette's middle (x -15..-5, z 15..25) hides that part.
+    run(&mut s, "solid.box", json!({"length": 10, "width": 5, "height": 10, "corner": [-15, -30, 15], "body_name": "Cover"}));
+    let after = silhouettes(&s);
+    assert_eq!(after.keys().map(String::as_str).collect::<Vec<_>>(), ids, "{after:?}");
+    let left = &after[ids[0]];
+    assert_eq!(left.len(), 3, "{left:?}");
+    assert_eq!(left.iter().filter(|l| l.hidden).count(), 1, "{left:?}");
+    assert!(left.iter().all(|l| (l.a.x + 10.).abs() < 0.1 && (l.b.x + 10.).abs() < 0.1), "{left:?}");
+    let right = &after[ids[1]];
+    assert!(right.len() == 1 && !right[0].hidden && (right[0].a.x - 10.).abs() < 0.1, "{right:?}");
+}
