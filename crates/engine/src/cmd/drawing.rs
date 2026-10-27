@@ -225,3 +225,7 @@ mod drawing_sheet_tests;
 #[cfg(test)]
 #[path = "drawing_edges_tests.rs"]
 mod drawing_edges_tests;
+
+#[cfg(test)]
+#[path = "drawing_projection_tests.rs"]
+mod drawing_projection_tests;

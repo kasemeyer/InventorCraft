@@ -218,3 +218,30 @@ fn silhouette_mid(pieces: &[(Vec2, Vec2)], group: &[usize]) -> Vec2 {
     let a = far(first);
     (a + far(a)) * 0.5
 }
+
+/// Numbers the silhouettes in `lines` again, by the rule `sourced_lines` uses (whole
+/// silhouettes of one surface by their midpoints' x, then y; R53): for a caller that moved or
+/// dropped silhouette pieces (`drawing::project` snaps them to the exact surface, R52).
+pub(crate) fn renumber_silhouettes(lines: &mut [SourcedLine]) {
+    let mut surfaces: BTreeMap<(Vec<u64>, String, String), Vec<usize>> = BTreeMap::new();
+    for (n, line) in lines.iter().enumerate() {
+        if let EdgeSource::Silhouette { component_path, body_name, face_name, .. } = &line.source {
+            surfaces.entry((component_path.clone(), body_name.clone(), face_name.clone())).or_default().push(n);
+        }
+    }
+    for members in surfaces.values() {
+        let pieces: Vec<(Vec2, Vec2)> = members.iter().filter_map(|n| lines.get(*n)).map(|l| (l.a, l.b)).collect();
+        let mut groups: Vec<(Vec2, Vec<usize>)> = whole_silhouettes(&pieces)
+            .into_iter()
+            .map(|g| (silhouette_mid(&pieces, &g), g.into_iter().filter_map(|i| members.get(i).copied()).collect()))
+            .collect();
+        groups.sort_by(|(p, a), (q, b)| p.x.total_cmp(&q.x).then(p.y.total_cmp(&q.y)).then(a.cmp(b)));
+        for (rank, (_, group)) in groups.iter().enumerate() {
+            for n in group {
+                if let Some(EdgeSource::Silhouette { k, .. }) = lines.get_mut(*n).map(|l| &mut l.source) {
+                    *k = u32::try_from(rank).unwrap_or(u32::MAX);
+                }
+            }
+        }
+    }
+}

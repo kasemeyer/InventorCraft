@@ -4,6 +4,7 @@
 //! block fields.
 
 pub(crate) mod edges;
+pub(crate) mod project;
 pub mod template;
 
 use std::sync::Arc;
@@ -11,6 +12,7 @@ use std::sync::Arc;
 use serde_json::Value;
 use solidcraft_doc::{DocumentKind, DrawingModel, DrawingProps};
 
+pub use project::{PaperCurve, camera_for};
 pub use template::*;
 
 use crate::{EngineError, Result, Session};
