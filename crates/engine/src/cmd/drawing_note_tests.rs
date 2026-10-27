@@ -567,3 +567,29 @@ fn remove_attached_counts_the_notes() {
     let others: BTreeSet<u64> = [v + 100].into_iter().collect();
     assert_eq!(crate::drawing::notes::remove_attached(&mut paper, &others), 0);
 }
+
+/// Final wave 28: the hole is found by the edge's own faces, split on the body's face names. A
+/// round on the hole's rim names the bore in its face name (`F4:blend:F1:-y|F2:bore:side:0`),
+/// so the rim the front view shows after it, `F1:+y|F4:blend:F1:-y|F2:bore:side:0`, held `F2:`
+/// and read as the hole; its faces are the back face and the round, so it is not a hole's edge.
+#[test]
+fn a_round_on_the_rim_is_not_the_hole() {
+    let (mut s, block, v) = front("a_round_on_the_rim_is_not_the_hole");
+    edit_model(&block, &[("solid.fillet", json!({"edges": [[9.525, 0, 38.1]], "radius": 1}))]);
+    run(&mut s, "drawing.update", json!({}));
+    let rim = edge_at(&s, v, [10.375, 8.0]);
+    assert_eq!(rim, "0/Block/e/F1:+y|F4:blend:F1:-y|F2:bore:side:0");
+    let undo = s.undo.len();
+    assert_eq!(bad_message(s.execute("drawing.note.hole", &json!({"view": v, "edge": rim, "placement": [12, 10]}))), "pick the edge of a hole");
+    assert_eq!(s.undo.len(), undo);
+}
+
+#[test]
+fn edge_names_split_on_whole_face_names() {
+    use crate::drawing::notes::edge_faces;
+    let known: std::collections::BTreeSet<&str> = ["F1:-y", "F2:bore:side:0", "F4:blend:F1:-y|F2:bore:side:0"].into_iter().collect();
+    assert_eq!(edge_faces("F1:-y|F4:blend:F1:-y|F2:bore:side:0", &known), ["F1:-y", "F4:blend:F1:-y|F2:bore:side:0"]);
+    assert_eq!(edge_faces("F2:bore:side:0|F4:blend:F1:-y|F2:bore:side:0~2", &known), ["F2:bore:side:0", "F4:blend:F1:-y|F2:bore:side:0"]);
+    assert_eq!(edge_faces("F1:-y|F2:bore:side:0", &known), ["F1:-y", "F2:bore:side:0"]);
+    assert!(edge_faces("F1:+z|F9:x", &known).is_empty());
+}

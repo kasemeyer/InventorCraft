@@ -337,18 +337,40 @@ pub(crate) fn follow(paper: &mut Drawing) -> usize {
     moves.len()
 }
 
-/// The ids of the features whose faces name the model edge `edge`: the `F<id>:` that starts
-/// each of its `|`-separated face names (after `/e/`, or `/s/` for a silhouette).
-fn feature_ids(edge: &str) -> Vec<u64> {
-    let faces = ["/e/", "/s/"].iter().filter_map(|m| edge.find(m).map(|i| &edge[i + m.len()..])).next().unwrap_or(edge);
-    faces
-        .split('|')
-        .filter_map(|f| {
-            let rest = f.strip_prefix('F')?;
-            let (id, _) = rest.split_once(':')?;
-            id.parse().ok()
+/// The ids of the features whose own faces bound the model edge `edge`
+/// (`"{path}/{body}/e/{faceA}|{faceB}[~k]"`), or are the face of a silhouette
+/// (`"{path}/{body}/s/{face}/{k}"`): the `F<id>:` that starts each face's name. A face name may
+/// hold `|` itself (a fillet's names the faces it blends, `F4:blend:F1:+z|F2:bore:side:0`), so
+/// the edge name is split where both sides are face names of the body (`model`'s); the faces a
+/// fillet blends are not the edge's faces.
+fn feature_ids(model: &LoadedModel, edge: &str) -> Vec<u64> {
+    let id_of = |face: &str| -> Option<u64> { face.strip_prefix('F')?.split_once(':')?.0.parse().ok() };
+    let Some((head, name, silhouette)) = ["/e/", "/s/"].iter().find_map(|m| edge.split_once(m).map(|(h, n)| (h, n, *m == "/s/"))) else {
+        return Vec::new();
+    };
+    if silhouette {
+        return name.rsplit_once('/').and_then(|(face, _)| id_of(face)).into_iter().collect();
+    }
+    let Some((_, body)) = head.split_once('/') else { return Vec::new() };
+    let world = model.session.world_state();
+    let Some(faces) = world.body(body).map(solidcraft_doc::naming::face_names) else { return Vec::new() };
+    let known: BTreeSet<&str> = faces.iter().map(String::as_str).collect();
+    edge_faces(name, &known).into_iter().filter_map(id_of).collect()
+}
+
+/// The two faces of an edge named `name` (`{faceA}|{faceB}`, then `~k` when repeated), split
+/// where both sides are in `known`; none when no split is.
+pub(crate) fn edge_faces<'a>(name: &'a str, known: &BTreeSet<&str>) -> Vec<&'a str> {
+    let name = match name.rsplit_once('~') {
+        Some((base, k)) if !k.is_empty() && k.bytes().all(|b| b.is_ascii_digit()) => base,
+        _ => name,
+    };
+    name.match_indices('|')
+        .find_map(|(i, _)| {
+            let (a, b) = (name.get(..i)?, name.get(i + 1..)?);
+            (known.contains(a) && known.contains(b)).then(|| vec![a, b])
         })
-        .collect()
+        .unwrap_or_default()
 }
 
 /// The hole note for the hole feature whose face bounds `edge` (spec §2.8): `⌀<diameter>`, then
@@ -358,7 +380,7 @@ fn feature_ids(edge: &str) -> Vec<u64> {
 pub(crate) fn hole_note_text(model: &LoadedModel, edge: &str, style: &DimStyle) -> Result<String> {
     let doc = &model.session.doc;
     let not_a_hole = || crate::params::bad(HOLE_CMD, "pick the edge of a hole");
-    let hole = feature_ids(edge)
+    let hole = feature_ids(model, edge)
         .into_iter()
         .find_map(|id| doc.features.iter().find(|f| f.id == id && !f.suppressed && matches!(f.kind, FeatureKind::Hole { .. })))
         .ok_or_else(not_a_hole)?;
