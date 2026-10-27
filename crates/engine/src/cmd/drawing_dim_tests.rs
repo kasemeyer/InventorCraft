@@ -319,3 +319,72 @@ fn dimension_commands_need_a_drawing() {
         assert!(e.to_string().contains("the active document is not a drawing"), "{id}: {e}");
     }
 }
+
+/// R56: two arcs of one geometry under one (edge, segment) key take keys from their kind and
+/// arc order, so when the model feature that produced the first goes, the second never takes
+/// over the first's handle: the dimensions on both go sick, neither silently re-attaches.
+#[test]
+fn same_key_arcs_never_trade_handles() {
+    use crate::drawing::mapper;
+    use crate::drawing::project::{PaperCurve, ViewCurve, ViewGeometry};
+    use solidcraft_geom::Vec2 as MmVec2;
+
+    let (mut s, _, v) = front("same_key_arcs_never_trade_handles");
+    let arc = |start: f64, end: f64| ViewCurve {
+        edge: "0/Block/e/F9:rim".into(),
+        sources: vec!["0/Block/e/F9:rim".into()],
+        segment: 0,
+        hidden: false,
+        curve: PaperCurve::Arc { c: MmVec2::new(0.0, 0.0), r: 9.525, start, end },
+    };
+    // The first arc (from the feature that will go) is listed first.
+    let first = arc(0.0, 1.0);
+    let second = arc(3.0, 4.0);
+    let geometry = |curves: Vec<ViewCurve>| ViewGeometry { curves, min: MmVec2::new(-10.0, -10.0), max: MmVec2::new(10.0, 10.0) };
+    let both = geometry(vec![first.clone(), second.clone()]);
+    crate::drawing::edit(&mut s, "test", |m, _| {
+        let view = m.views.get(&v).unwrap().clone();
+        mapper::place(m, &view, &both);
+        Ok(())
+    })
+    .unwrap();
+    let arcs = |s: &Session| -> Vec<(Handle, f64)> {
+        let m = model(s);
+        let layout = m.paper.layout(&m.sheets[0].layout).unwrap();
+        layout
+            .entities
+            .iter()
+            .filter_map(|e| match &e.kind {
+                EntityKind::Arc(a) if xkey_of(e).is_some_and(|k| k.view == v) => Some((e.handle, a.start)),
+                _ => None,
+            })
+            .collect()
+    };
+    let placed = arcs(&s);
+    assert_eq!(placed.len(), 2, "{placed:?}");
+    let on_first = placed.iter().find(|(_, start)| start.abs() < 1e-9).unwrap().0;
+    let on_second = placed.iter().find(|(_, start)| (start - 3.0).abs() < 1e-9).unwrap().0;
+    let radius = |s: &mut Session, h: Handle| -> u64 {
+        let m = model(s);
+        let EntityKind::Arc(a) = &m.paper.entity(h).unwrap().kind else { panic!() };
+        let (c, r) = (a.center.xy(), a.radius);
+        let d = crate::drawing::dims::radial(&m.paper, h, c, r, false, c + cadcraft_geom::Vec2::new(1.0, 1.0), 1.0).unwrap();
+        let layout = m.sheets[0].layout.clone();
+        crate::drawing::edit(s, "test", |m, _| crate::drawing::dims::add(&mut m.paper, &layout, d)).unwrap().0
+    };
+    let dim_first = radius(&mut s, on_first);
+    let dim_second = radius(&mut s, on_second);
+    assert!(sick_dimensions(model(&s)).is_empty());
+    // The feature that produced the first arc is gone: only the second is projected.
+    let only_second = geometry(vec![second]);
+    crate::drawing::edit(&mut s, "test", |m, _| {
+        let view = m.views.get(&v).unwrap().clone();
+        mapper::place(m, &view, &only_second);
+        Ok(())
+    })
+    .unwrap();
+    let now = arcs(&s);
+    assert_eq!(now.len(), 1, "{now:?}");
+    assert!(now[0].0 != on_first, "the second arc took over the first arc's handle");
+    assert_eq!(sick_dimensions(model(&s)).into_iter().collect::<Vec<_>>(), [dim_first, dim_second]);
+}

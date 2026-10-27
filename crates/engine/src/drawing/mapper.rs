@@ -159,6 +159,68 @@ fn placed(m: &DrawingModel, layout: &str, view: ViewId) -> BTreeMap<XKey, Handle
         .unwrap_or_default()
 }
 
+/// The first bit of a bumped segment (R56): above every run index the projection makes.
+const BUMPED: u32 = 1 << 31;
+
+/// A curve kind's rank in a bumped segment (R56).
+fn kind_rank(c: &PaperCurve) -> u32 {
+    match c {
+        PaperCurve::Line { .. } => 0,
+        PaperCurve::Arc { .. } => 1,
+        PaperCurve::Circle { .. } => 2,
+        PaperCurve::Poly { .. } => 3,
+    }
+}
+
+/// Where a curve sorts among curves of its kind (an arc by its start angle, R56).
+fn order_key(c: &PaperCurve) -> [f64; 4] {
+    match c {
+        PaperCurve::Line { a, b } => [a.x, a.y, b.x, b.y],
+        PaperCurve::Arc { c, r, start, end } => [*start, *end, c.x + c.y, *r],
+        PaperCurve::Circle { c, r } => [c.x, c.y, *r, 0.0],
+        PaperCurve::Poly { points } => {
+            let p = points.first().copied().unwrap_or_default();
+            [p.x, p.y, points.len() as f64, 0.0]
+        }
+    }
+}
+
+/// The segment each curve's key uses (R56). A curve alone on its (edge, segment) uses that
+/// segment. Curves sharing one (a joined circle on a piece of its first edge, R51) all take
+/// bumped segments derived from their own kind and their order among the curves of that kind
+/// (arcs by start angle), never from the order of the curves: `BUMPED | kind << 28 | segment
+/// << 8 | rank`. So a regenerated piece can take over a handle only when it is the same
+/// geometry: when one of them goes, the other's key changes and the dimensions on both go
+/// sick instead of following the wrong curve.
+fn segments(curves: &[super::project::ViewCurve]) -> Vec<u32> {
+    let mut by_key: BTreeMap<(&str, u32), Vec<usize>> = BTreeMap::new();
+    for (i, c) in curves.iter().enumerate() {
+        by_key.entry((c.edge.as_str(), c.segment)).or_default().push(i);
+    }
+    let mut out: Vec<u32> = curves.iter().map(|c| c.segment).collect();
+    for ((_, segment), mut group) in by_key.into_iter().filter(|(_, g)| g.len() > 1) {
+        group.sort_by(|&i, &j| {
+            let (a, b) = (&curves[i], &curves[j]);
+            kind_rank(&a.curve)
+                .cmp(&kind_rank(&b.curve))
+                .then_with(|| {
+                    order_key(&a.curve).iter().zip(order_key(&b.curve)).fold(std::cmp::Ordering::Equal, |o, (x, y)| o.then(x.total_cmp(&y)))
+                })
+                .then(a.hidden.cmp(&b.hidden))
+        });
+        let mut rank: BTreeMap<u32, u32> = BTreeMap::new();
+        for i in group {
+            let kind = kind_rank(&curves[i].curve);
+            let r = rank.entry(kind).or_insert(0);
+            if let Some(slot) = out.get_mut(i) {
+                *slot = BUMPED | kind << 28 | segment.min(0xF_FFFF) << 8 | (*r).min(0xFF);
+            }
+            *r += 1;
+        }
+    }
+    out
+}
+
 /// Writes `g` for view `v` into its sheet's layout: modify_entity for keys that exist, Drawing::add for new
 /// keys, remove_entity for keys no longer produced; `v.group` then lists exactly the view's entities.
 ///
@@ -171,13 +233,12 @@ pub(crate) fn place(m: &mut DrawingModel, v: &DrawingView, g: &ViewGeometry) {
     let position = v.position;
     let mut members: Vec<Handle> = Vec::new();
     let mut produced: BTreeSet<XKey> = BTreeSet::new();
-    for curve in &g.curves {
-        // A key is unique per view: a curve whose (edge, segment) is taken (a joined circle on
-        // a piece of its first edge, R51) takes the edge's next free segment.
-        let mut segment = curve.segment;
+    for (curve, segment) in g.curves.iter().zip(segments(&g.curves)) {
         let mut key = XKey { view: v.id, edge: curve.edge.clone(), seg: Seg::Index(segment) };
+        // Only past the bumped keys' range (module `segments`): still unique, deterministic.
+        let mut segment = segment;
         while produced.contains(&key) {
-            segment = segment.saturating_add(1);
+            segment = segment.wrapping_add(1) | BUMPED;
             key.seg = Seg::Index(segment);
         }
         let kind = kind_of(&to_paper(&curve.curve, position, v.scale));
@@ -241,6 +302,11 @@ pub(crate) fn transform_view(m: &mut DrawingModel, v: &DrawingView, t: &Mat3) {
 /// `p -> to + (p - from) * k`: a view centred at `from` moved to `to` and scaled by `k`.
 pub(crate) fn move_and_scale(from: Vec2, to: Vec2, k: f64) -> Mat3 {
     Mat3::translate(PaperVec2::new(to.x, to.y)).then_before(Mat3::scale(k, k)).then_before(Mat3::translate(PaperVec2::new(-from.x, -from.y)))
+}
+
+/// The handles of every entity of view `v` (curves, marks, label).
+pub(crate) fn view_handles(m: &DrawingModel, v: &DrawingView) -> Vec<Handle> {
+    m.sheets.get(v.sheet).map(|s| all_of(m, &s.layout, v.id)).unwrap_or_default()
 }
 
 /// Removes every entity of view `v` and its group.

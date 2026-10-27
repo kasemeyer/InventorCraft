@@ -437,3 +437,67 @@ fn a_projected_view_moved_past_its_parent_keeps_its_projection() {
     run(&mut s, "drawing.view.set_position", json!({"view": v2, "position": [15, 3]}));
     assert!(near(position(&s, v2), [10.0, 3.0], 1e-6), "{:?}", position(&s, v2));
 }
+
+/// The dimensions of view `id`'s entities, by handle.
+fn dims_on(s: &Session, id: u64) -> BTreeSet<u64> {
+    let m = model(s);
+    let layout = m.paper.layout(&m.sheets[0].layout).unwrap();
+    layout
+        .entities
+        .iter()
+        .filter_map(|e| match &e.kind {
+            EntityKind::Dimension(d) if d.assoc.iter().any(|a| m.paper.entity(a.handle).and_then(|x| xkey_of(x)).is_some_and(|k| k.view == id)) => {
+                Some(e.handle.0)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// Every dimension on the sheet, by handle.
+fn all_dims(s: &Session) -> BTreeSet<u64> {
+    let m = model(s);
+    let layout = m.paper.layout(&m.sheets[0].layout).unwrap();
+    layout.entities.iter().filter(|e| matches!(e.kind, EntityKind::Dimension(_))).map(|e| e.handle.0).collect()
+}
+
+/// A dimension of the first straight edge of view `id`, placed `off` inches below it.
+fn dimension_first_line(s: &mut Session, id: u64) -> u64 {
+    let edge = curves(s, id)
+        .into_iter()
+        .find_map(|(h, _, k)| matches!(k, EntityKind::Line(_)).then(|| xkey_of(model(s).paper.entity(h).unwrap()).unwrap().edge))
+        .unwrap();
+    let r = run(s, "drawing.dim.general", json!({"view": id, "picks": [{"edge": edge}], "placement": [0.5, 0.5]}));
+    r["handle"].as_u64().unwrap()
+}
+
+/// R57: deleting a view deletes the dimensions on its entities and on its descendants', in the
+/// same undo step.
+#[test]
+fn deleting_a_view_deletes_its_dimensions() {
+    let (mut s, _, [v1, v2, v3]) = three_views("deleting_a_view_deletes_its_dimensions");
+    let dims: Vec<u64> = [v1, v2, v3].into_iter().map(|id| dimension_first_line(&mut s, id)).collect();
+    assert_eq!(all_dims(&s), dims.iter().copied().collect());
+    assert_eq!(dims_on(&s, v2), BTreeSet::from([dims[1]]));
+    let undo = s.undo.len();
+    run(&mut s, "drawing.view.delete", json!({"view": v1}));
+    assert_eq!(s.undo.len(), undo + 1);
+    assert!(all_dims(&s).is_empty(), "{:?}", all_dims(&s));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(all_dims(&s), dims.iter().copied().collect());
+    assert!(drawing_sick(&s).is_empty());
+}
+
+/// R57: with `keep`, the freed children keep their dimensions; only the deleted view's go.
+#[test]
+fn kept_children_keep_their_dimensions() {
+    let (mut s, _, [v1, v2, v3]) = three_views("kept_children_keep_their_dimensions");
+    let dims: Vec<u64> = [v1, v2, v3].into_iter().map(|id| dimension_first_line(&mut s, id)).collect();
+    run(&mut s, "drawing.view.delete", json!({"view": v1, "children": "keep"}));
+    assert_eq!(all_dims(&s), BTreeSet::from([dims[1], dims[2]]));
+    assert!(drawing_sick(&s).is_empty());
+}
+
+fn drawing_sick(s: &Session) -> BTreeSet<u64> {
+    crate::drawing::sick_dimensions(model(s))
+}

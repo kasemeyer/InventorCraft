@@ -56,7 +56,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          → view, identifier, label_visible",
     ),
     CommandSpec::new("drawing.view.delete", "Delete View", delete).icon("delete").params(
-        "view: a view id; children?: delete (default: the views projected from it go too) or keep (they become base views) → deleted: view ids, kept",
+        "view: a view id; children?: delete (default: the views projected from it go too) or keep (they become base views). The dimensions attached to a deleted view go with it → deleted: view ids, kept",
     ),
     CommandSpec::new("drawing.update", "Update Views", update).icon("update").params(
         "views?: view ids (default: every view whose model changed since it was drawn). Each is projected again from its model, its entities changed in place \
@@ -651,6 +651,14 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let kept: Vec<ViewId> = freed.iter().map(|v| v.id).collect();
     drawing::edit(s, cmd, |m, _| {
+        // R57: what is attached to the removed views' entities goes with them.
+        let mut gone = std::collections::BTreeSet::new();
+        for vid in &removed {
+            if let Some(v) = m.views.get(vid) {
+                gone.extend(mapper::view_handles(m, v));
+            }
+        }
+        drawing::dims::remove_attached(&mut m.paper, &gone);
         for vid in &removed {
             if let Some(v) = m.views.remove(vid) {
                 mapper::remove_view(m, &v);

@@ -156,6 +156,17 @@ pub fn sick_dimensions(m: &DrawingModel) -> BTreeSet<u64> {
     all_dimensions(&m.paper).filter(|(_, d)| assoc::is_sick(&m.paper, d)).map(|(e, _)| e.handle.0).collect()
 }
 
+/// Removes every dimension attached to one of `handles` (R57: a deleted view's dimensions go
+/// with it). Returns how many.
+pub(crate) fn remove_attached(paper: &mut Drawing, handles: &BTreeSet<Handle>) -> usize {
+    let gone: Vec<Handle> =
+        all_dimensions(paper).filter(|(_, d)| d.assoc.iter().any(|a| handles.contains(&a.handle))).map(|(e, _)| e.handle).collect();
+    for h in &gone {
+        paper.remove_entity(*h);
+    }
+    gone.len()
+}
+
 /// The view whose entity a dimension is attached to (the first attachment on a view entity).
 fn view_of_dimension(paper: &Drawing, d: &Dimension) -> Option<ViewId> {
     d.assoc.iter().find_map(|a| xkey_of(paper.entity(a.handle)?).map(|k| k.view))
