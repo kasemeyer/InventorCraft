@@ -145,7 +145,7 @@ fn a_hatch_in_a_block_keeps_its_boundary_and_the_boundary_its_reactor() {
     let back = read_dxf(join(&p).as_bytes()).expect("read");
     // TCI-CAD: the DWG leg removed (DWG bridge not vendored); the next line's array also held
     // TCI-CAD: `("dwg", &from_dwg)`.
-    for (what, back) in [("dxf", &back)] {
+    for (what, back) in [("dxf", &back)] { // TCI-CAD: DXF leg only (DWG removed)
         let blk = back.block("Tag").expect("block");
         let sources: Vec<Vec<Handle>> = blk
             .entities
