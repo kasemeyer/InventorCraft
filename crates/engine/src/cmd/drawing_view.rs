@@ -61,7 +61,9 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("drawing.update", "Update Views", update).icon("update").params(
         "views?: view ids (default: every view whose model changed since it was drawn). Each is projected again from its model, its entities changed in place \
-         → updated: view ids, orphans: dimensions whose edge is gone, missing: the stored paths of models not found (their views keep their entities)",
+         and a shaded view whose picture is missing or stale has it drawn again \
+         → updated: view ids, orphans: dimensions whose edge is gone, missing: the stored paths of models not found (their views keep their entities), \
+         rasters: {view id: fresh|stale|none} for each view drawn",
     ),
 ];
 
@@ -723,6 +725,7 @@ fn update(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let mut loads = Loads::default();
     let (mut missing, mut redraw): (Vec<String>, Vec<(DrawingView, std::sync::Arc<model_ref::LoadedModel>)>) = (Vec::new(), Vec::new());
+    let mut reshade: Vec<(DrawingView, std::sync::Arc<model_ref::LoadedModel>)> = Vec::new();
     for v in targets {
         match loads.get(s, &v.model) {
             None => {
@@ -731,23 +734,36 @@ fn update(s: &mut Session, p: &Value) -> Result<Value> {
                 }
             }
             Some(loaded) if asked.is_some() || loaded.revision != v.revision => redraw.push((v.clone(), loaded)),
+            // A shaded view whose model is unchanged but whose picture is missing or stale: its
+            // picture is drawn again (its curves are current).
+            Some(loaded) if v.shaded && !raster::fresh(m, v) => reshade.push((v.clone(), loaded)),
             Some(_) => {}
         }
     }
     let mut states = Redraws::default();
     let regenerated = redraw.into_iter().map(|(v, loaded)| redrawn(s, v, &loaded, cmd, &mut states)).collect::<Result<Vec<_>>>()?;
+    let mut reshaded = Vec::new();
+    for (mut v, loaded) in reshade {
+        let state = raster::refresh(s, Some(&loaded), &mut v);
+        states.rasters.insert(v.id, state);
+        // Still stale: nothing to change (no undo step).
+        if state == raster::FRESH {
+            reshaded.push(v);
+        }
+    }
     let texts = std::mem::take(&mut states.notes);
     let updated: Vec<ViewId> = regenerated.iter().map(|(v, _)| v.id).collect();
-    if !regenerated.is_empty() {
+    if !regenerated.is_empty() || !reshaded.is_empty() {
         drawing::edit(s, cmd, |m, _| {
-            install(m, Vec::new(), regenerated, &texts);
+            install(m, reshaded, regenerated, &texts);
             Ok(())
         })?;
     }
     model_ref::evict_unreferenced(s);
     // Dimensions whose view entity is gone (kept as they were, spec §4.5 "Orphans").
     let orphans = drawing::require(s, cmd).map(|m| drawing::sick_dimensions(m).len()).unwrap_or(0);
-    Ok(json!({"updated": updated, "orphans": orphans, "missing": missing}))
+    let rasters: serde_json::Map<String, Value> = states.rasters.iter().map(|(id, state)| (id.to_string(), json!(state))).collect();
+    Ok(json!({"updated": updated, "orphans": orphans, "missing": missing, "rasters": rasters}))
 }
 
 #[cfg(test)]

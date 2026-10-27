@@ -5,7 +5,7 @@
 //!   picture under its curves as a [`PageImage`] over [`raster_rect`]. The picture is drawn again
 //!   at [`PDF_PX_PER_IN`] when a rasterizer draws and the model is the one the view shows; else
 //!   the stored picture is used only when it is fresh: its pixel size is what the view draws now
-//!   at [`SCREEN_PX_PER_IN`] (within a pixel each way), so a stale picture is never stretched. A
+//!   at [`SCREEN_PX_PER_IN`](raster::SCREEN_PX_PER_IN) (within a pixel each way), so a stale picture is never stretched. A
 //!   view with no fresh picture prints as lines only.
 //! - **DXF:** one sheet's paper space through `cadcraft_io::write_with`, R2018 (default) or R2000.
 //!   Pictures are not written (they are not on the paper); entities the view styles suppress
@@ -14,24 +14,16 @@
 use cadcraft_doc::{Drawing, Space};
 use cadcraft_io::pdf::{PageImage, pdf_sheets_with_images};
 use cadcraft_io::{PdfOptions, SaveOptions, Version};
-use solidcraft_doc::{DrawingModel, DrawingView, RasterRef};
+use solidcraft_doc::{DrawingModel, DrawingView};
 
 use super::model_ref::Loads;
-use super::raster::{self, PDF_PX_PER_IN, SCREEN_PX_PER_IN, raster_rect};
+use super::raster::{self, PDF_PX_PER_IN, raster_rect};
 use crate::{EngineError, Result, Session};
 
 /// A written PDF: its bytes and how many pictures it holds.
 pub(crate) struct PdfOut {
     pub bytes: Vec<u8>,
     pub images: usize,
-}
-
-/// Whether `r`, the stored picture of `v`, is what `v` draws now: its pixel size is the size of
-/// `rect` (paper inches) at `SCREEN_PX_PER_IN`, within one pixel each way (the picture is framed
-/// on the model's mesh, the rectangle on the curves).
-fn fresh(r: &RasterRef, rect: [f64; 4]) -> bool {
-    let (w, h) = raster::pixel_size((rect[2] - rect[0]) * SCREEN_PX_PER_IN, (rect[3] - rect[1]) * SCREEN_PX_PER_IN);
-    r.width.abs_diff(w) <= 1 && r.height.abs_diff(h) <= 1
 }
 
 /// The picture of shaded view `v` for a PDF: drawn again at `PDF_PX_PER_IN` (a rasterizer draws
@@ -43,7 +35,7 @@ fn picture(s: &Session, loads: &mut Loads, v: &DrawingView, rect: [f64; 4]) -> O
     });
     match drawn {
         Some(r) => Some(r.png),
-        None => v.raster.as_ref().filter(|r| fresh(r, rect)).map(|r| r.png.clone()),
+        None => v.raster.as_ref().filter(|r| raster::fits(r, rect)).map(|r| r.png.clone()),
     }
 }
 

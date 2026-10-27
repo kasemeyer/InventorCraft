@@ -277,7 +277,7 @@ fn update_keeps_every_handle_when_the_hole_grows() {
     assert_eq!(stale_views(&s), ids);
     let undo = s.undo.len();
     let r = run(&mut s, "drawing.update", json!({}));
-    assert_eq!(r, json!({"updated": ids, "orphans": 0, "missing": []}));
+    assert_eq!(r, json!({"updated": ids, "orphans": 0, "missing": [], "rasters": {"1": "none", "2": "none", "3": "none"}}));
     assert_eq!(s.undo.len(), undo + 1);
     let after: Vec<BTreeSet<Handle>> = ids.iter().map(|id| handles(&s, *id)).collect();
     assert_eq!(after, before);
@@ -294,7 +294,7 @@ fn nothing_stale_nothing_updated() {
     run(&mut s, "drawing.update", json!({}));
     let (undo, doc) = (s.undo.len(), s.doc.clone());
     let r = run(&mut s, "drawing.update", json!({}));
-    assert_eq!(r, json!({"updated": [], "orphans": 0, "missing": []}));
+    assert_eq!(r, json!({"updated": [], "orphans": 0, "missing": [], "rasters": {}}));
     assert_eq!(s.undo.len(), undo);
     assert!(Arc::ptr_eq(&s.doc, &doc));
     assert_eq!(bad_message(s.execute("drawing.update", &json!({"views": [99]}))), "no view 99");
@@ -334,7 +334,7 @@ fn a_missing_model_keeps_the_stored_views() {
     assert!(stale_views(&s).is_empty());
     let undo = s.undo.len();
     let r = run(&mut s, "drawing.update", json!({}));
-    assert_eq!(r, json!({"updated": [], "orphans": 0, "missing": ["block.tcipart"]}));
+    assert_eq!(r, json!({"updated": [], "orphans": 0, "missing": ["block.tcipart"], "rasters": {}}));
     assert_eq!(s.undo.len(), undo);
     assert_eq!(ids.iter().map(|id| curves(&s, *id).len()).collect::<Vec<_>>(), counts);
 }
@@ -370,7 +370,7 @@ fn a_drawing_saved_elsewhere_still_finds_its_model() {
     run(&mut c, "doc.open", json!({"path": copy.join("out").join("drw.tcidrw").to_string_lossy()}));
     grow_the_hole(&copied_block);
     let r = run(&mut c, "drawing.update", json!({}));
-    assert_eq!(r, json!({"updated": ids, "orphans": 0, "missing": []}));
+    assert_eq!(r, json!({"updated": ids, "orphans": 0, "missing": [], "rasters": {"1": "none", "2": "none", "3": "none"}}));
     let (_, _, radius) = circle(&c, ids[0]);
     assert!((radius - 0.5).abs() <= 1e-9, "{radius}");
     // The original's model is untouched.

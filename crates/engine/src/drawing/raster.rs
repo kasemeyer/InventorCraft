@@ -175,6 +175,22 @@ pub(crate) fn refresh(s: &Session, model: Option<&LoadedModel>, v: &mut DrawingV
     }
 }
 
+/// Whether `r`, the stored picture of a view whose raster lies over `rect`, is what the view
+/// draws now: its pixel size is the size of `rect` (paper inches) at `SCREEN_PX_PER_IN`, within
+/// one pixel each way (the picture is framed on the model's mesh, the rectangle on the curves).
+pub(crate) fn fits(r: &RasterRef, rect: [f64; 4]) -> bool {
+    let (w, h) = pixel_size((rect[2] - rect[0]) * SCREEN_PX_PER_IN, (rect[3] - rect[1]) * SCREEN_PX_PER_IN);
+    r.width.abs_diff(w) <= 1 && r.height.abs_diff(h) <= 1
+}
+
+/// Whether shaded view `v` of `m` has a fresh picture ([`fits`] its [`raster_rect`]).
+pub(crate) fn fresh(m: &DrawingModel, v: &DrawingView) -> bool {
+    match (&v.raster, raster_rect(m, v)) {
+        (Some(r), Some(rect)) => fits(r, rect),
+        _ => false,
+    }
+}
+
 /// Where view `v`'s raster lies on its sheet, `[x0, y0, x1, y1]` in paper inches: the box of
 /// its visible curves (the picture frames the model as the curves do), drawn under them.
 pub fn raster_rect(m: &DrawingModel, v: &DrawingView) -> Option<[f64; 4]> {

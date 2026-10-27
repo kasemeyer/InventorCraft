@@ -295,3 +295,34 @@ fn the_default_rasterizer_is_the_installed_renderer() {
     }
     panic!("the test renderer was replaced every time");
 }
+
+/// Final wave 13: `drawing.update` with no `views` also draws again a shaded view whose picture
+/// is stale (its model unchanged), and reports each view's raster state; one still stale adds no
+/// undo step.
+#[test]
+fn update_draws_stale_pictures_again() {
+    let (mut s, block, rec) = recorded("update_draws_stale_pictures_again");
+    let (v1, _) = shaded_view(&mut s, &block, json!({}));
+    let keep = s.view_rasterizer.take();
+    let r = run(&mut s, "drawing.view.set_scale", json!({"view": v1, "scale": 0.5}));
+    assert_eq!(r["raster"], "stale");
+    assert_eq!(view(&s, v1).raster.as_ref().map(|r| (r.width, r.height)), Some((800, 600)));
+    // Nothing can draw: reported stale, nothing changed.
+    let undo = s.undo.len();
+    let r = run(&mut s, "drawing.update", json!({}));
+    assert_eq!(r, json!({"updated": [], "orphans": 0, "missing": [], "rasters": {v1.to_string(): "stale"}}));
+    assert_eq!(s.undo.len(), undo);
+    // With a rasterizer, it is drawn again at the new size: one undo step, curves untouched.
+    s.view_rasterizer = keep;
+    let before = handles(&s);
+    let r = run(&mut s, "drawing.update", json!({}));
+    assert_eq!(r, json!({"updated": [], "orphans": 0, "missing": [], "rasters": {v1.to_string(): "fresh"}}));
+    assert_eq!(s.undo.len(), undo + 1);
+    assert_eq!(view(&s, v1).raster.as_ref().map(|r| (r.width, r.height)), Some((400, 300)));
+    assert_eq!(rec.calls().iter().map(|c| (c.width, c.height)).collect::<Vec<_>>(), vec![(800, 600), (400, 300)]);
+    assert_eq!(handles(&s), before);
+    // Now fresh: nothing to do.
+    let r = run(&mut s, "drawing.update", json!({}));
+    assert_eq!(r["rasters"], json!({}));
+    assert_eq!((s.undo.len(), rec.calls().len()), (undo + 1, 2));
+}
