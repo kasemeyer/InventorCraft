@@ -143,17 +143,9 @@ fn name_lines(model: &Session, scene: &Scene, lines: Vec<Line>) -> Result<Vec<So
     let mut k = vec![0u32; lines.len()];
     for members in silhouettes.values() {
         let pieces: Vec<(Vec2, Vec2)> = members.iter().map(|n| lines.get(*n).map_or((Vec2::ZERO, Vec2::ZERO), |l| (l.a, l.b))).collect();
-        let mut groups: Vec<(Vec2, Vec<usize>)> = whole_silhouettes(&pieces)
-            .into_iter()
-            .map(|g| (silhouette_mid(&pieces, &g), g.into_iter().filter_map(|i| members.get(i).copied()).collect()))
-            .collect();
-        groups.sort_by(|(p, a), (q, b)| p.x.total_cmp(&q.x).then(p.y.total_cmp(&q.y)).then(a.cmp(b)));
-        for (rank, (_, group)) in groups.iter().enumerate() {
-            let rank = u32::try_from(rank).map_err(|_| lost("a silhouette"))?;
-            for n in group {
-                if let Some(slot) = k.get_mut(*n) {
-                    *slot = rank;
-                }
+        for (n, rank) in ranks(&pieces, members) {
+            if let Some(slot) = k.get_mut(n) {
+                *slot = rank;
             }
         }
     }
@@ -308,18 +300,28 @@ pub(crate) fn renumber_silhouettes(lines: &mut [SourcedLine]) {
         }
     }
     for members in surfaces.values() {
-        let pieces: Vec<(Vec2, Vec2)> = members.iter().filter_map(|n| lines.get(*n)).map(|l| (l.a, l.b)).collect();
-        let mut groups: Vec<(Vec2, Vec<usize>)> = whole_silhouettes(&pieces)
-            .into_iter()
-            .map(|g| (silhouette_mid(&pieces, &g), g.into_iter().filter_map(|i| members.get(i).copied()).collect()))
-            .collect();
-        groups.sort_by(|(p, a), (q, b)| p.x.total_cmp(&q.x).then(p.y.total_cmp(&q.y)).then(a.cmp(b)));
-        for (rank, (_, group)) in groups.iter().enumerate() {
-            for n in group {
-                if let Some(EdgeSource::Silhouette { k, .. }) = lines.get_mut(*n).map(|l| &mut l.source) {
-                    *k = u32::try_from(rank).unwrap_or(u32::MAX);
-                }
+        let pieces: Vec<(Vec2, Vec2)> = members.iter().map(|n| lines.get(*n).map_or((Vec2::ZERO, Vec2::ZERO), |l| (l.a, l.b))).collect();
+        for (n, rank) in ranks(&pieces, members) {
+            if let Some(EdgeSource::Silhouette { k, .. }) = lines.get_mut(n).map(|l| &mut l.source) {
+                *k = rank;
             }
         }
     }
+}
+
+/// One surface's silhouette pieces (`pieces[i]` is line `members[i]`) ranked by the rule of R53:
+/// whole silhouettes ([`whole_silhouettes`]) in order of their midpoints' x, then y; every piece
+/// of one gets its rank. Returns (line index, rank) per piece.
+fn ranks(pieces: &[(Vec2, Vec2)], members: &[usize]) -> Vec<(usize, u32)> {
+    let mut groups: Vec<(Vec2, Vec<usize>)> = whole_silhouettes(pieces)
+        .into_iter()
+        .map(|g| (silhouette_mid(pieces, &g), g.into_iter().filter_map(|i| members.get(i).copied()).collect()))
+        .collect();
+    groups.sort_by(|(p, a), (q, b)| p.x.total_cmp(&q.x).then(p.y.total_cmp(&q.y)).then(a.cmp(b)));
+    let mut out = Vec::with_capacity(members.len());
+    for (rank, (_, group)) in groups.into_iter().enumerate() {
+        let rank = u32::try_from(rank).unwrap_or(u32::MAX);
+        out.extend(group.into_iter().map(|n| (n, rank)));
+    }
+    out
 }
