@@ -20,12 +20,14 @@ use crate::{EngineError, Result, Session};
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("drawing.note.text", "Text", text).icon("text").params(
         "position: [x, y] in inches, where the text starts (its upper left corner); corner?: [x, y], the other corner of a box the text wraps in; \
-         text: what it says (a new line starts a line); height?: inches (default 0.12) → handle",
+         text: what it says (a new line starts a line); height?: inches (default 0.12); justify?: left, center or right (default left): the lines line up \
+         on the text's left side, centre or right side, `position` being its upper left, upper centre or upper right (with `corner`, in the box) → handle",
     ),
     CommandSpec::new("drawing.note.leader", "Leader Text", leader).icon("text").params(
         "points: two or more [x, y] in inches, the first the arrow end (a closed filled arrow), the text at the last; text: what it says; \
-         attach?: {view: a view id, edge: a model edge id the view shows (or {edge, segment?} or {at: [x, y]})}: the arrow end sits on that edge and follows it \
-         → handle: the leader, text_handle: its text",
+         attach?: {view: a view id, edge: a model edge id the view shows (or {edge, segment?} or {at: [x, y]})}: the arrow end sits on that edge and follows it; \
+         height?: inches (default 0.12); justify?: left, center or right: the text starts at, centres on or ends at the last point \
+         (default: starts there when the leader comes in from the left, ends there otherwise) → handle: the leader, text_handle: its text",
     ),
     CommandSpec::new("drawing.note.hole", "Hole and Thread Note", hole).icon("hole").params(
         "view: a view id; edge: the edge of a hole the view shows (a model edge id, {edge, segment?} or {at: [x, y]}); placement: [x, y] in inches, where the text goes. \
@@ -98,6 +100,30 @@ fn edge_entity(s: &Session, m: &DrawingModel, v: &DrawingView, p: &Value, key: &
     Ok(((**e).clone(), k))
 }
 
+/// The `height` param: inches, default [`NOTE_HEIGHT_IN`].
+fn height_param(p: &Value, cmd: &str) -> Result<f64> {
+    match p.get("height") {
+        None | Some(Value::Null) => Ok(NOTE_HEIGHT_IN),
+        Some(h) => h
+            .as_f64()
+            .filter(|h| h.is_finite() && *h > 0.0 && *h <= MAX_HEIGHT_IN)
+            .ok_or_else(|| bad(cmd, "`height` must be a number of inches above 0, at most 10")),
+    }
+}
+
+/// The `justify` param (R65): 0 left, 1 centre, 2 right; None when not given.
+fn justify_param(p: &Value, cmd: &str) -> Result<Option<u8>> {
+    match p.get("justify") {
+        None | Some(Value::Null) => Ok(None),
+        Some(j) => match j.as_str() {
+            Some("left") => Ok(Some(0)),
+            Some("center") => Ok(Some(1)),
+            Some("right") => Ok(Some(2)),
+            _ => Err(bad(cmd, "`justify` must be left, center or right")),
+        },
+    }
+}
+
 fn text(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "drawing.note.text";
     let m = drawing::require(s, cmd)?;
@@ -107,20 +133,19 @@ fn text(s: &mut Session, p: &Value) -> Result<Value> {
         Some(_) => Some(point(p, "corner", cmd)?),
     };
     let value = text_param(p, cmd)?;
-    let height = match p.get("height") {
-        None | Some(Value::Null) => NOTE_HEIGHT_IN,
-        Some(h) => h
-            .as_f64()
-            .filter(|h| h.is_finite() && *h > 0.0 && *h <= MAX_HEIGHT_IN)
-            .ok_or_else(|| bad(cmd, "`height` must be a number of inches above 0, at most 10"))?,
-    };
-    // Two corners: the box's upper left corner, its width.
+    let height = height_param(p, cmd)?;
+    let column = justify_param(p, cmd)?.unwrap_or(0);
+    // Two corners: the box's upper left, upper centre or upper right (by `justify`), its width.
     let (insert, width) = match corner {
-        Some(c) => (Vec2::new(at.x.min(c.x), at.y.max(c.y)), (c.x - at.x).abs()),
+        Some(c) => {
+            let width = (c.x - at.x).abs();
+            (Vec2::new(at.x.min(c.x) + width * f64::from(column) / 2.0, at.y.max(c.y)), width)
+        }
         None => (at, 0.0),
     };
     let layout = active_layout(s, m, cmd)?;
-    let note = notes::mtext(insert, height, width, 1, notes::contents(&value));
+    // MText attachment 1, 2, 3: top left, top centre, top right.
+    let note = notes::mtext(insert, height, width, 1 + column, notes::contents(&value));
     let h = drawing::edit(s, cmd, |m, _| notes::add_text(&mut m.paper, &layout, note))?;
     Ok(json!({"handle": h.0}))
 }
@@ -140,6 +165,7 @@ fn leader(s: &mut Session, p: &Value) -> Result<Value> {
         .map(|v| vec2(v).map(|q| Vec2::new(q.x, q.y)).ok_or_else(|| bad(cmd, "`points` must be a list of [x, y] points")))
         .collect::<Result<_>>()?;
     let value = text_param(p, cmd)?;
+    let text = notes::LeaderText { height: height_param(p, cmd)?, column: justify_param(p, cmd)? };
     let (layout, attach) = match p.get("attach") {
         None | Some(Value::Null) => (active_layout(s, m, cmd)?, None),
         Some(a @ Value::Object(_)) => {
@@ -155,7 +181,7 @@ fn leader(s: &mut Session, p: &Value) -> Result<Value> {
         Some(_) => return Err(bad(cmd, "`attach` must be {view, edge}")),
     };
     let (lh, th) =
-        drawing::edit(s, cmd, |m, _| notes::add_leader(&mut m.paper, &layout, &points, notes::contents(&value), NoteKind::Leader, attach, ""))?;
+        drawing::edit(s, cmd, |m, _| notes::add_leader(&mut m.paper, &layout, &points, notes::contents(&value), text, NoteKind::Leader, attach, ""))?;
     Ok(json!({"handle": lh.0, "text_handle": th.0}))
 }
 
@@ -175,7 +201,16 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
     let layout = layout_of(m, v, cmd)?;
     let attach = Attach { view: v.id, handle: e.handle, at };
     let (lh, _) = drawing::edit(s, cmd, |m, _| {
-        notes::add_leader(&mut m.paper, &layout, &[on, placement], notes::contents(&value), NoteKind::Hole, Some(attach), &key.edge)
+        notes::add_leader(
+            &mut m.paper,
+            &layout,
+            &[on, placement],
+            notes::contents(&value),
+            notes::LeaderText::default(),
+            NoteKind::Hole,
+            Some(attach),
+            &key.edge,
+        )
     })?;
     Ok(json!({"handle": lh.0, "text": value}))
 }

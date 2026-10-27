@@ -124,6 +124,58 @@ fn a_text_note_at_a_point() {
     assert_eq!(bad_message(s.execute("drawing.note.text", &json!({"position": [2, 2], "text": ""}))), "`text` must be some text");
 }
 
+/// R65: `justify` lines a text note up left (the default), centred or right, `position` then
+/// being its upper left, upper centre or upper right (MText attachment 1, 2, 3); with a box, the
+/// insert is the box's top left, top centre or top right.
+#[test]
+fn a_text_note_is_justified() {
+    let (mut s, _, _) = front("a_text_note_is_justified");
+    for (justify, attach) in [(Value::Null, 1), (json!("left"), 1), (json!("center"), 2), (json!("right"), 3)] {
+        let h = handle(&run(&mut s, "drawing.note.text", json!({"position": [2, 2], "text": "A\nBB", "justify": justify})));
+        let t = mtext(&s, h);
+        assert_eq!((t.attach, t.height, t.width), (attach, 0.12, 0.0), "{justify}");
+        assert!(near(t.insert.xy(), [2.0, 2.0]), "{justify}: {t:?}");
+    }
+    for (justify, attach, x) in [("left", 1, 2.0), ("center", 2, 4.0), ("right", 3, 6.0)] {
+        let h =
+            handle(&run(&mut s, "drawing.note.text", json!({"position": [6, 1], "corner": [2, 2], "text": "A", "justify": justify, "height": 0.2})));
+        let t = mtext(&s, h);
+        assert_eq!((t.attach, t.height), (attach, 0.2), "{justify}");
+        assert!(close(t.width, 4.0) && near(t.insert.xy(), [x, 2.0]), "{justify}: {t:?}");
+    }
+    let undo = s.undo.len();
+    for bad in [json!("middle"), json!(1), json!(true)] {
+        let r = s.execute("drawing.note.text", &json!({"position": [2, 2], "text": "A", "justify": bad}));
+        assert_eq!(bad_message(r), "`justify` must be left, center or right");
+    }
+    assert_eq!(s.undo.len(), undo);
+}
+
+/// R65: a leader's text takes `height` and `justify`: it starts at (middle left, attachment 4),
+/// centres on (5) or ends at (6) the last point; by default by the leader's direction.
+#[test]
+fn a_leader_note_is_justified() {
+    let (mut s, _, _) = front("a_leader_note_is_justified");
+    for (points, justify, attach) in [
+        (json!([[5, 5], [6, 6]]), Value::Null, 4),
+        (json!([[7, 5], [6, 6]]), Value::Null, 6),
+        (json!([[7, 5], [6, 6]]), json!("left"), 4),
+        (json!([[5, 5], [6, 6]]), json!("center"), 5),
+        (json!([[5, 5], [6, 6]]), json!("right"), 6),
+    ] {
+        let r = run(&mut s, "drawing.note.leader", json!({"points": points, "text": "X", "justify": justify}));
+        let (_, t) = leader(&s, handle(&r));
+        assert_eq!((t.attach, t.height), (attach, 0.12), "{points} {justify}");
+        assert!(near(t.insert.xy(), [6.0, 6.0]), "{t:?}");
+    }
+    let r = run(&mut s, "drawing.note.leader", json!({"points": [[5, 5], [6, 6]], "text": "X", "height": 0.25}));
+    assert_eq!(leader(&s, handle(&r)).1.height, 0.25);
+    let r = s.execute("drawing.note.leader", &json!({"points": [[5, 5], [6, 6]], "text": "X", "height": 0}));
+    assert_eq!(bad_message(r), "`height` must be a number of inches above 0, at most 10");
+    let r = s.execute("drawing.note.leader", &json!({"points": [[5, 5], [6, 6]], "text": "X", "justify": "up"}));
+    assert_eq!(bad_message(r), "`justify` must be left, center or right");
+}
+
 #[test]
 fn a_leader_note_has_a_filled_arrow() {
     let (mut s, _, _) = front("a_leader_note_has_a_filled_arrow");

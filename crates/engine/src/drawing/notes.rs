@@ -191,14 +191,31 @@ pub(crate) fn add_text(paper: &mut Drawing, layout: &str, text: MText) -> Result
     added(paper.add(&Space::Paper(layout.into()), on_note(&note), EntityKind::MText(text)))
 }
 
+/// How a leader note's text is set (R65).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct LeaderText {
+    /// Inches.
+    pub height: f64,
+    /// 0: the text starts at the last point, 1: centres on it, 2: ends at it; None: starts there
+    /// when the leader comes in from the left, ends there otherwise.
+    pub column: Option<u8>,
+}
+
+impl Default for LeaderText {
+    fn default() -> Self {
+        Self { height: NOTE_HEIGHT_IN, column: None }
+    }
+}
+
 /// Adds a leader note to `layout`: a Leader through `points` (the first the arrow end, at least
-/// two) and its MText at the last point, left or right of it by the last segment's direction.
-/// Returns (leader, text).
+/// two) and its MText at the last point, set by `style`. Returns (leader, text).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn add_leader(
     paper: &mut Drawing,
     layout: &str,
     points: &[Vec2],
     text: String,
+    style: LeaderText,
     kind: NoteKind,
     attach: Option<Attach>,
     edge: &str,
@@ -210,10 +227,11 @@ pub(crate) fn add_leader(
     let leader = Leader { vertices: points.iter().map(|p| v3(*p)).collect(), arrow: true, spline: false, style: DIM_STYLE.into() };
     let note = Note { kind, partner: None, attach, edge: edge.to_string() };
     let lh = added(paper.add(&space, on_note(&note), EntityKind::Leader(leader)))?;
-    // Middle left of the text when the leader comes in from the left, middle right otherwise.
-    let side = if last.x >= before.x { 4 } else { 6 };
+    // MText attachment 4, 5, 6: middle left, centre, right. By default middle left of the text
+    // when the leader comes in from the left, middle right otherwise.
+    let column = style.column.unwrap_or(if last.x >= before.x { 0 } else { 2 });
     let label = Note { kind: NoteKind::Label, partner: Some(lh), attach: None, edge: String::new() };
-    let th = added(paper.add(&space, on_note(&label), EntityKind::MText(mtext(last, NOTE_HEIGHT_IN, 0.0, side, text))))?;
+    let th = added(paper.add(&space, on_note(&label), EntityKind::MText(mtext(last, style.height, 0.0, 4 + column.min(2), text))))?;
     let tags = Note { partner: Some(th), ..note }.tags();
     paper.modify_entity(lh, |e| e.common.xdata = tags).map_err(|e| EngineError::Other(e.to_string()))?;
     Ok((lh, th))
