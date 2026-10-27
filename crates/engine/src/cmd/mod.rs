@@ -33,6 +33,7 @@ mod delete;
 mod diagnostics;
 mod document_kind;
 mod drawing;
+pub(crate) mod drawing_dim;
 pub(crate) mod drawing_view;
 mod edit;
 mod face;
@@ -305,6 +306,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(document_kind::COMMANDS.iter());
     v.extend(drawing::COMMANDS.iter());
     v.extend(drawing_view::COMMANDS.iter());
+    v.extend(drawing_dim::COMMANDS.iter());
     v.extend(project::COMMANDS.iter());
     v.extend(metadata::COMMANDS.iter());
     v.extend(inspect::COMMANDS.iter());

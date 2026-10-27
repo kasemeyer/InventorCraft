@@ -535,6 +535,7 @@ Editable drawing code, native projects and shipped exports are collected under `
 | crates/cadcraft-render/ (vendored) | CADCraft `crates/render` @ d864a08b013353143086bd8bb568c26cb6256796 | MIT OR Apache-2.0 |
 | crates/cadcraft-io/ (vendored; DWG bridge removed; PDF image patch comes with Task 9) | CADCraft `crates/io` @ d864a08b013353143086bd8bb568c26cb6256796 | MIT OR Apache-2.0 |
 | crates/cadcraft-{color,geom,dxf,fonts}/ (vendored) | CADCraft `crates/{color,geom,dxf,fonts}` @ d864a08b013353143086bd8bb568c26cb6256796 | MIT OR Apache-2.0 |
+| crates/engine/src/drawing/assoc.rs (associative dimension update) | CADCraft `crates/engine/src/assoc.rs` @ d864a08b013353143086bd8bb568c26cb6256796 | MIT OR Apache-2.0 |
 
 ## Incremental HDR codec adapter
 

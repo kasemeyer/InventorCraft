@@ -326,8 +326,6 @@ pub(crate) fn place_label(m: &mut DrawingModel, v: &DrawingView) {
 }
 
 /// The handle of the entity keyed `key`, on its view's sheet.
-// The dimension commands (Task 10) are its first caller outside the tests.
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn handle_of(m: &DrawingModel, key: &XKey) -> Option<cadcraft_doc::Handle> {
     let layout = m.sheets.get(m.views.get(&key.view)?.sheet)?.layout.as_str();
     m.paper.layout(layout)?.entities.iter().find(|e| xkey_of(e).as_ref() == Some(key)).map(|e: &std::sync::Arc<Entity>| e.handle)

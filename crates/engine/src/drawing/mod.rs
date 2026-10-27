@@ -3,6 +3,8 @@
 //! [`DrawingModel`]: its paper (a vendored CADCraft drawing, in inches), sheets, views and title
 //! block fields.
 
+pub(crate) mod assoc;
+pub mod dims;
 pub(crate) mod edges;
 pub(crate) mod mapper;
 pub(crate) mod model_ref;
@@ -17,6 +19,7 @@ use std::sync::Arc;
 use serde_json::Value;
 use solidcraft_doc::{DocumentKind, DrawingModel, DrawingProps};
 
+pub use dims::{VALUE_TOKEN, dimension_text, sick_dimensions};
 pub(crate) use model_ref::rebased_models;
 pub use model_ref::{ModelProvider, stale_views};
 pub use orient::{Projection, aligned_position, projected_orientation, projection_at};
@@ -37,15 +40,21 @@ pub(crate) fn require<'a>(s: &'a Session, cmd: &str) -> Result<&'a DrawingModel>
     }
 }
 
-/// Runs `f` on a copy-on-write copy of the drawing and installs the edited document; then the
-/// assoc re-solve (a no-op until Task 10). One command = one undo step through `undoable`:
-/// `Session::execute` records the document `f` started from.
+/// Runs `f` on a copy-on-write copy of the drawing, re-solves the associative dimensions
+/// (`assoc::update` against the drawing `f` started from, then each attached dimension's
+/// DIMLFAC to 1 / its view's scale) and installs the edited document. One command = one undo
+/// step through `undoable`: `Session::execute` records the document `f` started from.
 pub(crate) fn edit<T>(s: &mut Session, cmd: &str, f: impl FnOnce(&mut DrawingModel, &Session) -> Result<T>) -> Result<T> {
     require(s, cmd)?;
     let Some(mut model) = s.doc.drawing.clone() else { return Err(EngineError::Other(format!("{cmd}: {NOT_A_DRAWING}"))) };
     // The document still holds the model, so this copies it (the paper's entity stores are
     // copy-on-write: only what `f` touches is copied again).
-    let out = f(Arc::make_mut(&mut model), s)?;
+    let edited = Arc::make_mut(&mut model);
+    let out = f(edited, s)?;
+    if let Some(before) = s.doc.drawing.as_deref() {
+        assoc::update(&mut edited.paper, &before.paper);
+    }
+    dims::sync_factors(edited);
     s.doc_mut().drawing = Some(model);
     Ok(out)
 }

@@ -708,8 +708,9 @@ fn update(s: &mut Session, p: &Value) -> Result<Value> {
         })?;
     }
     model_ref::evict_unreferenced(s);
-    // Orphaned dimensions are counted once dimensions exist (Task 10).
-    Ok(json!({"updated": updated, "orphans": 0, "missing": missing}))
+    // Dimensions whose view entity is gone (kept as they were, spec §4.5 "Orphans").
+    let orphans = drawing::require(s, cmd).map(|m| drawing::sick_dimensions(m).len()).unwrap_or(0);
+    Ok(json!({"updated": updated, "orphans": orphans, "missing": missing}))
 }
 
 #[cfg(test)]

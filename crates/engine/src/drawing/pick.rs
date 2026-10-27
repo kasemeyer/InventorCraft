@@ -106,25 +106,29 @@ pub fn pick(s: &crate::Session, at: [f64; 2], tol: f64) -> Option<PaperPick> {
     if !(at[0].is_finite() && at[1].is_finite() && tol.is_finite() && tol >= 0.0) {
         return None;
     }
-    let mut best: Option<(f64, PaperPick)> = None;
+    // A view edge within `tol` wins over anything else: a dimension or a note is measured by
+    // its box (text and arrow room), which can cover the edges under it.
+    let (mut edge, mut other): (Option<(f64, PaperPick)>, Option<(f64, PaperPick)>) = (None, None);
     for e in layout.entities.iter() {
         if e.handle == sheet.border || e.handle == sheet.title_block || !m.paper.is_visible(e) {
             continue;
         }
         let d = distance(&m.paper, e, at);
-        if d > tol || best.as_ref().is_some_and(|(b, _)| d >= *b) {
+        if d > tol {
             continue;
         }
         let handle = e.handle.0;
-        let found = match (xkey_of(e), curve_kind(e)) {
-            (Some(k), Some(curve)) if k.seg != Seg::Mark => PaperPick::ViewEdge { view: k.view, edge: k.edge, curve, handle },
-            (Some(_), _) => PaperPick::Annotation { handle },
-            (None, _) if matches!(e.kind, EntityKind::Dimension(_)) => PaperPick::Dimension { handle },
-            (None, _) => PaperPick::Annotation { handle },
+        let (best, found) = match (xkey_of(e), curve_kind(e)) {
+            (Some(k), Some(curve)) if k.seg != Seg::Mark => (&mut edge, PaperPick::ViewEdge { view: k.view, edge: k.edge, curve, handle }),
+            (Some(_), _) => (&mut other, PaperPick::Annotation { handle }),
+            (None, _) if matches!(e.kind, EntityKind::Dimension(_)) => (&mut other, PaperPick::Dimension { handle }),
+            (None, _) => (&mut other, PaperPick::Annotation { handle }),
         };
-        best = Some((d, found));
+        if best.as_ref().is_none_or(|(b, _)| d < *b) {
+            *best = Some((d, found));
+        }
     }
-    if let Some((_, found)) = best {
+    if let Some((_, found)) = edge.or(other) {
         return Some(found);
     }
     // Inside a view's box (its entities' bounds, grown by `tol`): the view whose box is the
