@@ -413,9 +413,11 @@ pub(crate) fn set_texts(paper: &mut Drawing, texts: &[(Handle, String)]) {
 /// Removes every leader note attached to one of `views` (with its text). Returns how many.
 pub(crate) fn remove_attached(paper: &mut Drawing, views: &BTreeSet<ViewId>) -> usize {
     let mut gone: Vec<Handle> = Vec::new();
+    let mut notes = 0;
     for store in std::iter::once(&paper.model).chain(paper.layouts.iter().map(|l| &l.entities)) {
         for e in store.iter() {
             let Some(note) = note_of(e).filter(|n| n.attach.as_ref().is_some_and(|a| views.contains(&a.view))) else { continue };
+            notes += 1;
             gone.push(e.handle);
             gone.extend(note.partner);
         }
@@ -423,5 +425,5 @@ pub(crate) fn remove_attached(paper: &mut Drawing, views: &BTreeSet<ViewId>) -> 
     for h in &gone {
         paper.remove_entity(*h);
     }
-    gone.len() / 2
+    notes
 }

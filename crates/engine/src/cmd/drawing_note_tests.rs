@@ -546,3 +546,24 @@ fn style_suppressed_annotations_are_kept_not_orphaned() {
     assert!(close(found[0].1.dist(found[0].2), 1.25) && near(found[0].1.mid(found[0].2), [20.0, 8.0]));
     assert!(near(leader(&s, ld).0.vertices[0].xy(), [20.0, 8.375]));
 }
+
+/// Final wave 19: `notes::remove_attached` returns how many notes it removed, also when a
+/// leader has lost its text; a free note stays.
+#[test]
+fn remove_attached_counts_the_notes() {
+    use std::collections::BTreeSet;
+    let (mut s, _, v) = front("remove_attached_counts_the_notes");
+    let bottom = edge_at(&s, v, [10.0, 6.5]);
+    let a =
+        handle(&run(&mut s, "drawing.note.leader", json!({"points": [[10, 6.5], [11, 5.5]], "text": "A", "attach": {"view": v, "edge": bottom}})));
+    let b = run(&mut s, "drawing.note.leader", json!({"points": [[9.5, 6.5], [9, 5.5]], "text": "B", "attach": {"view": v, "edge": bottom}}));
+    run(&mut s, "drawing.note.text", json!({"position": [2, 2], "text": "NOTES:"}));
+    let mut paper = model(&s).paper.clone();
+    // The second leader's text gone: the note is still one.
+    paper.remove_entity(Handle(b["text_handle"].as_u64().unwrap()));
+    let views: BTreeSet<u64> = [v].into_iter().collect();
+    assert_eq!(crate::drawing::notes::remove_attached(&mut paper, &views), 2);
+    assert!(paper.entity(Handle(a)).is_none() && paper.entity(Handle(handle(&b))).is_none());
+    let others: BTreeSet<u64> = [v + 100].into_iter().collect();
+    assert_eq!(crate::drawing::notes::remove_attached(&mut paper, &others), 0);
+}
