@@ -755,6 +755,8 @@
   "cmd.drawing_dim_general": "一般寸法",
   "cmd.drawing_dim_linear": "長さ寸法",
   "cmd.drawing_dim_radius": "半径寸法",
+  "cmd.drawing_export_dxf": "図面を DXF に書き出し",
+  "cmd.drawing_export_pdf": "図面を PDF に書き出し",
   "cmd.drawing_new": "新規図面",
   "cmd.drawing_note_hole": "穴/ねじ注記",
   "cmd.drawing_note_leader": "引出線テキスト",

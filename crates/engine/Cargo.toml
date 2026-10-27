@@ -54,6 +54,8 @@ cadcraft-geom = { path = "../cadcraft-geom" }
 chrono = "0.4.38"
 
 [dev-dependencies]
+# Drawing export tests read PDFs back with the vendored reader CADCraft's own tests use (R31).
+craft-pdf = { path = "../../vendor/craft-pdf", default-features = false, features = ["read"] }
 # Shaded-view tests decode the rasters they store (already in the tree through solidcraft-render).
 image = { workspace = true }
 # Model-cache tests also run in a source tarball build (no git commit).

@@ -107,8 +107,11 @@ impl Note {
             tag(1000, view),
             tag(1000, on),
             tag(1040, format!("{at:?}")),
-            tag(1000, self.edge.clone()),
         ]
+        .into_iter()
+        // The model edge, chunked when long (R62).
+        .chain(super::mapper::string_tags(&self.edge))
+        .collect()
     }
 }
 
@@ -124,7 +127,8 @@ pub(crate) fn note_of(e: &Entity) -> Option<Note> {
         (Some(view), Some(handle), Some(at)) => at.parse().ok().filter(|a: &f64| a.is_finite()).map(|at| Attach { view, handle, at }),
         _ => None,
     };
-    Some(Note { kind, partner, attach, edge: text(5, 1000).unwrap_or_default().to_string() })
+    let edge = rest.get(5..).and_then(super::mapper::joined).unwrap_or_default();
+    Some(Note { kind, partner, attach, edge })
 }
 
 /// The MText of the leader note `leader`.

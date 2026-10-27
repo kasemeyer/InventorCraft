@@ -43,6 +43,48 @@ const LABEL_HEIGHT_IN: f64 = 0.12;
 const LABEL_GAP_IN: f64 = 0.25;
 const LABEL_LINE_IN: f64 = 0.2;
 
+/// The longest string a DXF `1000` group holds, in bytes.
+pub(crate) const MAX_XDATA_STRING: usize = 255;
+
+/// The bytes `c` takes in a `1000` string in the oldest DXF we write (R2000 is not UTF-8: a
+/// character past ASCII is written as `\U+XXXX`, one past the Basic Multilingual Plane longer).
+fn dxf_bytes(c: char) -> usize {
+    match u32::from(c) {
+        0..=0x7F => 1,
+        0x80..=0xFFFF => 7,
+        _ => 8,
+    }
+}
+
+/// `value` as consecutive `1000` strings, each at most [`MAX_XDATA_STRING`] bytes as written in
+/// any DXF version we write ([`dxf_bytes`]), split between characters; one (empty) string for an
+/// empty value (R62).
+pub(crate) fn string_tags(value: &str) -> Vec<RawTag> {
+    let mut out = vec![RawTag { code: 1000, value: String::new() }];
+    let mut used = 0;
+    for c in value.chars() {
+        let n = dxf_bytes(c);
+        if used + n > MAX_XDATA_STRING {
+            out.push(RawTag { code: 1000, value: String::new() });
+            used = 0;
+        }
+        used += n;
+        if let Some(last) = out.last_mut() {
+            last.value.push(c);
+        }
+    }
+    out
+}
+
+/// The value written by [`string_tags`]: consecutive `1000` strings joined; None when a tag is
+/// not a `1000` string or there is none.
+pub(crate) fn joined(tags: &[&RawTag]) -> Option<String> {
+    if tags.is_empty() || tags.iter().any(|t| t.code != 1000) {
+        return None;
+    }
+    Some(tags.iter().map(|t| t.value.as_str()).collect())
+}
+
 /// A curve's place along its model edge.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Seg {
@@ -60,14 +102,18 @@ pub struct XKey {
 }
 
 impl XKey {
-    /// The key as xdata tags.
+    /// The key as xdata tags; an edge id longer than a `1000` string holds is chunked across
+    /// consecutive ones (R62).
     pub(crate) fn tags(&self) -> Vec<RawTag> {
         let tag = |code: i32, value: String| RawTag { code, value };
         let last = match self.seg {
             Seg::Index(i) => tag(1071, i.to_string()),
             Seg::Mark => tag(1000, MARK_TAG.into()),
         };
-        vec![tag(1001, XDATA_APP.into()), tag(1000, self.view.to_string()), tag(1000, self.edge.clone()), last]
+        let mut out = vec![tag(1001, XDATA_APP.into()), tag(1000, self.view.to_string())];
+        out.extend(string_tags(&self.edge));
+        out.push(last);
+        out
     }
 }
 
@@ -75,10 +121,13 @@ impl XKey {
 pub(crate) fn xkey_of(e: &cadcraft_doc::Entity) -> Option<XKey> {
     let xdata = &e.common.xdata;
     let at = xdata.iter().position(|t| t.code == 1001 && t.value == XDATA_APP)?;
-    let mut rest = xdata.get(at + 1..)?.iter().take_while(|t| t.code != 1001);
-    let view = rest.next().filter(|t| t.code == 1000)?.value.parse().ok()?;
-    let edge = rest.next().filter(|t| t.code == 1000)?.value.clone();
-    let seg = match rest.next()? {
+    // The view, the edge id's strings (R62: one or more), the segment or "cm".
+    let rest: Vec<&RawTag> = xdata.get(at + 1..)?.iter().take_while(|t| t.code != 1001).collect();
+    let (first, more) = rest.split_first()?;
+    let (last, middle) = more.split_last()?;
+    let view = Some(first).filter(|t| t.code == 1000)?.value.parse().ok()?;
+    let edge = joined(middle)?;
+    let seg = match last {
         t if t.code == 1071 => Seg::Index(t.value.parse().ok()?),
         t if t.code == 1000 && t.value == MARK_TAG => Seg::Mark,
         _ => return None,

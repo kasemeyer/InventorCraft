@@ -108,6 +108,8 @@ pub(crate) fn glyph(c: char) -> Option<(f64, &'static str)> {
         '°' => (2.0, "1i0h1g2h1i"),
         '±' => (4.0, "2e2i 0g4g 0d4d"),
         'Ø' | 'ø' | '⌀' => (4.0, "1c0d0h1i3i4h4d3c1c 0c4i"),
+        // TCI-CAD: the ASME depth symbol (R59, our own artwork): a down arrow onto a short base bar.
+        '↧' => (4.0, "2i2d 0f2d4f 0c4c"), // TCI-CAD:
         // List bullet: a small crossed diamond at mid x-height.
         '•' => (2.0, "1d0e1f2e1d 0e2e 1d1f"),
         _ => return None,

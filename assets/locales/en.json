@@ -755,6 +755,8 @@
   "cmd.drawing_dim_general": "General Dimension",
   "cmd.drawing_dim_linear": "Linear Dimension",
   "cmd.drawing_dim_radius": "Radius Dimension",
+  "cmd.drawing_export_dxf": "Export Drawing as DXF",
+  "cmd.drawing_export_pdf": "Export Drawing as PDF",
   "cmd.drawing_new": "New Drawing",
   "cmd.drawing_note_hole": "Hole and Thread Note",
   "cmd.drawing_note_leader": "Leader Text",

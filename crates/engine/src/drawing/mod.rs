@@ -7,6 +7,7 @@ pub(crate) mod assoc;
 pub(crate) mod centermark;
 pub mod dims;
 pub(crate) mod edges;
+pub(crate) mod export;
 pub(crate) mod mapper;
 pub(crate) mod model_ref;
 pub(crate) mod notes;

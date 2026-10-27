@@ -361,10 +361,34 @@ pub fn pdf_sheets(d: &Drawing, spaces: &[Space], o: &PdfOptions) -> Result<Vec<u
     pdf_items(d, &items, o)
 }
 
+/// A picture placed on a sheet under its vector strokes. // TCI-CAD:
+#[derive(Clone, Debug, PartialEq)] // TCI-CAD:
+#[rustfmt::skip] // TCI-CAD: keeps each line's mark on its line
+pub struct PageImage { // TCI-CAD:
+    /// The page: an index into the spaces plotted. // TCI-CAD:
+    pub sheet: usize, // TCI-CAD:
+    /// `[x0, y0, x1, y1]` on the sheet in paper units (inches on an inch drawing). // TCI-CAD:
+    pub rect_in: [f64; 4], // TCI-CAD:
+    /// The picture, as PNG; one that does not decode is left out. // TCI-CAD:
+    pub png: Vec<u8>, // TCI-CAD:
+} // TCI-CAD:
+
+/// [`pdf_sheets`] with `images` drawn on their pages before (under) the strokes. // TCI-CAD:
+#[rustfmt::skip] // TCI-CAD: keeps each line's mark on its line
+pub fn pdf_sheets_with_images(d: &Drawing, spaces: &[Space], o: &PdfOptions, images: &[PageImage]) -> Result<Vec<u8>> { // TCI-CAD:
+    let items: Vec<(Space, PdfOptions)> = spaces.iter().take(MAX_PAGES + 1).map(|s| (s.clone(), o.clone())).collect(); // TCI-CAD:
+    pdf_items_with_images(d, &items, o, images) // TCI-CAD:
+} // TCI-CAD:
+
 /// Write a vector PDF with one page per `(space, options)` item (at most [`MAX_PAGES`]): each
 /// page plots with its own options (window, paper, orientation); `o` supplies the file-wide
 /// ones (compression, title, layers, links).
 pub fn pdf_items(d: &Drawing, items: &[(Space, PdfOptions)], o: &PdfOptions) -> Result<Vec<u8>> {
+    pdf_items_with_images(d, items, o, &[]) // TCI-CAD: the body is `pdf_items_with_images`
+} // TCI-CAD:
+
+#[rustfmt::skip] // TCI-CAD: keeps each line's mark on its line
+fn pdf_items_with_images(d: &Drawing, items: &[(Space, PdfOptions)], o: &PdfOptions, images: &[PageImage]) -> Result<Vec<u8>> { // TCI-CAD:
     if items.iter().any(|(_, io)| io.offset.is_some_and(|offset| !valid_plot_offset(offset))) {
         return Err(IoError::Format("plot offset must contain two finite values within ±100000 mm".into()));
     }
@@ -374,10 +398,10 @@ pub fn pdf_items(d: &Drawing, items: &[(Space, PdfOptions)], o: &PdfOptions) -> 
     if items.len() > MAX_PAGES {
         return Err(IoError::Format(format!("at most {MAX_PAGES} sheets fit in one PDF")));
     }
-    match write_pdf(d, items, o, o.text_as_geometry) {
+    match write_pdf(d, items, o, o.text_as_geometry, images) { // TCI-CAD: images
         // A font the PDF writer can't embed after all, or one that makes it fail internally:
         // plot the text as outlines instead. Outlines embed no font, so this runs at most once.
-        Err(Failure::Write(e)) if !o.text_as_geometry && font_failure(&e) => write_pdf(d, items, o, true).map_err(Failure::into_io),
+        Err(Failure::Write(e)) if !o.text_as_geometry && font_failure(&e) => write_pdf(d, items, o, true, images).map_err(Failure::into_io), // TCI-CAD: images
         r => r.map_err(Failure::into_io),
     }
 }
@@ -421,7 +445,8 @@ impl Failure {
 
 /// Write the file, one sheet at a time: each sheet's display list is built, written as its page
 /// and dropped before the next.
-fn write_pdf(d: &Drawing, items: &[(Space, PdfOptions)], o: &PdfOptions, text_as_geometry: bool) -> std::result::Result<Vec<u8>, Failure> {
+#[rustfmt::skip] // TCI-CAD: keeps each line's mark on its line
+fn write_pdf(d: &Drawing, items: &[(Space, PdfOptions)], o: &PdfOptions, text_as_geometry: bool, images: &[PageImage]) -> std::result::Result<Vec<u8>, Failure> { // TCI-CAD: images
     write::guard(|| {
         // Layers that are off plot on PDF layers that start hidden: draw them from a copy with
         // them on.
@@ -453,12 +478,12 @@ fn write_pdf(d: &Drawing, items: &[(Space, PdfOptions)], o: &PdfOptions, text_as
         let mut writer = Writer::new(settings, metadata);
         let mut fonts = fonts::Fonts::new(!text_as_geometry);
         let mut groups = Groups::default();
-        for (s, po) in items {
+        for (i, (s, po)) in items.iter().enumerate() { // TCI-CAD: the page index, for images
             let page = sheet(drawn, s, po, &links)?;
             let doc = writer.document_mut();
             // Groups are added to the document, so they must exist before the page starts.
             groups.add(doc, d, &page.layers);
-            write_page(doc, &page, &groups, &mut fonts)?;
+            write_page(doc, &page, &groups, &mut fonts, images.iter().filter(|im| im.sheet == i))?; // TCI-CAD: images
         }
         if items.len() == 1 && !groups.ids.is_empty() {
             writer.document_mut().set_optional_content_page_mode(true);
@@ -711,7 +736,8 @@ fn circle_path(x: f32, y: f32, r: f32) -> Option<Path> {
 }
 
 /// Write one sheet as a page: its size, label, link annotations and marks.
-fn write_page(doc: &mut kr::Document, p: &SheetPage, groups: &Groups, fonts: &mut fonts::Fonts) -> std::result::Result<(), Failure> {
+#[rustfmt::skip] // TCI-CAD: keeps each line's mark on its line
+fn write_page<'a>(doc: &mut kr::Document, p: &SheetPage, groups: &Groups, fonts: &mut fonts::Fonts, images: impl Iterator<Item = &'a PageImage>) -> std::result::Result<(), Failure> { // TCI-CAD: images
     let (w, h) = (p.media.x as f32, p.media.y as f32);
     let label = PageLabel::new(None, Some(p.label.chars().take(MAX_TEXT).collect()), None);
     let settings = PageSettings::from_wh(w, h).ok_or_else(|| IoError::Format("the sheet has no area".into()))?.with_page_label(label);
@@ -730,6 +756,7 @@ fn write_page(doc: &mut kr::Document, p: &SheetPage, groups: &Groups, fonts: &mu
     let mut drawn = Ok(());
     if let Some(clip) = rect_path(p.clip_pt.min, p.clip_pt.max) {
         surface.push_clip_path(&clip, &FillRule::NonZero);
+        page_images(&mut surface, &p.map, images); // TCI-CAD: under the marks
         drawn = marks(&mut surface, p, groups, fonts);
         surface.pop();
     }
@@ -738,6 +765,23 @@ fn write_page(doc: &mut kr::Document, p: &SheetPage, groups: &Groups, fonts: &mu
     page.finish();
     drawn
 }
+
+/// Draw `images` over their rectangles (paper units, mapped to points like the marks). A // TCI-CAD:
+/// picture that does not decode, or a rectangle without area, is left out. // TCI-CAD:
+#[rustfmt::skip] // TCI-CAD: keeps each line's mark on its line
+fn page_images<'a>(s: &mut Surface<'_>, map: &Map, images: impl Iterator<Item = &'a PageImage>) { // TCI-CAD:
+    for im in images { // TCI-CAD:
+        let [x0, y0, x1, y1] = im.rect_in; // TCI-CAD:
+        let (lo, hi) = (map.pt(Vec2::new(x0.min(x1), y0.min(y1))), map.pt(Vec2::new(x0.max(x1), y0.max(y1)))); // TCI-CAD:
+        let (Some((ax, ay)), Some((bx, by))) = (coord(lo), coord(hi)) else { continue }; // TCI-CAD:
+        let Some(size) = kr::geom::Size::from_wh(bx - ax, by - ay) else { continue }; // TCI-CAD:
+        let Ok(image) = kr::image::Image::from_png(im.png.clone().into(), true) else { continue }; // TCI-CAD:
+        // The surface is y-up here; a picture's first row is its top. // TCI-CAD:
+        s.push_transform(&Transform::from_row(1.0, 0.0, 0.0, -1.0, ax, by)); // TCI-CAD:
+        s.draw_image(image, size); // TCI-CAD:
+        s.pop(); // TCI-CAD:
+    } // TCI-CAD:
+} // TCI-CAD:
 
 /// What consecutive strokes share to be painted as one path: colour, width (points) and
 /// transparency (percent).

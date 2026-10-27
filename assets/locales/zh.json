@@ -755,6 +755,8 @@
   "cmd.drawing_dim_general": "通用尺寸",
   "cmd.drawing_dim_linear": "线性尺寸",
   "cmd.drawing_dim_radius": "半径尺寸",
+  "cmd.drawing_export_dxf": "将图纸导出为 DXF",
+  "cmd.drawing_export_pdf": "将图纸导出为 PDF",
   "cmd.drawing_new": "新建工程图",
   "cmd.drawing_note_hole": "孔和螺纹注释",
   "cmd.drawing_note_leader": "引线文本",

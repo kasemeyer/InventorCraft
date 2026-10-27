@@ -398,3 +398,19 @@ Changes:
     `crates/cadcraft-io/tests/it/main.rs`;
   - `#![allow(clippy::single_element_loop)]` in `crates/cadcraft-io/src/lib.rs` (for `src/tests.rs`)
     and `crates/cadcraft-io/tests/it/main.rs`: the loops that kept only their DXF leg.
+- The PDF patch, `crates/cadcraft-io/src/pdf.rs` (spec §4.7, rulings R20 and R60), every added or
+  changed line marked `// TCI-CAD:` (the six items it touches carry `#[rustfmt::skip]`, marked too,
+  so the marks stay on their lines). It is page images only: `PageImage { sheet, rect_in, png }` and
+  `pdf_sheets_with_images(d, spaces, o, images)`. Each picture is drawn on its own page over its
+  rectangle (paper units, mapped like the marks), inside the plot-area clip, before (under) the
+  page's strokes. A PNG that does not decode, or a rectangle with no area, is left out. To get
+  there, `pdf_items`' body moved to `pdf_items_with_images`, and `write_pdf` and `write_page` take
+  the images. With no images, the output is `pdf_sheets`' own. Searchable (render mode 3) text,
+  R20's second half, is **deferred** (R60): krilla needs an embedded TrueType font for any text,
+  and none is shipped. Stroke-font text stays geometry. `tests/tci_pdf_images.rs` (ours) holds the
+  patch to the image's place under the strokes and on its own page. The `lib.rs` re-export the
+  plan named is not made: `pdf` is already a public module.
+- The depth symbol, `crates/cadcraft-fonts/src/stroke.rs` (R59): `'↧'` (U+21A7), our own
+  three-stroke glyph (a down arrow onto a short base bar), marked `// TCI-CAD:`. Hole notes ("⌀.75
+  ↧.50") then never fall back to a system font. The engine's
+  `drawing_export_tests::the_depth_symbol_is_a_stroke_glyph` holds it.
