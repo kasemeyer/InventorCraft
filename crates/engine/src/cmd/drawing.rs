@@ -229,3 +229,7 @@ mod drawing_edges_tests;
 #[cfg(test)]
 #[path = "drawing_projection_tests.rs"]
 mod drawing_projection_tests;
+
+#[cfg(test)]
+#[path = "drawing_script_tests.rs"]
+mod drawing_script_tests;

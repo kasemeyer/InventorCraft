@@ -1,0 +1,21 @@
+{"commands": [
+  {"command": "document.new_part", "params": {}},
+  {"command": "document.units", "params": {"units": "in"}},
+  {"command": "solid.box", "params": {"length": "4 in", "width": "1 in", "height": "3 in", "corner": [-50.8, 0, 0], "name": "Block", "body_name": "Block"}},
+  {"command": "solid.hole", "params": {"position": [0, 0, 38.1], "direction": [0, 1, 0], "diameter": "0.75 in", "name": "Drill"}},
+  {"command": "solid.fillet", "params": {"edges": [[-50.8, 12.7, 0], [50.8, 12.7, 0], [-50.8, 12.7, 76.2], [50.8, 12.7, 76.2]], "radius": "0.5 in"}},
+  {"command": "file.save", "params": {"path": "block.tcipart"}},
+  {"command": "drawing.new", "params": {"model": "block.tcipart"}},
+  {"command": "drawing.view.base", "params": {"model": "block.tcipart", "orientation": "front", "lines": "hidden", "shaded": false, "scale": 1, "position": [10, 8]}},
+  {"command": "drawing.view.projected", "params": {"parent": 1, "position": [10, 16]}},
+  {"command": "drawing.dim.general", "params": {"view": 1, "picks": [{"at": [10, 6.5]}], "placement": [10, 5.8]}},
+  {"command": "drawing.dim.general", "params": {"view": 1, "picks": [{"at": [12, 8]}], "placement": [13, 8]}},
+  {"command": "drawing.dim.general", "params": {"view": 1, "picks": [{"at": [10.375, 8]}], "placement": [11, 8.6]}},
+  {"command": "drawing.dim.general", "params": {"view": 1, "picks": [{"at": [8.146, 6.646]}], "placement": [7.5, 6]}},
+  {"command": "drawing.centermark", "params": {"view": 1, "edge": {"at": [10.375, 8]}}},
+  {"command": "drawing.note.hole", "params": {"view": 1, "edge": {"at": [10.375, 8]}, "placement": [12, 10]}},
+  {"command": "file.save", "params": {"path": "block.tcidrw"}},
+  {"command": "drawing.export.pdf", "params": {"path": "block.pdf"}},
+  {"command": "drawing.export.dxf", "params": {"path": "block.dxf"}},
+  {"command": "drawing.export.dxf", "params": {"path": "block-r2000.dxf", "version": "R2000"}}
+]}
