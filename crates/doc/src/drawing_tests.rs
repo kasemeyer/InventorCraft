@@ -279,3 +279,36 @@ fn every_cube_target_name_loads_back() {
 fn a_non_canonical_cube_target_has_no_name() {
     let _ = CubeTarget { x: 2, y: 0, z: 0 }.name();
 }
+
+/// Final wave 14: a view saved before R55 (no `projection`) loads with none.
+#[test]
+fn a_view_without_a_projection_loads_with_none() {
+    use crate::drawing::Projection;
+    let view = DrawingView {
+        id: 2,
+        identifier: "VIEW2".into(),
+        sheet: 0,
+        parent: Some(1),
+        projection: Some(Projection::Top),
+        model: ModelRef { path: "block.tcipart".into(), project_path: None, kind: ModelKind::Part },
+        model_state: None,
+        orientation: CubeTarget::from_name("top").unwrap().orientation(),
+        scale: 1.0,
+        scale_from_base: true,
+        lines: LineStyle::Hidden,
+        shaded: false,
+        style_from_base: true,
+        tangent_edges: false,
+        position: solidcraft_geom::Vec2::new(10.0, 16.0),
+        label_visible: false,
+        group: cadcraft_doc::Handle(0x2a),
+        revision: ModelRevision("ab".into()),
+        raster: None,
+    };
+    let mut value = serde_json::to_value(&view).unwrap();
+    assert_eq!(value["projection"], "top");
+    value.as_object_mut().unwrap().remove("projection");
+    let back: DrawingView = serde_json::from_value(value).unwrap();
+    assert_eq!(back.projection, None);
+    assert_eq!(back, DrawingView { projection: None, ..view });
+}
