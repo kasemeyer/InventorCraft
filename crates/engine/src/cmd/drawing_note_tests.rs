@@ -286,6 +286,28 @@ fn a_center_mark_spans_the_circle() {
     assert_eq!(bad_message(s.execute("drawing.centermark", &json!({"view": v, "edge": bottom}))), "a center mark needs a circle or an arc");
 }
 
+/// Final wave 18: rescaling a view fits its centre mark again: the legs cross the scaled circle
+/// and run the same 0.125 in past it (2 × (.1875 + .125) = .625 at half scale, not .5);
+/// centrelines are fitted the same way. Handles are kept.
+#[test]
+fn rescaling_keeps_the_mark_overshoot() {
+    let (mut s, _, v) = front("rescaling_keeps_the_mark_overshoot");
+    let hole = edge_at(&s, v, [10.375, 8.0]);
+    run(&mut s, "drawing.centermark", json!({"view": v, "edge": hole}));
+    let before: Vec<u64> = center_lines(&s).iter().map(|m| m.0).collect();
+    run(&mut s, "drawing.view.set_scale", json!({"view": v, "scale": 0.5}));
+    let marks = center_lines(&s);
+    assert_eq!(marks.iter().map(|m| m.0).collect::<Vec<_>>(), before);
+    for (_, a, b, _) in &marks {
+        assert!(close(a.dist(*b), 0.625) && near(a.mid(*b), [10.0, 8.0]), "{a:?} {b:?}");
+    }
+    assert!(close(marks[0].1.y, marks[0].2.y) && close(marks[1].1.x, marks[1].2.x), "{marks:?}");
+    run(&mut s, "drawing.view.set_scale", json!({"view": v, "scale": 2}));
+    for (_, a, b, _) in &center_lines(&s) {
+        assert!(close(a.dist(*b), 2.0 * (0.75 + 0.125)) && near(a.mid(*b), [10.0, 8.0]), "{a:?} {b:?}");
+    }
+}
+
 #[test]
 fn center_marks_follow_their_circle() {
     let (mut s, block, v) = front("center_marks_follow_their_circle");

@@ -538,6 +538,8 @@ fn set_scale(s: &mut Session, p: &Value) -> Result<Value> {
         for (v, old) in &changed {
             if *old != v.scale {
                 mapper::transform_view(m, v, &mapper::move_and_scale(v.position, v.position, v.scale / old));
+                // The marks' overshoot is paper inches: fitted again, not scaled.
+                mapper::refit_marks(m, v);
             }
         }
         install(m, changed.into_iter().map(|(v, _)| v).collect(), Vec::new(), &[]);

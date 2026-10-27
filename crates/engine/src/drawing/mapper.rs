@@ -406,6 +406,47 @@ fn place_marks(
     drawn: &[(&ViewCurve, PaperCurve)],
     every: &[(&ViewCurve, PaperCurve)],
 ) -> Vec<Handle> {
+    fit_marks(m, layout, view, drawn, every, true)
+}
+
+/// Fits view `v`'s centre marks and centrelines to its curves as they are on paper (after
+/// `transform_view` scaled them: the overshoot past a circle or edges stays
+/// [`MARK_OVERSHOOT_IN`](super::centermark::MARK_OVERSHOOT_IN), unscaled). A mark whose curves
+/// are not found on paper is left as it is.
+pub(crate) fn refit_marks(m: &mut DrawingModel, v: &DrawingView) {
+    let Some(layout) = m.sheets.get(v.sheet).map(|s| s.layout.clone()) else { return };
+    let mut curves: Vec<(ViewCurve, PaperCurve, bool)> = Vec::new();
+    if let Some(l) = m.paper.layout(&layout) {
+        for e in l.entities.iter() {
+            let Some(key) = xkey_of(e).filter(|k| k.view == v.id) else { continue };
+            let Seg::Index(segment) = key.seg else { continue };
+            let p = |q: PaperVec3| Vec2::new(q.x, q.y);
+            let curve = match &e.kind {
+                EntityKind::Line(l) => PaperCurve::Line { a: p(l.a), b: p(l.b) },
+                EntityKind::Circle(c) => PaperCurve::Circle { c: p(c.center), r: c.radius },
+                EntityKind::Arc(a) => PaperCurve::Arc { c: p(a.center), r: a.radius, start: a.start, end: a.end },
+                _ => continue,
+            };
+            let stub =
+                ViewCurve { edge: key.edge.clone(), sources: vec![key.edge], segment, hidden: e.common.layer == HIDDEN_LAYER, curve: curve.clone() };
+            curves.push((stub, curve, e.common.visible));
+        }
+    }
+    let every: Vec<(&ViewCurve, PaperCurve)> = curves.iter().map(|(c, p, _)| (c, p.clone())).collect();
+    let drawn: Vec<(&ViewCurve, PaperCurve)> = curves.iter().filter(|(_, _, shown)| *shown).map(|(c, p, _)| (c, p.clone())).collect();
+    fit_marks(m, &layout, v.id, &drawn, &every, false);
+}
+
+/// [`place_marks`]; with `remove_gone` false, a mark whose curves are not in `every` is kept as
+/// it is instead of removed.
+fn fit_marks(
+    m: &mut DrawingModel,
+    layout: &str,
+    view: ViewId,
+    drawn: &[(&ViewCurve, PaperCurve)],
+    every: &[(&ViewCurve, PaperCurve)],
+    remove_gone: bool,
+) -> Vec<Handle> {
     let mut marks: BTreeMap<String, Vec<(Handle, bool)>> = BTreeMap::new();
     if let Some(l) = m.paper.layout(layout) {
         for e in l.entities.iter() {
@@ -425,7 +466,11 @@ fn place_marks(
         };
         let Some((lines, visible)) = found else {
             for (h, _) in handles {
-                m.paper.remove_entity(h);
+                if remove_gone {
+                    m.paper.remove_entity(h);
+                } else {
+                    kept.push(h);
+                }
             }
             continue;
         };
