@@ -16,8 +16,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::f64::consts::TAU;
 
-use cadcraft_doc::{Arc as ArcEntity, Circle, Common, Entity, EntityKind, Group, Handle, Line, LwPolyline, RawTag, Space};
-use cadcraft_geom::{PolyVertex, Vec2 as PaperVec2, Vec3 as PaperVec3};
+use cadcraft_doc::{Arc as ArcEntity, Circle, Common, Entity, EntityKind, Group, HAlign, Handle, Line, LwPolyline, RawTag, Space, Text, VAlign};
+use cadcraft_geom::{Mat3, PolyVertex, Vec2 as PaperVec2, Vec3 as PaperVec3};
 use solidcraft_doc::{DrawingModel, DrawingView, ViewId};
 use solidcraft_geom::Vec2;
 
@@ -31,6 +31,17 @@ pub(crate) const HIDDEN_LAYER: &str = "HIDDEN";
 
 /// The fourth xdata tag of a centre mark or centreline.
 const MARK_TAG: &str = "cm";
+
+/// The layer of a view's label (spec §3.1: `<identifier>` over `SCALE <scale>`).
+pub(crate) const NOTE_LAYER: &str = "NOTE";
+/// A label line's fourth xdata tag is `(1000, "label<n>")` (its third is empty): not a curve
+/// key, so `xkey_of` skips it and `place` never removes it.
+const LABEL_TAG: &str = "label";
+/// The label's text height, the gap from the view's lowest curve to its first line, and the
+/// distance between its lines, inches.
+const LABEL_HEIGHT_IN: f64 = 0.12;
+const LABEL_GAP_IN: f64 = 0.25;
+const LABEL_LINE_IN: f64 = 0.2;
 
 /// A curve's place along its model edge.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -73,6 +84,34 @@ pub(crate) fn xkey_of(e: &cadcraft_doc::Entity) -> Option<XKey> {
         _ => return None,
     };
     Some(XKey { view, edge, seg })
+}
+
+/// The view an entity of a view belongs to (its curves, centre marks and label), if any.
+pub(crate) fn view_of(e: &Entity) -> Option<ViewId> {
+    let xdata = &e.common.xdata;
+    let at = xdata.iter().position(|t| t.code == 1001 && t.value == XDATA_APP)?;
+    xdata.get(at + 1).filter(|t| t.code == 1000)?.value.parse().ok()
+}
+
+/// The label line (0: the identifier, 1: the scale) an entity is, with its view.
+fn label_of(e: &Entity) -> Option<(ViewId, u8)> {
+    let xdata = &e.common.xdata;
+    let at = xdata.iter().position(|t| t.code == 1001 && t.value == XDATA_APP)?;
+    let mut rest = xdata.get(at + 1..)?.iter().take_while(|t| t.code != 1001);
+    let view = rest.next().filter(|t| t.code == 1000)?.value.parse().ok()?;
+    rest.next().filter(|t| t.code == 1000 && t.value.is_empty())?;
+    let line = rest.next().filter(|t| t.code == 1000)?.value.strip_prefix(LABEL_TAG)?.parse().ok()?;
+    Some((view, line))
+}
+
+fn label_tags(view: ViewId, line: u8) -> Vec<RawTag> {
+    let tag = |code: i32, value: String| RawTag { code, value };
+    vec![tag(1001, XDATA_APP.into()), tag(1000, view.to_string()), tag(1000, String::new()), tag(1000, format!("{LABEL_TAG}{line}"))]
+}
+
+/// The handles of every entity of view `view` on `layout` (curves, marks, label).
+fn all_of(m: &DrawingModel, layout: &str, view: ViewId) -> Vec<Handle> {
+    m.paper.layout(layout).map(|l| l.entities.iter().filter(|e| view_of(e) == Some(view)).map(|e| e.handle).collect()).unwrap_or_default()
 }
 
 /// The name of the `Drawing.groups` entry of the view whose group handle is `group`.
@@ -164,6 +203,9 @@ pub(crate) fn place(m: &mut DrawingModel, v: &DrawingView, g: &ViewGeometry) {
         }
         produced.insert(key);
     }
+    if let Some(l) = m.paper.layout(&layout) {
+        members.extend(l.entities.iter().filter(|e| label_of(e).is_some_and(|(view, _)| view == v.id)).map(|e| e.handle));
+    }
     for (key, h) in &before {
         match key.seg {
             Seg::Mark => members.push(*h),
@@ -173,11 +215,114 @@ pub(crate) fn place(m: &mut DrawingModel, v: &DrawingView, g: &ViewGeometry) {
             Seg::Index(_) => {}
         }
     }
+    set_group(m, v, members);
+}
+
+/// `v`'s group lists `members` and is described by its identifier.
+fn set_group(m: &mut DrawingModel, v: &DrawingView, members: Vec<Handle>) {
     let name = group_name(v.group);
     match m.paper.groups.iter_mut().find(|gr| gr.name == name) {
-        Some(group) => group.members = members,
+        Some(group) => {
+            group.members = members;
+            group.description.clone_from(&v.identifier);
+        }
         None => m.paper.groups.push(Group { name, description: v.identifier.clone(), selectable: true, members }),
     }
+}
+
+/// Applies `t` to every entity of view `v` (curves, marks and label) in place, handles kept.
+pub(crate) fn transform_view(m: &mut DrawingModel, v: &DrawingView, t: &Mat3) {
+    let Some(layout) = m.sheets.get(v.sheet).map(|s| s.layout.clone()) else { return };
+    for h in all_of(m, &layout, v.id) {
+        let _ = m.paper.modify_entity(h, |e| e.kind.transform(t));
+    }
+}
+
+/// `p -> to + (p - from) * k`: a view centred at `from` moved to `to` and scaled by `k`.
+pub(crate) fn move_and_scale(from: Vec2, to: Vec2, k: f64) -> Mat3 {
+    Mat3::translate(PaperVec2::new(to.x, to.y)).then_before(Mat3::scale(k, k)).then_before(Mat3::translate(PaperVec2::new(-from.x, -from.y)))
+}
+
+/// Removes every entity of view `v` and its group.
+pub(crate) fn remove_view(m: &mut DrawingModel, v: &DrawingView) {
+    if let Some(layout) = m.sheets.get(v.sheet).map(|s| s.layout.clone()) {
+        for h in all_of(m, &layout, v.id) {
+            m.paper.remove_entity(h);
+        }
+    }
+    let name = group_name(v.group);
+    m.paper.groups.retain(|g| g.name != name);
+}
+
+/// View `v`'s label as it should stand (spec §3.1): with `label_visible`, two texts on NOTE
+/// centred under the view's curves, `<identifier>` over `SCALE <scale>`; else none. Existing
+/// label texts are changed in place. The group is refreshed (members, description).
+pub(crate) fn place_label(m: &mut DrawingModel, v: &DrawingView) {
+    let Some(layout) = m.sheets.get(v.sheet).map(|s| s.layout.clone()) else { return };
+    let mut lines: BTreeMap<u8, Handle> = BTreeMap::new();
+    let mut members: Vec<Handle> = Vec::new();
+    let mut bottom = f64::INFINITY;
+    if let Some(l) = m.paper.layout(&layout) {
+        for e in l.entities.iter() {
+            if let Some((view, line)) = label_of(e) {
+                if view == v.id {
+                    lines.insert(line, e.handle);
+                }
+            } else if xkey_of(e).is_some_and(|k| k.view == v.id) {
+                members.push(e.handle);
+                let b = cadcraft_doc::entity_bounds(&m.paper, e, 0);
+                if !b.is_empty() {
+                    bottom = bottom.min(b.min.y);
+                }
+            }
+        }
+    }
+    if !bottom.is_finite() {
+        bottom = v.position.y;
+    }
+    let texts = [v.identifier.clone(), format!("SCALE {}", solidcraft_doc::format_scale(v.scale))];
+    for (line, value) in (0u8..).zip(texts) {
+        let existing = lines.remove(&line);
+        if !v.label_visible {
+            if let Some(h) = existing {
+                m.paper.remove_entity(h);
+            }
+            continue;
+        }
+        let at = PaperVec3::new(v.position.x, bottom - LABEL_GAP_IN - LABEL_LINE_IN * f64::from(line), 0.0);
+        let text = Text {
+            insert: at,
+            align_pt: Some(at),
+            height: LABEL_HEIGHT_IN,
+            value,
+            rotation: 0.0,
+            width_factor: 1.0,
+            oblique: 0.0,
+            style: super::template::TEXT_STYLE.into(),
+            halign: HAlign::Center,
+            valign: VAlign::Top,
+        };
+        let kind = EntityKind::Text(text);
+        let handle = match existing {
+            Some(h) => {
+                let _ = m.paper.modify_entity(h, |e| {
+                    e.kind = kind;
+                    e.common.layer = NOTE_LAYER.to_string();
+                });
+                Some(h)
+            }
+            None => {
+                let common = Common { layer: NOTE_LAYER.to_string(), xdata: label_tags(v.id, line), ..Common::default() };
+                m.paper.add(&Space::Paper(layout.clone()), common, kind).ok()
+            }
+        };
+        members.extend(handle);
+    }
+    // Lines no label has any more.
+    for h in lines.into_values() {
+        m.paper.remove_entity(h);
+    }
+    set_group(m, v, members);
 }
 
 /// The handle of the entity keyed `key`, on its view's sheet.

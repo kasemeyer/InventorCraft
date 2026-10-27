@@ -16,7 +16,8 @@ use std::sync::Arc;
 use serde_json::Value;
 use solidcraft_doc::{DocumentKind, DrawingModel, DrawingProps};
 
-pub use model_ref::ModelProvider;
+pub(crate) use model_ref::rebased_models;
+pub use model_ref::{ModelProvider, stale_views};
 pub use orient::{Projection, aligned_position, projected_orientation, projection_at};
 pub use pick::{CurveKind, PaperPick, pick, preview_view};
 pub use project::{PaperCurve, camera_for};

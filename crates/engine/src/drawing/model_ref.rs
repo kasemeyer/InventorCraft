@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use solidcraft_doc::{Document, DocumentKind, ModelRef, ModelRevision, revision_of};
+use solidcraft_doc::{Document, DocumentKind, DrawingModel, ModelRef, ModelRevision, ViewId, revision_of};
 
 use crate::{EngineError, Result};
 
@@ -101,4 +101,51 @@ fn loaded(s: &crate::Session, path: PathBuf, doc: Arc<Document>) -> Result<Arc<L
         cache.insert(path, model.clone());
     }
     Ok(model)
+}
+
+/// Each view's model loaded once per call (views of one model share it): the model, or None
+/// when it cannot be found or read.
+#[derive(Default)]
+pub(crate) struct Loads(BTreeMap<(String, Option<String>), Option<Arc<LoadedModel>>>);
+
+impl Loads {
+    pub(crate) fn get(&mut self, s: &crate::Session, r: &ModelRef) -> Option<Arc<LoadedModel>> {
+        self.0.entry((r.path.clone(), r.project_path.clone())).or_insert_with(|| load(s, r).ok()).clone()
+    }
+}
+
+/// Views whose model's current revision differs from their stored one (models that cannot be loaded are
+/// not stale; `drawing.update` reports them as missing). D-2 runs `drawing.update` when this is non-empty.
+pub fn stale_views(s: &crate::Session) -> Vec<ViewId> {
+    let Some(m) = s.doc.drawing.as_deref().filter(|_| s.doc.kind == DocumentKind::Drawing) else { return Vec::new() };
+    let mut loads = Loads::default();
+    m.views.values().filter(|v| loads.get(s, &v.model).is_some_and(|l| l.revision != v.revision)).map(|v| v.id).collect()
+}
+
+/// `m`'s ModelRefs re-stored for a drawing saved at `to` instead of `from` (the DesignLink rule).
+pub(crate) fn rebased_models(m: &DrawingModel, from: Option<&str>, to: &str) -> DrawingModel {
+    let mut out = m.clone();
+    for v in out.views.values_mut() {
+        v.model.path = rebased_path(&v.model.path, from, to);
+    }
+    out
+}
+
+fn rebased_path(path: &str, from: Option<&str>, to: &str) -> String {
+    crate::cmd::component_link::stored(Some(to), &crate::cmd::component_link::resolve(from, path))
+}
+
+/// Whether saving `m` at `to` instead of `from` stores any model path differently.
+pub(crate) fn rebase_changes(m: &DrawingModel, from: Option<&str>, to: &str) -> bool {
+    m.views.values().any(|v| rebased_path(&v.model.path, from, to) != v.model.path)
+}
+
+/// Drops the loaded models no view of the active drawing refers to any more (after a view is
+/// deleted, or a model is found somewhere else).
+pub(crate) fn evict_unreferenced(s: &crate::Session) {
+    let referenced: std::collections::BTreeSet<PathBuf> =
+        s.doc.drawing.as_deref().map(|m| m.views.values().flat_map(|v| candidates(s, &v.model)).collect()).unwrap_or_default();
+    if let Ok(mut cache) = s.loaded_models.lock() {
+        cache.retain(|path, _| referenced.contains(path));
+    }
 }

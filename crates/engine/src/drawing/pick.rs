@@ -127,8 +127,9 @@ pub fn pick(s: &crate::Session, at: [f64; 2], tol: f64) -> Option<PaperPick> {
     if let Some((_, found)) = best {
         return Some(found);
     }
-    // Inside a view's box (its entities' bounds, grown by `tol`): the view.
-    m.views.values().filter(|v| v.sheet == index).find_map(|v| {
+    // Inside a view's box (its entities' bounds, grown by `tol`): the view whose box is the
+    // smallest (a view drawn over a bigger one stays pickable); equal boxes: the nearest centre.
+    let inside = m.views.values().filter(|v| v.sheet == index).filter_map(|v| {
         let group = m.paper.groups.iter().find(|g| g.name == mapper::group_name(v.group))?;
         let mut b = cadcraft_doc::geom::Bounds2::EMPTY;
         for h in &group.members {
@@ -137,8 +138,11 @@ pub fn pick(s: &crate::Session, at: [f64; 2], tol: f64) -> Option<PaperPick> {
             }
         }
         let inside = !b.is_empty() && at[0] >= b.min.x - tol && at[0] <= b.max.x + tol && at[1] >= b.min.y - tol && at[1] <= b.max.y + tol;
-        inside.then_some(PaperPick::View { view: v.id })
-    })
+        let area = (b.max.x - b.min.x) * (b.max.y - b.min.y);
+        let centre = (v.position.x - at[0]).hypot(v.position.y - at[1]);
+        inside.then_some((area, centre, v.id))
+    });
+    inside.min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1))).map(|(.., view)| PaperPick::View { view })
 }
 
 /// What `cmd` (drawing.view.base or drawing.view.projected) with `params` would place, placing nothing.

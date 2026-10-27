@@ -408,13 +408,37 @@ fn write_file(s: &mut Session, path: &str, format: &str, compression: &str, prev
     // Linked designs are kept relative to the folder the design is saved in.
     let links = super::component_link::rebased(&s.doc, s.path.as_deref(), path);
     let old_links = (links != s.doc.links).then(|| std::mem::replace(&mut s.doc_mut().links, links));
+    // A drawing's model paths likewise (spec §4.6, the DesignLink rule).
+    let from = s.path.clone();
+    let rebased = s
+        .doc
+        .drawing
+        .as_deref()
+        .filter(|m| crate::drawing::model_ref::rebase_changes(m, from.as_deref(), path))
+        .map(|m| std::sync::Arc::new(crate::drawing::rebased_models(m, from.as_deref(), path)));
+    let old_drawing = rebased.map(|m| s.doc_mut().drawing.replace(m));
     let r = write_bytes(s, path, format, compression, preview, cache);
-    if r.is_err()
-        && let Some(old) = old_links
-    {
-        s.doc_mut().links = old;
+    if r.is_err() {
+        if let Some(old) = old_links {
+            s.doc_mut().links = old;
+        }
+        if let Some(old) = old_drawing {
+            s.doc_mut().drawing = old;
+        }
+    } else if old_drawing.is_some() {
+        rebase_drawing_history(s, from.as_deref(), path);
     }
     r
+}
+
+/// The undo and redo steps of a drawing saved at `to` instead of `from`, with their model paths
+/// re-stored, so undoing after a save-as still finds the models.
+fn rebase_drawing_history(s: &mut Session, from: Option<&str>, to: &str) {
+    for snap in s.undo.iter_mut().chain(s.redo.iter_mut()) {
+        let Some(m) = snap.doc.drawing.as_deref().filter(|m| crate::drawing::model_ref::rebase_changes(m, from, to)) else { continue };
+        let rebased = std::sync::Arc::new(crate::drawing::rebased_models(m, from, to));
+        std::sync::Arc::make_mut(&mut snap.doc).drawing = Some(rebased);
+    }
 }
 
 fn write_bytes(
@@ -450,6 +474,11 @@ impl Session {
         if done.doc.links != self.doc.links {
             self.doc_mut().links.clone_from(&done.doc.links);
         }
+        if let (Some(to), false) = (done.path.as_deref(), opt_ptr_eq(&done.doc.drawing, &self.doc.drawing)) {
+            let from = self.path.clone();
+            self.doc_mut().drawing.clone_from(&done.doc.drawing);
+            rebase_drawing_history(self, from.as_deref(), to);
+        }
         self.path.clone_from(&done.path);
         self.mark_saved();
     }
@@ -462,6 +491,15 @@ impl Session {
         let preview = preview.then(|| saved_preview(self)).flatten();
         let thumbnail = cache.then(|| thumbnail::saved(self)).flatten();
         solidcraft_io::write_design_container_with_thumbnail(&design, compression, preview.as_ref(), geometry.as_ref(), thumbnail.as_deref())
+    }
+}
+
+/// Whether `a` and `b` are the same drawing model (or both none).
+fn opt_ptr_eq<T>(a: &Option<std::sync::Arc<T>>, b: &Option<std::sync::Arc<T>>) -> bool {
+    match (a, b) {
+        (Some(a), Some(b)) => std::sync::Arc::ptr_eq(a, b),
+        (None, None) => true,
+        _ => false,
     }
 }
 

@@ -1,17 +1,22 @@
 //! Placing drawing views (`drawing.view.*`, Plan D): a base view of a part or an assembly, and
 //! views projected from it (third angle, spec §2.4). Each placed view is one command and one undo
 //! step; its curves become paper entities through `drawing::mapper::place` (the seam, spec §4.5).
+//! A placed view is then edited (style, scale, position, orientation, label, delete) and
+//! regenerated from its model in place (`drawing.update`, spec §4.6).
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use serde_json::{Value, json};
-use solidcraft_doc::{CubeTarget, DocumentKind, DrawingModel, DrawingView, LineStyle, ModelKind, ModelRef, ModelRevision, Orientation, parse_scale};
+use solidcraft_doc::{
+    CubeTarget, DocumentKind, DrawingModel, DrawingView, LineStyle, ModelKind, ModelRef, ModelRevision, Orientation, ViewId, parse_scale,
+};
 use solidcraft_geom::Vec2;
 
 use super::CommandSpec;
 use crate::drawing::mapper;
-use crate::drawing::model_ref::{absolute, load};
-use crate::drawing::orient::{aligned_position, orientation_from, projected_orientation, projection_at};
+use crate::drawing::model_ref::{self, LoadedModel, Loads, absolute, load};
+use crate::drawing::orient::{Projection, aligned_position, orientation_from, projected_orientation, projection_at};
 use crate::drawing::project::{PaperCurve, ProjectOptions, ViewGeometry, project_view};
 use crate::drawing::{self, template};
 use crate::params::{bad, vec2, vec3};
@@ -28,6 +33,33 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("drawing.view.projected", "Projected View", projected).icon("project").params(
         "parent: a view id; position: [x, y] in inches. The direction from the parent's centre picks the view (third angle): up = top, down = bottom, left, right, a diagonal = an isometric; \
          an orthographic view stays aligned with its parent; style and scale come from the parent → view, identifier, entities: {visible, hidden}, raster",
+    ),
+    CommandSpec::new("drawing.view.set_style", "View Style", set_style).icon("appearance").params(
+        "view: a view id; lines?: hidden or removed; shaded?: bool; style_from_base?: bool (a projected view takes its parent's style; giving lines or shaded stops it). \
+         Projected views that take their style from this one follow → view, changed: the views changed",
+    ),
+    CommandSpec::new("drawing.view.set_scale", "View Scale", set_scale).icon("scale").params(
+        "view: a view id; scale: a number > 0 or \"1:2\", or scale_from_base: bool (a projected view takes its parent's scale). \
+         Views keep their centres; projected views that take their scale from this one follow → view, changed",
+    ),
+    CommandSpec::new("drawing.view.set_position", "Move View", set_position).icon("move").params(
+        "view: a view id; position: [x, y], the view's centre in inches. A projected top, bottom, left or right view stays aligned with its parent; \
+         the views projected from this one move with it → view, position: where it went",
+    ),
+    CommandSpec::new("drawing.view.set_orientation", "View Orientation", set_orientation).icon("orbit").params(
+        "view: a base view's id; orientation: a view cube target (front, top, iso_top_right, ...) or {dir: [x, y, z], up: [x, y, z]}. \
+         The views projected from it turn with it; all are projected again from the model → view, changed",
+    ),
+    CommandSpec::new("drawing.view.set_label", "View Label", set_label).icon("rename").params(
+        "view: a view id; identifier?: text not used by another view; label_visible?: bool (the label is the identifier over SCALE <scale>, under the view) \
+         → view, identifier, label_visible",
+    ),
+    CommandSpec::new("drawing.view.delete", "Delete View", delete).icon("delete").params(
+        "view: a view id; children?: delete (default: the views projected from it go too) or keep (they become base views) → deleted: view ids, kept",
+    ),
+    CommandSpec::new("drawing.update", "Update Views", update).icon("update").params(
+        "views?: view ids (default: every view whose model changed since it was drawn). Each is projected again from its model, its entities changed in place \
+         → updated: view ids, orphans: dimensions whose edge is gone, missing: the stored paths of models not found (their views keep their entities)",
     ),
 ];
 
@@ -102,13 +134,13 @@ fn lines(p: &Value, cmd: &str) -> Result<LineStyle> {
     }
 }
 
-/// `identifier`: text not taken by another view of the drawing.
-fn identifier(m: &DrawingModel, p: &Value, cmd: &str) -> Result<Option<String>> {
+/// `identifier`: text not taken by another view of the drawing (`except`: the view being renamed).
+fn identifier(m: &DrawingModel, p: &Value, cmd: &str, except: Option<ViewId>) -> Result<Option<String>> {
     match p.get("identifier") {
         None | Some(Value::Null) => Ok(None),
         Some(v) => {
             let text = v.as_str().map(str::trim).filter(|t| !t.is_empty() && t.len() <= 255).ok_or_else(|| bad(cmd, "`identifier` must be text"))?;
-            if m.views.values().any(|v| v.identifier == text) {
+            if m.views.values().any(|v| v.identifier == text && Some(v.id) != except) {
                 return Err(bad(cmd, format!("identifier {text} is taken")));
             }
             Ok(Some(text.to_string()))
@@ -119,6 +151,11 @@ fn identifier(m: &DrawingModel, p: &Value, cmd: &str) -> Result<Option<String>> 
 /// The view of `planned`'s model and orientation, projected.
 fn geometry(s: &Session, view: &DrawingView) -> Result<(ViewGeometry, ModelRevision, ModelKind)> {
     let loaded = load(s, &view.model)?;
+    geometry_of(&loaded, view)
+}
+
+/// `view` of the model `loaded`, projected.
+fn geometry_of(loaded: &LoadedModel, view: &DrawingView) -> Result<(ViewGeometry, ModelRevision, ModelKind)> {
     let kind = if loaded.session.doc.kind == DocumentKind::Part { ModelKind::Part } else { ModelKind::Assembly };
     let opts = ProjectOptions { lines: view.lines, tangent_edges: view.tangent_edges, tolerance_mm: TOLERANCE_MM };
     let g =
@@ -197,7 +234,7 @@ pub(crate) fn plan(s: &Session, cmd: &str, p: &Value) -> Result<Planned> {
             if m.sheets.is_empty() {
                 return Err(bad(cmd, "the drawing has no sheets"));
             }
-            let identifier = identifier(m, p, cmd)?;
+            let identifier = identifier(m, p, cmd, None)?;
             let given = p.get("model").and_then(Value::as_str).ok_or_else(|| bad(cmd, "`model` must be the path of a part or an assembly"))?;
             let model = model_ref(s, given, cmd)?;
             let mut v = unplaced(model, orientation, at);
@@ -271,6 +308,360 @@ fn projected(s: &mut Session, p: &Value) -> Result<Value> {
     place(s, cmd, planned)
 }
 
+// --- Editing placed views and regenerating them (Task 8) ---
+
+/// The `view` param: the id of a view of `m`.
+fn view_param(m: &DrawingModel, p: &Value, cmd: &str) -> Result<ViewId> {
+    let id = match p.get("view") {
+        Some(Value::Number(n)) => n.as_u64().ok_or_else(|| bad(cmd, "`view` must be a view id"))?,
+        _ => return Err(bad(cmd, "`view` must be a view id")),
+    };
+    if m.views.contains_key(&id) { Ok(id) } else { Err(bad(cmd, format!("no view {id}"))) }
+}
+
+/// The views projected from `id`, from `id`'s children down, each after its parent.
+fn descendants(views: &BTreeMap<ViewId, DrawingView>, id: ViewId) -> Vec<ViewId> {
+    let mut out: Vec<ViewId> = Vec::new();
+    let mut next = vec![id];
+    while let Some(parent) = next.pop() {
+        let children: Vec<ViewId> = views.values().filter(|v| v.parent == Some(parent) && v.id != id && !out.contains(&v.id)).map(|v| v.id).collect();
+        out.extend(children.iter().copied());
+        next.extend(children.into_iter().rev());
+    }
+    out
+}
+
+/// The projection that places `child` beside `parent`.
+fn projection_of(parent: &DrawingView, child: &DrawingView) -> Projection {
+    projection_at([parent.position.x, parent.position.y], [child.position.x, child.position.y])
+}
+
+/// `views` projected again from their (possibly changed) models, each with its new revision
+/// and kind; the model of each is loaded once.
+fn regenerated(s: &Session, views: Vec<DrawingView>, cmd: &str) -> Result<Vec<(DrawingView, ViewGeometry)>> {
+    let mut loads = Loads::default();
+    views
+        .into_iter()
+        .map(|mut v| {
+            let loaded = loads.get(s, &v.model).ok_or_else(|| crate::EngineError::Other(format!("{cmd}: model not found: {}", v.model.path)))?;
+            let (g, revision, kind) = geometry_of(&loaded, &v).map_err(|e| crate::EngineError::Other(format!("{cmd}: {e}")))?;
+            (v.revision, v.model.kind) = (revision, kind);
+            Ok((v, g))
+        })
+        .collect()
+}
+
+/// Writes `changed` views into `m`: regenerated ones through `mapper::place`, the others as
+/// stored; every one's label follows; the title blocks' SCALE is refreshed.
+fn install(m: &mut DrawingModel, changed: Vec<DrawingView>, regenerated: Vec<(DrawingView, ViewGeometry)>) {
+    for v in changed {
+        mapper::place_label(m, &v);
+        m.views.insert(v.id, v);
+    }
+    for (v, g) in regenerated {
+        mapper::place(m, &v, &g);
+        mapper::place_label(m, &v);
+        m.views.insert(v.id, v);
+    }
+    template::refresh_title_blocks(m);
+}
+
+fn set_style(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "drawing.view.set_style";
+    let m = drawing::require(s, cmd)?;
+    let id = view_param(m, p, cmd)?;
+    let given_lines = match p.get("lines") {
+        None | Some(Value::Null) => None,
+        Some(_) => Some(lines(p, cmd)?),
+    };
+    let given_shaded = match p.get("shaded") {
+        None | Some(Value::Null) => None,
+        Some(_) => Some(bool_param(p, "shaded", false, cmd)?),
+    };
+    let follow = match p.get("style_from_base") {
+        None | Some(Value::Null) => None,
+        Some(_) => Some(bool_param(p, "style_from_base", false, cmd)?),
+    };
+    if given_lines.is_none() && given_shaded.is_none() && follow.is_none() {
+        return Err(bad(cmd, "name lines, shaded or style_from_base"));
+    }
+    let mut views = m.views.clone();
+    let parent = views.get(&id).and_then(|v| v.parent).and_then(|p| views.get(&p)).map(|p| (p.lines, p.shaded));
+    let Some(v) = views.get_mut(&id) else { return Err(bad(cmd, format!("no view {id}"))) };
+    match (follow, parent) {
+        (Some(true), None) => return Err(bad(cmd, format!("{} is a base view: it has no parent style to follow", v.identifier))),
+        (Some(true), Some(_)) if given_lines.is_some() || given_shaded.is_some() => {
+            return Err(bad(cmd, "style_from_base: true takes the parent's style; give lines or shaded without it"));
+        }
+        (Some(true), Some((lines, shaded))) => (v.style_from_base, v.lines, v.shaded) = (true, lines, shaded),
+        _ => {
+            v.style_from_base = false;
+            v.lines = given_lines.unwrap_or(v.lines);
+            v.shaded = given_shaded.unwrap_or(v.shaded);
+        }
+    }
+    for child in descendants(&views, id) {
+        let Some(parent) = views.get(&child).and_then(|c| c.parent).and_then(|p| views.get(&p)).map(|p| (p.lines, p.shaded)) else { continue };
+        if let Some(c) = views.get_mut(&child).filter(|c| c.style_from_base) {
+            (c.lines, c.shaded) = parent;
+        }
+    }
+    let (mut redraw, mut changed) = (Vec::new(), Vec::new());
+    for (vid, v) in &views {
+        match m.views.get(vid) {
+            Some(old) if old.lines != v.lines => redraw.push(v.clone()),
+            Some(old) if old != v => changed.push(v.clone()),
+            _ => {}
+        }
+    }
+    let regenerated = regenerated(s, redraw, cmd)?;
+    let updated: Vec<ViewId> = changed.iter().map(|v| v.id).chain(regenerated.iter().map(|(v, _)| v.id)).collect();
+    drawing::edit(s, cmd, |m, _| {
+        install(m, changed, regenerated);
+        Ok(())
+    })?;
+    Ok(json!({"view": id, "changed": updated}))
+}
+
+fn set_scale(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "drawing.view.set_scale";
+    let m = drawing::require(s, cmd)?;
+    let id = view_param(m, p, cmd)?;
+    let given = match p.get("scale") {
+        None | Some(Value::Null) => None,
+        Some(_) => Some(scale(p, cmd)?),
+    };
+    let follow = match p.get("scale_from_base") {
+        None | Some(Value::Null) => None,
+        Some(_) => Some(bool_param(p, "scale_from_base", false, cmd)?),
+    };
+    let mut views = m.views.clone();
+    let parent = views.get(&id).and_then(|v| v.parent).and_then(|p| views.get(&p)).map(|p| p.scale);
+    let Some(v) = views.get_mut(&id) else { return Err(bad(cmd, format!("no view {id}"))) };
+    match (given, follow, parent) {
+        (None, None, _) => return Err(bad(cmd, "give scale or scale_from_base")),
+        (_, Some(true), None) => return Err(bad(cmd, format!("{} is a base view: it has no parent scale to follow", v.identifier))),
+        (Some(_), Some(true), _) => return Err(bad(cmd, "scale_from_base: true takes the parent's scale; give scale without it")),
+        (None, Some(true), Some(scale)) => (v.scale_from_base, v.scale) = (true, scale),
+        (given, _, _) => {
+            v.scale_from_base = false;
+            v.scale = given.unwrap_or(v.scale);
+        }
+    }
+    for child in descendants(&views, id) {
+        let Some(scale) = views.get(&child).and_then(|c| c.parent).and_then(|p| views.get(&p)).map(|p| p.scale) else { continue };
+        if let Some(c) = views.get_mut(&child).filter(|c| c.scale_from_base) {
+            c.scale = scale;
+        }
+    }
+    let changed: Vec<(DrawingView, f64)> =
+        views.into_values().filter_map(|v| m.views.get(&v.id).filter(|old| **old != v).map(|old| (v.clone(), old.scale))).collect();
+    let ids: Vec<ViewId> = changed.iter().map(|(v, _)| v.id).collect();
+    drawing::edit(s, cmd, |m, _| {
+        // The paper curves scale about the view's centre (the model is not read).
+        for (v, old) in &changed {
+            if *old != v.scale {
+                mapper::transform_view(m, v, &mapper::move_and_scale(v.position, v.position, v.scale / old));
+            }
+        }
+        install(m, changed.into_iter().map(|(v, _)| v).collect(), Vec::new());
+        Ok(())
+    })?;
+    Ok(json!({"view": id, "changed": ids}))
+}
+
+fn set_position(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "drawing.view.set_position";
+    let m = drawing::require(s, cmd)?;
+    let id = view_param(m, p, cmd)?;
+    let at = position(p, cmd)?;
+    let Some(v) = m.views.get(&id) else { return Err(bad(cmd, format!("no view {id}"))) };
+    // A projected orthographic view stays on its alignment axis.
+    let to = match v.parent.and_then(|p| m.views.get(&p)) {
+        Some(parent) => {
+            let [x, y] = aligned_position([parent.position.x, parent.position.y], projection_of(parent, v), [at.x, at.y]);
+            Vec2::new(x, y)
+        }
+        None => at,
+    };
+    let delta = to - v.position;
+    let moved: Vec<DrawingView> = std::iter::once(id)
+        .chain(descendants(&m.views, id))
+        .filter_map(|vid| m.views.get(&vid).cloned())
+        .map(|mut v| {
+            v.position += delta;
+            v
+        })
+        .collect();
+    drawing::edit(s, cmd, |m, _| {
+        for v in &moved {
+            if let Some(old) = m.views.get(&v.id).map(|o| o.position) {
+                mapper::transform_view(m, v, &mapper::move_and_scale(old, v.position, 1.0));
+            }
+        }
+        install(m, moved, Vec::new());
+        Ok(())
+    })?;
+    Ok(json!({"view": id, "position": [to.x, to.y]}))
+}
+
+fn set_orientation(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "drawing.view.set_orientation";
+    let m = drawing::require(s, cmd)?;
+    let id = view_param(m, p, cmd)?;
+    let Some(v) = m.views.get(&id) else { return Err(bad(cmd, format!("no view {id}"))) };
+    if let Some(parent) = v.parent.and_then(|p| m.views.get(&p)) {
+        return Err(bad(cmd, format!("only a base view's orientation can be set ({} is projected from {})", v.identifier, parent.identifier)));
+    }
+    if p.get("orientation").is_none_or(Value::is_null) {
+        return Err(bad(cmd, "`orientation` is required: a view cube target (front, top, iso_top_right, ...) or {dir, up}"));
+    }
+    let mut views = m.views.clone();
+    let o = orientation(p, cmd)?;
+    if let Some(v) = views.get_mut(&id) {
+        v.orientation = o;
+    }
+    let order = descendants(&views, id);
+    for child in &order {
+        let Some(c) = views.get(child) else { continue };
+        let Some(parent) = c.parent.and_then(|p| views.get(&p)) else { continue };
+        let derived = projected_orientation(&parent.orientation, projection_of(parent, c));
+        if let Some(c) = views.get_mut(child) {
+            c.orientation = derived;
+        }
+    }
+    let redraw: Vec<DrawingView> = std::iter::once(id).chain(order).filter_map(|vid| views.remove(&vid)).collect();
+    let regenerated = regenerated(s, redraw, cmd)?;
+    let ids: Vec<ViewId> = regenerated.iter().map(|(v, _)| v.id).collect();
+    drawing::edit(s, cmd, |m, _| {
+        install(m, Vec::new(), regenerated);
+        Ok(())
+    })?;
+    Ok(json!({"view": id, "changed": ids}))
+}
+
+fn set_label(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "drawing.view.set_label";
+    let m = drawing::require(s, cmd)?;
+    let id = view_param(m, p, cmd)?;
+    let name = identifier(m, p, cmd, Some(id))?;
+    let visible = match p.get("label_visible") {
+        None | Some(Value::Null) => None,
+        Some(_) => Some(bool_param(p, "label_visible", false, cmd)?),
+    };
+    if name.is_none() && visible.is_none() {
+        return Err(bad(cmd, "give identifier or label_visible"));
+    }
+    let Some(mut v) = m.views.get(&id).cloned() else { return Err(bad(cmd, format!("no view {id}"))) };
+    if let Some(name) = name {
+        v.identifier = name;
+    }
+    v.label_visible = visible.unwrap_or(v.label_visible);
+    let out = json!({"view": id, "identifier": v.identifier, "label_visible": v.label_visible});
+    drawing::edit(s, cmd, |m, _| {
+        install(m, vec![v], Vec::new());
+        Ok(())
+    })?;
+    Ok(out)
+}
+
+fn delete(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "drawing.view.delete";
+    let m = drawing::require(s, cmd)?;
+    let id = view_param(m, p, cmd)?;
+    let keep = match p.get("children") {
+        None | Some(Value::Null) => false,
+        Some(v) => match v.as_str().map(str::trim) {
+            Some("delete") => false,
+            Some("keep") => true,
+            _ => return Err(bad(cmd, "`children` must be delete or keep")),
+        },
+    };
+    let removed: Vec<ViewId> = if keep { vec![id] } else { std::iter::once(id).chain(descendants(&m.views, id)).collect() };
+    let freed: Vec<DrawingView> = if keep {
+        m.views
+            .values()
+            .filter(|c| c.parent == Some(id))
+            .map(|c| {
+                let mut c = c.clone();
+                (c.parent, c.style_from_base, c.scale_from_base) = (None, false, false);
+                c
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let kept: Vec<ViewId> = freed.iter().map(|v| v.id).collect();
+    drawing::edit(s, cmd, |m, _| {
+        for vid in &removed {
+            if let Some(v) = m.views.remove(vid) {
+                mapper::remove_view(m, &v);
+            }
+        }
+        install(m, freed, Vec::new());
+        Ok(())
+    })?;
+    model_ref::evict_unreferenced(s);
+    Ok(json!({"deleted": removed, "kept": kept}))
+}
+
+/// `drawing.update`: the given views (default: every view whose model has changed) projected
+/// again from their models in place, handles kept. Views whose model cannot be found keep their
+/// stored entities and are reported by the path they store.
+fn update(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "drawing.update";
+    let m = drawing::require(s, cmd)?;
+    let asked: Option<Vec<ViewId>> = match p.get("views") {
+        None | Some(Value::Null) => None,
+        Some(Value::Array(ids)) => Some(
+            ids.iter()
+                .map(|id| {
+                    let id = id.as_u64().ok_or_else(|| bad(cmd, "`views` must be an array of view ids"))?;
+                    if m.views.contains_key(&id) { Ok(id) } else { Err(bad(cmd, format!("no view {id}"))) }
+                })
+                .collect::<Result<Vec<_>>>()?,
+        ),
+        Some(_) => return Err(bad(cmd, "`views` must be an array of view ids")),
+    };
+    let targets: Vec<&DrawingView> = match &asked {
+        Some(ids) => m.views.values().filter(|v| ids.contains(&v.id)).collect(),
+        None => m.views.values().collect(),
+    };
+    let mut loads = Loads::default();
+    let (mut missing, mut redraw): (Vec<String>, Vec<(DrawingView, std::sync::Arc<model_ref::LoadedModel>)>) = (Vec::new(), Vec::new());
+    for v in targets {
+        match loads.get(s, &v.model) {
+            None => {
+                if !missing.contains(&v.model.path) {
+                    missing.push(v.model.path.clone());
+                }
+            }
+            Some(loaded) if asked.is_some() || loaded.revision != v.revision => redraw.push((v.clone(), loaded)),
+            Some(_) => {}
+        }
+    }
+    let mut regenerated = Vec::new();
+    for (mut v, loaded) in redraw {
+        let (g, revision, kind) = geometry_of(&loaded, &v).map_err(|e| crate::EngineError::Other(format!("{cmd}: {e}")))?;
+        (v.revision, v.model.kind) = (revision, kind);
+        regenerated.push((v, g));
+    }
+    let updated: Vec<ViewId> = regenerated.iter().map(|(v, _)| v.id).collect();
+    if !regenerated.is_empty() {
+        drawing::edit(s, cmd, |m, _| {
+            install(m, Vec::new(), regenerated);
+            Ok(())
+        })?;
+    }
+    model_ref::evict_unreferenced(s);
+    // Orphaned dimensions are counted once dimensions exist (Task 10).
+    Ok(json!({"updated": updated, "orphans": 0, "missing": missing}))
+}
+
 #[cfg(test)]
 #[path = "drawing_view_tests.rs"]
 mod drawing_view_tests;
+
+#[cfg(test)]
+#[path = "drawing_update_tests.rs"]
+mod drawing_update_tests;
