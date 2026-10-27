@@ -23,7 +23,8 @@
 //! The styles: Hidden Line keeps the hidden curves, Hidden Line Removed drops them. A shaded view
 //! draws the same curves over its raster (the edge overlay; the raster is `ViewRasterizer`'s),
 //! so shading changes nothing here. Tangent edges (`SourcedLine::smooth`) are dropped unless the
-//! view asks for them, before the visibility rules run.
+//! view asks for them, before the visibility rules run; one that is also a silhouette
+//! (`SourcedLine::silhouette`) is an outline and always stays (R54).
 // Drawing views (Task 7) are the first caller outside the tests.
 #![cfg_attr(not(test), allow(dead_code))]
 
@@ -138,7 +139,8 @@ pub(crate) fn project_view(model: &Session, o: &Orientation, opts: &ProjectOptio
 
     let mut lines = sourced_lines(model, &cam, opts.tolerance_mm)?;
     if !opts.tangent_edges {
-        lines.retain(|l| !l.smooth);
+        // R54: a tangent edge that is also a silhouette is an outline, and stays.
+        lines.retain(|l| !l.smooth || l.silhouette);
     }
     lines.retain(|l| l.a.dist(l.b) >= SAME);
     snap_silhouettes(&world, &frame, o.dir, opts.tolerance_mm, &mut lines);

@@ -83,6 +83,11 @@ pub(crate) struct Line {
     pub hidden: bool,
     /// What the line was projected from. `file.export_view_dxf` never writes it.
     pub source: EdgeRef,
+    /// A drawing view's line (`merge_lines` with `by_source`) along which a silhouette of the
+    /// same visibility is drawn, though the line is named after a B-rep edge drawn there (R54):
+    /// an outline, which a view never leaves out. Set when any part of the line has one, so the
+    /// lines split exactly as before. False in an export.
+    pub silhouette: bool,
 }
 
 /// The model edge a projected line comes from: of placement `placement` of the scene.
@@ -252,13 +257,15 @@ fn merge_lines(lines: Vec<Line>, eps: f64, by_source: bool) -> Vec<Line> {
                     } else {
                         source
                     };
+                    let silhouette = by_source && open.iter().any(|(s, h)| *h == is_hidden && matches!(s.kind, EdgeKind::Silhouette { .. }));
                     if let Some(p) = path.as_mut().filter(|p| p.hidden == is_hidden && p.b.dist(a) <= eps && (!by_source || p.source == named)) {
                         p.b = b;
+                        p.silhouette |= silhouette;
                     } else {
                         if let Some(p) = path.take() {
                             result.push(p);
                         }
-                        path = Some(Line { a, b, hidden: is_hidden, source: named });
+                        path = Some(Line { a, b, hidden: is_hidden, source: named, silhouette });
                     }
                 } else if let Some(p) = path.take() {
                     result.push(p);
@@ -375,7 +382,7 @@ fn reference_drawing(meshes: &[Mesh], cam: &Camera) -> Result<Vec<Line>, &'stati
             if a.dist(b) <= eps {
                 return;
             }
-            result.push(Line { a, b, hidden, source: EdgeRef { placement: 0, kind: EdgeKind::Brep(0) } });
+            result.push(Line { a, b, hidden, source: EdgeRef { placement: 0, kind: EdgeKind::Brep(0) }, silhouette: false });
         };
         let mut cursor = 0.0;
         for (lo, hi) in merged {
@@ -398,8 +405,8 @@ mod tests {
     fn a_visible_edge_overrides_only_the_overlapping_part_of_a_hidden_edge() {
         let source = EdgeRef { placement: 0, kind: EdgeKind::Brep(0) };
         let lines = vec![
-            Line { a: Vec2::ZERO, b: Vec2::new(10., 0.), hidden: true, source },
-            Line { a: Vec2::new(3., 0.), b: Vec2::new(7., 0.), hidden: false, source },
+            Line { a: Vec2::ZERO, b: Vec2::new(10., 0.), hidden: true, source, silhouette: false },
+            Line { a: Vec2::new(3., 0.), b: Vec2::new(7., 0.), hidden: false, source, silhouette: false },
         ];
         let merged = merge_lines(lines, 1e-8, false);
         assert_eq!(merged.len(), 3);

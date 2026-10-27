@@ -207,27 +207,67 @@ fn tangent_edges_appear_only_when_asked() {
     let on = view(&s, "top", LineStyle::Hidden, true);
     assert_eq!(on, off);
     assert_no_visible_duplicates(&on);
-    // The tube's two certified tangent joins, seen from the front at x = -10 and 10, 10 mm
-    // tall: drawn only with tangent edges on.
+    // The tube's two certified tangent joins, seen from the iso corner, where they are not its
+    // outline: drawn only with tangent edges on.
     let s = tube();
-    let off = view(&s, "front", LineStyle::Hidden, false);
-    let on = view(&s, "front", LineStyle::Hidden, true);
-    let at = |g: &ViewGeometry, x: f64| -> Vec<ViewCurve> {
-        g.curves
-            .iter()
-            .filter(|c| matches!(c.curve, PaperCurve::Line { a, b } if near(a.x, x) && near(b.x, x) && near((a.y - b.y).abs(), 10.)))
-            .cloned()
-            .collect()
-    };
-    for x in [-10., 10.] {
-        let joins = at(&on, x);
-        assert_eq!(joins.len(), 1, "{x}: {:#?}", on.curves);
-        assert!(!joins[0].hidden && joins[0].edge.starts_with("0/Tube/e/F2:side:s1|F2:side:s2~"), "{joins:?}");
-        assert!(at(&off, x).is_empty(), "{x}: {:#?}", off.curves);
-    }
-    assert_eq!(on.curves.len(), off.curves.len() + 2, "{:#?}\n{:#?}", on.curves, off.curves);
+    let off = view(&s, "iso_top_right", LineStyle::Hidden, false);
+    let on = view(&s, "iso_top_right", LineStyle::Hidden, true);
+    let joins =
+        |g: &ViewGeometry| -> Vec<ViewCurve> { g.curves.iter().filter(|c| c.edge.starts_with("0/Tube/e/F2:side:s1|F2:side:s2~")).cloned().collect() };
+    assert_eq!(joins(&on).len(), 2, "{:#?}", on.curves);
+    assert!(joins(&off).is_empty(), "{:#?}", off.curves);
+    assert_eq!(
+        on.curves.len(),
+        off.curves.len() + 2,
+        "{:#?}
+{:#?}",
+        on.curves,
+        off.curves
+    );
     assert_no_visible_duplicates(&on);
     assert_no_visible_duplicates(&off);
+}
+
+/// The tube with a 6 mm bore.
+fn bored_tube() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.spline.control_point", json!({"points": [[10, 0], [10, 13.333], [-10, 13.333], [-10, 0]]}));
+    run(&mut s, "sketch.spline.control_point", json!({"points": [[-10, 0], [-10, -6], [10, -6], [10, 0]]}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 2], "radius": 3}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 10, "body_name": "Tube"}));
+    s
+}
+
+#[test]
+fn tangent_silhouettes_are_always_drawn() {
+    // R54: from the front the tube's tangent joins at x = -10 and 10 are its outline, so they are
+    // drawn with tangent edges off and on, named after the joins (B-rep edges); the
+    // bore's silhouettes are the hidden lines at x = -3 and 3.
+    let s = bored_tube();
+    for tangent_edges in [false, true] {
+        let g = view(&s, "front", LineStyle::Hidden, tangent_edges);
+        let at = |x: f64, hidden: bool| -> Vec<ViewCurve> {
+            g.curves
+                .iter()
+                .filter(|c| {
+                    c.hidden == hidden && matches!(c.curve, PaperCurve::Line { a, b } if near(a.x, x) && near(b.x, x) && near((a.y - b.y).abs(), 10.))
+                })
+                .cloned()
+                .collect()
+        };
+        for x in [-10., 10.] {
+            let outline = at(x, false);
+            assert_eq!(outline.len(), 1, "{tangent_edges} {x}: {:#?}", g.curves);
+            assert!(outline[0].edge.starts_with("0/Tube/e/") && outline[0].edge.contains("F2:side:s2~"), "{outline:?}");
+        }
+        for x in [-3., 3.] {
+            assert_eq!(at(x, true).len(), 1, "{tangent_edges} {x}: {:#?}", g.curves);
+        }
+        assert!(near2(g.min, Vec2::new(-10., -5.)) && near2(g.max, Vec2::new(10., 5.)), "{:?} {:?}", g.min, g.max);
+        assert_no_visible_duplicates(&g);
+    }
 }
 
 #[test]

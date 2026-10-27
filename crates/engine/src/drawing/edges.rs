@@ -14,7 +14,8 @@
 //!   by the projected x of their midpoints, then y; a silhouette is all its collinear end-to-end
 //!   pieces, hidden or not, so an occluder that splits one renumbers none (R53).
 //! - A tangent edge (`Mesh::smooth_edges`) is drawn, as a `Brep` line with `smooth` set, so a
-//!   view can leave it out (R48); an export never draws it.
+//!   view can leave it out (R48); an export never draws it. Where it is also a silhouette (a
+//!   tube's outline) it is marked `silhouette`, and a view always draws it (R54).
 // Drawing views (Task 6) are the first caller outside the tests.
 #![cfg_attr(not(test), allow(dead_code))]
 
@@ -64,6 +65,9 @@ pub(crate) struct SourcedLine {
     pub mesh_edge: Option<u32>,
     /// A tangent edge (`Mesh::smooth_edges`), which a view shows only when asked.
     pub smooth: bool,
+    /// A silhouette, or a B-rep edge drawn where a silhouette of the same visibility runs (the
+    /// merge names it after the edge): an outline, always drawn, even when `smooth` (R54).
+    pub silhouette: bool,
 }
 
 /// The HLR of `model`'s visible bodies seen by `cam`, each line naming its source.
@@ -153,6 +157,7 @@ fn name_lines(model: &Session, scene: &Scene, lines: Vec<Line>) -> Result<Vec<So
         let placed = scene.placements.get(line.source.placement as usize).ok_or_else(|| lost("a placement"))?;
         let named = names.get(&line.source.placement).ok_or_else(|| lost(&placed.body))?;
         let (component_path, body_name) = (placed.component_path.clone(), placed.body.clone());
+        let silhouette = line.silhouette || matches!(line.source.kind, EdgeKind::Silhouette { .. });
         let (source, mesh_edge, smooth) = match line.source.kind {
             EdgeKind::Brep(i) => {
                 let edge_name = named.edges.get(i as usize).ok_or_else(|| lost("an edge"))?.clone();
@@ -164,7 +169,7 @@ fn name_lines(model: &Session, scene: &Scene, lines: Vec<Line>) -> Result<Vec<So
                 (EdgeSource::Silhouette { component_path, body_name, face_name, k }, None, false)
             }
         };
-        out.push(SourcedLine { a: line.a, b: line.b, hidden: line.hidden, source, mesh_edge, smooth });
+        out.push(SourcedLine { a: line.a, b: line.b, hidden: line.hidden, source, mesh_edge, smooth, silhouette });
     }
     Ok(out)
 }

@@ -516,7 +516,7 @@ pub(super) fn drawing(scene: &Scene, sketch: &[Part], cam: &Camera) -> Result<Dr
                     if !claim(&output, 1, MAX_LINES) {
                         return Err(TOO_COMPLEX);
                     }
-                    lines.push(Line { a: p, b: q, hidden, source });
+                    lines.push(Line { a: p, b: q, hidden, source, silhouette: false });
                 }
                 Ok(())
             };
