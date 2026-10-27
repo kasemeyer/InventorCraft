@@ -507,3 +507,27 @@ fn kept_children_keep_their_dimensions() {
 fn drawing_sick(s: &Session) -> BTreeSet<u64> {
     crate::drawing::sick_dimensions(model(s))
 }
+
+/// Final wave 12: set_style, set_label and set_position that change nothing add no undo step
+/// (and no revision); one that changes something adds one.
+#[test]
+fn no_op_view_edits_add_no_undo_step() {
+    let (mut s, _, [v1, v2, v3]) = three_views("no_op_view_edits_add_no_undo_step");
+    let (undo, revision) = (s.undo.len(), s.revision);
+    let style = run(&mut s, "drawing.view.set_style", json!({"view": v1, "lines": "hidden"}));
+    assert_eq!(style["changed"], json!([]));
+    run(&mut s, "drawing.view.set_style", json!({"view": v2, "style_from_base": true}));
+    let name = view(&s, v3).identifier.clone();
+    let label = run(&mut s, "drawing.view.set_label", json!({"view": v3, "identifier": name, "label_visible": false}));
+    assert_eq!(label["label_visible"], json!(false));
+    let at = position(&s, v1);
+    let moved = run(&mut s, "drawing.view.set_position", json!({"view": v1, "position": at}));
+    assert_eq!(moved["position"], json!(at));
+    // A projected view asked to leave its alignment axis only along it stays put too.
+    let at2 = position(&s, v2);
+    run(&mut s, "drawing.view.set_position", json!({"view": v2, "position": [at2[0] + 3.0, at2[1]]}));
+    assert_eq!(position(&s, v2), at2);
+    assert_eq!((s.undo.len(), s.revision), (undo, revision));
+    run(&mut s, "drawing.view.set_label", json!({"view": v3, "label_visible": true}));
+    assert_eq!(s.undo.len(), undo + 1);
+}

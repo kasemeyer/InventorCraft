@@ -471,10 +471,13 @@ fn set_style(s: &mut Session, p: &Value) -> Result<Value> {
     let texts = std::mem::take(&mut states.notes);
     let state = states.rasters.get(&id).copied().unwrap_or_else(|| views.get(&id).map_or(raster::NONE, raster_state));
     let updated: Vec<ViewId> = changed.iter().map(|v| v.id).chain(regenerated.iter().map(|(v, _)| v.id)).collect();
-    drawing::edit(s, cmd, |m, _| {
-        install(m, changed, regenerated, &texts);
-        Ok(())
-    })?;
+    // Nothing changed: no edit, so no empty undo step.
+    if !updated.is_empty() {
+        drawing::edit(s, cmd, |m, _| {
+            install(m, changed, regenerated, &texts);
+            Ok(())
+        })?;
+    }
     // The annotations the styles now suppress (R58, R61): kept, not drawn, not sick.
     let suppressed = s.doc.drawing.as_deref().map_or(0, |m| drawing::suppressed_annotations(m).len());
     Ok(json!({"view": id, "changed": updated, "raster": state, "suppressed": suppressed}))
@@ -556,6 +559,10 @@ fn set_position(s: &mut Session, p: &Value) -> Result<Value> {
         None => at,
     };
     let delta = to - v.position;
+    // Already there: no edit, so no empty undo step.
+    if delta.x == 0.0 && delta.y == 0.0 {
+        return Ok(json!({"view": id, "position": [to.x, to.y]}));
+    }
     let moved: Vec<DrawingView> = std::iter::once(id)
         .chain(descendants(&m.views, id))
         .filter_map(|vid| m.views.get(&vid).cloned())
@@ -632,6 +639,10 @@ fn set_label(s: &mut Session, p: &Value) -> Result<Value> {
     }
     v.label_visible = visible.unwrap_or(v.label_visible);
     let out = json!({"view": id, "identifier": v.identifier, "label_visible": v.label_visible});
+    // Nothing changed: no edit, so no empty undo step.
+    if m.views.get(&id) == Some(&v) {
+        return Ok(out);
+    }
     drawing::edit(s, cmd, |m, _| {
         install(m, vec![v], Vec::new(), &[]);
         Ok(())
