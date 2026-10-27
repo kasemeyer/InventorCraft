@@ -124,8 +124,9 @@ fn frame(s: &Session, d: &mut Dialog) -> Option<(ReferenceFrame, Vec<usize>)> {
 
 /// Keep the distances and the hole's place in step: a new place or a new edge is measured, a
 /// typed distance moves the place there (when it stays on the face). Run before the dialog's
-/// commands are made.
-pub(crate) fn sync(s: &Session, d: &mut Dialog) {
+/// commands are made. A measured distance is written in `unit` (the drag arrows' unit: the design
+/// unit under the profile's `workflow.plane_drag`, millimetres otherwise).
+pub(crate) fn sync(s: &Session, d: &mut Dialog, unit: &crate::canvas::DragUnit) {
     if !single(d) {
         return;
     }
@@ -160,7 +161,7 @@ pub(crate) fn sync(s: &Session, d: &mut Dialog) {
                     if let Some(slot) = refs.distance.get_mut(*k)
                         && (moved || new_edge || slot.trim().is_empty())
                     {
-                        *slot = crate::canvas::format_len(v.max(0.0));
+                        *slot = unit.text(v.max(0.0));
                     }
                     if new_edge && edges.get(*k).is_some_and(Option::is_some) {
                         refs.focus = Some(*k);
@@ -179,7 +180,7 @@ pub(crate) fn sync(s: &Session, d: &mut Dialog) {
 
 /// The Single hole's selection rows, each reference edge with its distance on the row below it
 /// once it is picked. Whether Enter was pressed in a distance.
-pub(crate) fn input_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session) -> bool {
+pub(crate) fn input_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, unit: &crate::canvas::DragUnit) -> bool {
     let mut enter = false;
     for i in 0..d.inputs.len() {
         crate::dialogs::input_rows_range(d, ui, s, i..i + 1);
@@ -192,7 +193,7 @@ pub(crate) fn input_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session) -> bool
             enter |= crate::ui_kit::expr_row(ui, label, value);
         }
     }
-    sync(s, d);
+    sync(s, d, unit);
     enter
 }
 

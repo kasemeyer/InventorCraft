@@ -365,3 +365,23 @@ fn the_sketch_move_arrow_writes_the_design_unit() {
     }
 }
 
+#[test]
+fn an_edge_pick_writes_the_hole_reference_distance_in_the_design_unit() {
+    for inv in [true, false] {
+        let mut h = inch_box(inv);
+        // The place, 1 in from the left edge (x = 0) and 0.75 in from the front one (y = 0).
+        h.run(&json!([
+            {"start": "solid.hole"},
+            {"click": {"world": [MM_PER_IN, 0.75 * MM_PER_IN, 12.7]}},
+            {"click": {"handle": "dialog:Reference 1"}},
+            {"click": {"world": [0, MM_PER_IN, 12.7]}}
+        ]))
+        .unwrap();
+        h.settle();
+        let Some(Kind::Hole { opts, .. }) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("the Hole dialog closed") };
+        let measured = opts.refs.distance[0].clone();
+        // Inventor writes the inch Part's unit; SolidCraft keeps upstream's millimetres.
+        assert_eq!(measured, if inv { "1 in" } else { "25.4 mm" }, "inventor profile: {inv}");
+        assert!((h.app.session.doc.eval(&measured, ValueKind::Length).unwrap() - MM_PER_IN).abs() < 1e-9);
+    }
+}

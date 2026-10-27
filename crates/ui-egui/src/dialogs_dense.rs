@@ -186,7 +186,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
     placement_row(app, d, ui);
     if matches!(&d.kind, Kind::Hole { opts, .. } if !opts.multiple) {
         // Each reference edge with its distance (#37).
-        enter |= crate::hole_refs::input_rows(d, ui, &app.session);
+        enter |= crate::hole_refs::input_rows(d, ui, &app.session, &crate::canvas::DragUnit::arrows(app));
     } else {
         input_rows(d, ui, &app.session);
     }
