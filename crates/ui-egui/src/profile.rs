@@ -188,6 +188,10 @@ pub struct RibbonPanel {
     pub groups: Vec<Group>,
     /// Face commands drawn as small buttons (icon and label, three high); the rest draw large.
     pub small: Vec<String>,
+    /// Small commands drawn instead as the icon-only cells of the panel's grid (the SKETCH/CONSTRAIN
+    /// constraint gallery), in reading order. Every grid command is also in `small`; the face's
+    /// other small commands stack in columns before the grid.
+    pub grid: Vec<String>,
     /// Not drawn unless the user shows it (C3); set per tab by the tab's panel reference.
     pub hidden: bool,
     /// Face buttons that are split buttons: the face runs a command, its arrow opens a list.
@@ -476,6 +480,7 @@ pub fn solidcraft() -> Profile {
                             .map(|g| Group { label: g.label.into(), commands: g.ids.iter().map(|id| id.to_string()).collect() })
                             .collect(),
                         small: Vec::new(),
+                        grid: Vec::new(),
                         hidden: false,
                         dropdowns: Vec::new(),
                     })
@@ -574,6 +579,8 @@ struct PanelJson {
     #[serde(default)]
     small: Vec<String>,
     #[serde(default)]
+    grid: Vec<String>,
+    #[serde(default)]
     dropdowns: Vec<Dropdown>,
 }
 
@@ -652,6 +659,7 @@ pub fn parse(text: &str, base: &Profile) -> Result<Profile, String> {
                             shown: p.shown,
                             groups: p.groups.clone(),
                             small: p.small.clone(),
+                            grid: p.grid.clone(),
                             hidden,
                             dropdowns: p.dropdowns.clone(),
                         });
@@ -807,6 +815,9 @@ pub fn validate(profile: &Profile) -> Vec<String> {
                 let face = panel.commands.get(..panel.promoted).unwrap_or(&panel.commands);
                 for c in panel.small.iter().filter(|c| !face.contains(c)) {
                     out.push(format!("{k} {t}/{p}: small {c} is not among the first {} commands", panel.promoted));
+                }
+                for c in panel.grid.iter().filter(|c| !panel.small.contains(c)) {
+                    out.push(format!("{k} {t}/{p}: grid {c} is not a small command"));
                 }
                 out.extend(validate_dropdowns(&format!("{k} {t}/{p}"), panel, face, &mut dropdown_lists));
             }
@@ -1029,15 +1040,15 @@ pub fn is_small(app: &SolveApp, tab: &str, panel: &str, id: &str) -> bool {
 
 /// Where `id` sits in the constraint gallery (the SKETCH/CONSTRAIN panel's grid of icon-only
 /// cells) of a customisation scope ([`custom_scope`]): SolidCraft's
-/// `workspace::CONSTRAINT_GALLERY`, else the small commands of that profile and kind's
-/// CONSTRAIN panel, in the panel's order. None when it is not a gallery command there.
+/// `workspace::CONSTRAINT_GALLERY`, else the `grid` of that profile and kind's CONSTRAIN panel,
+/// in its order. None when it is not a gallery command there.
 pub fn gallery_position(scope: &str, id: &str) -> Option<usize> {
     if scope == crate::toolbar_custom::WORKSPACE {
         return workspace::CONSTRAINT_GALLERY.iter().position(|c| *c == id);
     }
     let (profile, kind) = scope.split_once('.')?;
     let (_, ribbon) = get(profile)?.ribbons().find(|(k, _)| kind_name(*k) == kind)?;
-    ribbon.tab("SKETCH")?.panel("CONSTRAIN")?.small.iter().position(|c| c == id)
+    ribbon.tab("SKETCH")?.panel("CONSTRAIN")?.grid.iter().position(|c| c == id)
 }
 
 /// The active panel's drop-down order (Ruling 18: one shared function, `workspace::group_commands`).

@@ -198,10 +198,10 @@ fn the_constraint_gallery_follows_the_profile_panel_order() {
     h.app.ui.tab = "SKETCH".into();
     h.frames(3);
     let panel = crate::profile::ribbon(&h.app).tab("SKETCH").unwrap().panel("CONSTRAIN").unwrap();
-    assert_eq!(panel.small.len(), 13);
+    assert_eq!(panel.grid.len(), 13);
     let dimension = rect_of("button:sketch.dimension").unwrap();
     let mut cells: Vec<(&str, egui::Rect)> = panel
-        .small
+        .grid
         .iter()
         .map(|id| {
             let cell = rect_of(&format!("ribbon:constraint:{id}")).unwrap_or_else(|| panic!("{id} is not a gallery cell"));
@@ -212,10 +212,53 @@ fn the_constraint_gallery_follows_the_profile_panel_order() {
         .collect();
     // Reading order (rows top to bottom, each left to right) is the panel's order.
     cells.sort_by(|a, b| a.1.top().total_cmp(&b.1.top()).then(a.1.left().total_cmp(&b.1.left())));
-    assert_eq!(cells.iter().map(|(id, _)| *id).collect::<Vec<_>>(), panel.small);
+    assert_eq!(cells.iter().map(|(id, _)| *id).collect::<Vec<_>>(), panel.grid);
     assert!(cells.iter().all(|(_, cell)| cell.bottom() <= dimension.bottom()), "the gallery is taller than the buttons");
     // SolidCraft keeps its own gallery and order.
     assert_eq!(crate::profile::gallery_position("DESIGN", crate::workspace::CONSTRAINT_GALLERY[0]), Some(0));
     assert_eq!(crate::profile::gallery_position("DESIGN", "sketch.constraint.fix"), None);
     assert_eq!(crate::profile::gallery_position("inventor.part", "sketch.constraint.coincident"), Some(0));
+}
+
+#[test]
+fn the_constrain_panel_is_dimension_large_then_a_small_column_then_the_grid() {
+    let mut h = inventor(Part);
+    h.app.home.open = false;
+    h.call("ui.resize", json!({"width": 3200, "height": 1200}));
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.ui.tab = "SKETCH".into();
+    h.frames(3);
+    // The face, before the grid: Dimension alone at the large tier, then one column of three.
+    assert_eq!(
+        inventor_face("SKETCH", "CONSTRAIN").get(..2).unwrap(),
+        ["sketch.dimension", "[sketch.auto_constrain, sketch.auto_constrain_from_datum, sketch.constrainer]"]
+    );
+    let dimension = rect_of("button:sketch.dimension").unwrap();
+    assert!(rect_of("ribbon:constraint:sketch.dimension").is_none(), "Dimension is drawn in the grid");
+    let pattern = rect_of("button:sketch.pattern.rectangular").unwrap();
+    let ids = ["sketch.auto_constrain", "sketch.auto_constrain_from_datum", "sketch.constrainer"];
+    let helpers = ids.map(|id| rect_of(&format!("button:{id}")).unwrap());
+    // Dimension is the panel's first control: right of the PATTERN panel, left of everything else.
+    assert!(dimension.left() > pattern.right());
+    for helper in helpers {
+        assert!((helper.height() - dimension.height() / 3.0).abs() <= 1.5, "{helper:?} is not small beside {dimension:?}");
+        assert!((helper.left() - helpers[0].left()).abs() <= 0.5, "{helper:?} is not in one column");
+        assert!(helper.left() > dimension.right());
+    }
+    for id in ids {
+        assert!(rect_of(&format!("ribbon:constraint:{id}")).is_none(), "{id} is drawn in the grid");
+    }
+    assert!(helpers[0].top() < helpers[1].top() && helpers[1].top() < helpers[2].top());
+    // The grid follows the column and still holds every constraint, and no helper.
+    let panel = crate::profile::ribbon(&h.app).tab("SKETCH").unwrap().panel("CONSTRAIN").unwrap();
+    assert_eq!(panel.grid.len(), 13);
+    for id in &panel.grid {
+        let cell = rect_of(&format!("ribbon:constraint:{id}")).unwrap_or_else(|| panic!("{id} is not a gallery cell"));
+        assert!(cell.left() > helpers[0].right(), "{id} is not after the small column");
+    }
+    // The alias still starts Dimension.
+    h.app.alias.fired = None;
+    h.step(&json!({"key": "D"})).unwrap();
+    h.frames(crate::profile::active(&h.app).alias_wait_ms as usize * 60 / 1000 + 2);
+    assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some("sketch.dimension"));
 }

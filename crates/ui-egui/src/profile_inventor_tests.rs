@@ -126,13 +126,18 @@ const PART_FACES: &[(&str, &str, &[(&str, bool)])] = &[
         ],
     ),
     ("SKETCH", "PATTERN", &[("sketch.pattern.rectangular", S), ("sketch.pattern.circular", S), ("sketch.mirror", S)]),
-    // The capture's order. `horizontal_vertical` stands in for both Horizontal and Vertical, at
-    // Horizontal's place; midpoint and polygon have no capture slot and close the grid.
+    // The capture's order: Dimension large and alone, then a small column standing for Auto
+    // Dimension / Show Constraints / Constraint Settings, then the grid. `horizontal_vertical`
+    // stands in for both Horizontal and Vertical, at Horizontal's place; midpoint and polygon
+    // have no capture slot and close the grid.
     (
         "SKETCH",
         "CONSTRAIN",
         &[
             ("sketch.dimension", L),
+            ("sketch.auto_constrain", S),
+            ("sketch.auto_constrain_from_datum", S),
+            ("sketch.constrainer", S),
             ("sketch.constraint.coincident", S),
             ("sketch.constraint.parallel", S),
             ("sketch.constraint.tangent", S),
@@ -705,4 +710,13 @@ fn validate_rejects_fixed_face_outside_a_drop_down_and_a_face_off_its_list() {
     let p = inventor_with(|v| v["panels"]["work_features"]["dropdowns"][0]["face"] = json!("construct.axis.edge")).unwrap();
     let problems = validate(&p);
     assert!(problems.iter().any(|m| m.contains("drop-down work_plane: face construct.axis.edge is not in its commands")), "{problems:?}");
+}
+
+#[test]
+fn validate_rejects_a_grid_command_that_is_not_small() {
+    assert!(validate(inventor()).is_empty(), "{:?}", validate(inventor()));
+    // Dimension is large: it cannot be a grid cell.
+    let p = inventor_with(|v| v["panels"]["constrain"]["grid"].as_array_mut().unwrap().push(json!("sketch.dimension"))).unwrap();
+    let problems = validate(&p);
+    assert!(problems.iter().any(|m| m.ends_with("SKETCH/CONSTRAIN: grid sketch.dimension is not a small command")), "{problems:?}");
 }
