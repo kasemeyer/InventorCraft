@@ -40,7 +40,19 @@ pub(crate) struct Anchor {
 pub(crate) enum Direction {
     Horizontal,
     Vertical,
+    /// Along the line from the first point to the second.
     Aligned,
+    /// Along this unit direction: two parallel lines' normal (wave 3, R101), so the dimension
+    /// reads the perpendicular distance between them. A rotated linear dimension (DXF), which
+    /// reports as aligned (`kind_name`).
+    Across(Vec2),
+}
+
+/// The unit normal of a line along `along`, turned into (-90°, 90°] so that the same pair of
+/// lines always gives the same rotation.
+pub(crate) fn normal_of(along: Vec2) -> Vec2 {
+    let n = along.normalized().perp();
+    if n.x < 0.0 || (n.x == 0.0 && n.y < 0.0) { Vec2::new(-n.x, -n.y) } else { n }
 }
 
 fn v3(p: Vec2) -> Vec3 {
@@ -82,6 +94,7 @@ pub(crate) fn linear(first: &Anchor, second: &Anchor, direction: Direction, plac
             let d = (p2 - p1).normalized();
             (DimKind::Aligned, if d == Vec2::ZERO || !d.is_finite() { Vec2::X } else { d })
         }
+        Direction::Across(n) => (DimKind::Linear { rotation: n.angle() }, n),
     };
     let foot = |p: Vec2| placement + dir * (p - placement).dot(dir);
     let mut d = blank(kind, scale);
@@ -119,10 +132,21 @@ pub(crate) fn add(paper: &mut Drawing, layout: &str, mut d: Dimension) -> crate:
     paper.add(&Space::Paper(layout.to_string()), common, EntityKind::Dimension(d)).map_err(|e| crate::EngineError::Other(e.to_string()))
 }
 
-/// What a dimension is, in a command's result.
+/// What a dimension is, in a command's result (wave 3, R101): `linear_h`, `linear_v`, `aligned`
+/// (an aligned dimension, or a linear one turned to neither axis: the distance across two
+/// parallel lines), `diameter` or `radius`.
 pub(crate) fn kind_name(d: &Dimension) -> &'static str {
     match d.kind {
-        DimKind::Linear { .. } => "linear",
+        DimKind::Linear { rotation } => {
+            let r = rotation.rem_euclid(std::f64::consts::PI);
+            if r <= 1e-9 || std::f64::consts::PI - r <= 1e-9 {
+                "linear_h"
+            } else if (r - std::f64::consts::FRAC_PI_2).abs() <= 1e-9 {
+                "linear_v"
+            } else {
+                "aligned"
+            }
+        }
         DimKind::Aligned => "aligned",
         DimKind::Diameter => "diameter",
         DimKind::Radius => "radius",

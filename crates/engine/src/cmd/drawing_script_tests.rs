@@ -112,7 +112,7 @@ fn the_example_script_makes_the_two_view_drawing() {
     let texts: Vec<&str> = dims.iter().map(|r| r["text"].as_str().unwrap()).collect();
     assert_eq!(texts, ["3.00", "2.00", "⌀.75", "R.50"]);
     let kinds: Vec<&str> = dims.iter().map(|r| r["kind"].as_str().unwrap()).collect();
-    assert_eq!(kinds, ["linear", "linear", "diameter", "radius"]);
+    assert_eq!(kinds, ["linear_h", "linear_v", "diameter", "radius"]);
     for (r, text) in dims.iter().zip(texts) {
         assert_eq!(dimension_text(m, r["handle"].as_u64().unwrap()).as_deref(), Some(text));
     }

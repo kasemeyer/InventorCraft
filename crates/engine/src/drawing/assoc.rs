@@ -77,7 +77,7 @@ fn close(a: Vec2, b: Vec2) -> bool {
 }
 
 /// A circle or arc (centre, radius) by handle.
-fn circle_of(d: &Drawing, h: Handle) -> Option<(Vec2, f64)> {
+pub(crate) fn circle_of(d: &Drawing, h: Handle) -> Option<(Vec2, f64)> {
     match &d.entity(h)?.kind {
         EntityKind::Circle(c) => Some((c.center.xy(), c.radius)),
         EntityKind::Arc(a) => Some((a.center.xy(), a.radius)),

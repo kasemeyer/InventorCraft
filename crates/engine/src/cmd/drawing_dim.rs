@@ -20,9 +20,10 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("drawing.dim.general", "General Dimension", general).icon("dimension").params(
         "As Inventor's General Dimension, the kind is chosen by the picks: one straight edge gives its length (horizontal or vertical by the edge, else aligned); \
          a circle gives a diameter, an arc a radius; two picks give the distance between their snap points (default: a line's mid point, a circle's or arc's centre), \
-         horizontal when the placement is above or below them, vertical when it is left or right, unless orientation: horizontal|vertical|aligned is given. \
+         horizontal when the placement is above or below them, vertical when it is left or right, unless orientation: horizontal|vertical|aligned is given; \
+         two parallel lines (no snaps) that are neither horizontal nor vertical give the aligned distance across them, which orientation: aligned also asks of any parallel pair. \
          view: a view id; picks: one or two of {edge: a model edge id shown by the view (segment?: which piece), snap?: start|end|mid|center|vertex (a polyline's vertex: vertex?: its index, else the one nearest `at`)} or {at: [x, y], snap?}; \
-         placement: [x, y] in inches → handle, kind: linear|aligned|diameter|radius, text: what it draws",
+         placement: [x, y] in inches → handle, kind: linear_h|linear_v|aligned|diameter|radius, text: what it draws",
     ),
     CommandSpec::new("drawing.dim.linear", "Linear Dimension", linear).icon("dimension").params(
         "A horizontal or vertical dimension of one straight edge or between two picks, chosen by the placement unless orientation: horizontal|vertical is given. \
@@ -42,7 +43,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("drawing.dim.edit", "Edit Dimension", edit).icon("edit").params(
         "dim: a dimension's handle; text?: what it says, where <<>> stands for the measured value (\"\" = the value alone); hide_value?: bool (true drops <<>>, false puts it back); \
          precision?: 0 to 6 decimals, or null for the style's; justify?: {horizontal?: center|first|second, vertical?: centered|above|below}; \
-         ext_lines?: {first?: bool, second?: bool} (false hides that extension line) → handle, kind, text",
+         ext_lines?: {first?: bool, second?: bool} (false hides that extension line); type?: aligned|horizontal|vertical (a linear or aligned dimension) or radius|diameter (a radial one), measured again → handle, kind, text",
     ),
 ];
 
@@ -211,6 +212,7 @@ fn measurable(a: Vec2, b: Vec2, d: Direction, cmd: &str) -> Result<Direction> {
         Direction::Horizontal => ((b.x - a.x).abs(), "horizontal"),
         Direction::Vertical => ((b.y - a.y).abs(), "vertical"),
         Direction::Aligned => (a.dist(b), "aligned"),
+        Direction::Across(n) => ((b - a).dot(n).abs(), "aligned"),
     };
     if extent <= 1e-9 {
         return Err(bad(cmd, format!("a {name} dimension here would measure nothing: give another orientation")));
@@ -246,6 +248,46 @@ fn edge_direction(a: Vec2, b: Vec2) -> Direction {
     } else {
         Direction::Aligned
     }
+}
+
+/// What two picks are as lines (R101).
+#[derive(Clone, Copy, PartialEq)]
+enum LinePair {
+    /// Not two straight lines with no snap (a point is involved).
+    Not,
+    /// Two parallel lines, along this unit direction.
+    Parallel(Vec2),
+    /// Two lines that are not parallel.
+    Crossing,
+}
+
+/// Two picks that are both straight lines with no snap (each measured at its middle).
+fn line_pair(a: &Picked, b: &Picked) -> LinePair {
+    let (EntityKind::Line(la), EntityKind::Line(lb), None, None) = (&a.kind, &b.kind, a.snap, b.snap) else { return LinePair::Not };
+    lines_parallel(la.b.xy() - la.a.xy(), lb.b.xy() - lb.a.xy()).map_or(LinePair::Crossing, LinePair::Parallel)
+}
+
+/// `da` (normalized) when `da` and `db` are parallel (either way round).
+fn lines_parallel(da: Vec2, db: Vec2) -> Option<Vec2> {
+    let (da, db) = (da.normalized(), db.normalized());
+    (da.is_finite() && db.is_finite() && da != Vec2::ZERO && db != Vec2::ZERO && da.cross(db).abs() <= 1e-9).then_some(da)
+}
+
+/// How far apart two parallel lines along `along` are, through their points `a` and `b`.
+fn parallel_gap(along: Vec2, a: Vec2, b: Vec2) -> f64 {
+    (b - a).dot(dims::normal_of(along)).abs()
+}
+
+/// The aligned direction across two lines: their normal; refused when they are not parallel or
+/// are one line.
+fn across(lines: LinePair, a: Vec2, b: Vec2, cmd: &str) -> Result<Direction> {
+    let LinePair::Parallel(along) = lines else {
+        return Err(bad(cmd, "the two lines are not parallel: an aligned dimension between two lines needs parallel lines"));
+    };
+    if parallel_gap(along, a, b) <= 1e-9 {
+        return Err(bad(cmd, "the two lines are in line: an aligned dimension between them would measure nothing"));
+    }
+    Ok(Direction::Across(dims::normal_of(along)))
 }
 
 fn make(s: &mut Session, p: &Value, want: Want, cmd: &str) -> Result<Value> {
@@ -302,15 +344,26 @@ fn make(s: &mut Session, p: &Value, want: Want, cmd: &str) -> Result<Value> {
             };
             dims::linear(&start, &end, direction, placement, scale)
         }
-        (_, [a, b]) => {
-            let (a, b) = (anchor(paper, a, cmd)?, anchor(paper, b, cmd)?);
+        (_, [pa, pb]) => {
+            let lines = line_pair(pa, pb);
+            let (a, b) = (anchor(paper, pa, cmd)?, anchor(paper, pb, cmd)?);
             if a.at.dist(b.at) <= 1e-9 {
                 return Err(bad(cmd, "the two picks are at the same point"));
             }
-            let direction = match (want, given) {
-                (Want::Aligned, _) => Direction::Aligned,
-                (_, Some(d)) => measurable(a.at, b.at, d, cmd)?,
-                (_, None) => by_placement(a.at, b.at, placement),
+            let aligned = want == Want::Aligned || given == Some(Direction::Aligned);
+            let direction = match (aligned, given, lines) {
+                // Two lines (no snaps): aligned is the distance across them (R101).
+                (true, _, LinePair::Parallel(_) | LinePair::Crossing) => across(lines, a.at, b.at, cmd)?,
+                (true, _, LinePair::Not) => measurable(a.at, b.at, Direction::Aligned, cmd)?,
+                (false, Some(d), _) => measurable(a.at, b.at, d, cmd)?,
+                // Inventor's default for two parallel lines that are neither horizontal nor
+                // vertical: aligned; else horizontal or vertical by the placement, as before.
+                (false, None, LinePair::Parallel(along))
+                    if edge_direction(Vec2::ZERO, along) == Direction::Aligned && parallel_gap(along, a.at, b.at) > 1e-9 =>
+                {
+                    across(lines, a.at, b.at, cmd)?
+                }
+                (false, None, _) => by_placement(a.at, b.at, placement),
             };
             dims::linear(&a, &b, direction, placement, scale)
         }
@@ -423,8 +476,14 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
             overrides.insert("suppressExt2".into(), json!(!second));
         }
     }
+    // `type` (wave 3, R101): measured again as the new kind, keeping text and overrides.
+    if let Some(ty) = p.get("type").filter(|t| !t.is_null()) {
+        let ty = ty.as_str().map(str::trim).ok_or_else(|| bad(cmd, "`type` must be aligned, horizontal, vertical, radius or diameter"))?;
+        d = retype(&m.paper, &d, ty, cmd)?;
+        named = true;
+    }
     if !named && overrides.is_empty() && !clear_precision {
-        return Err(bad(cmd, "name text, hide_value, precision, justify or ext_lines"));
+        return Err(bad(cmd, "name text, hide_value, precision, justify, ext_lines or type"));
     }
     d.overrides.extend(overrides);
     if clear_precision {
@@ -437,6 +496,75 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     })?;
     let text = drawing::require(s, cmd).ok().and_then(|m| dims::dimension_text(m, h)).unwrap_or_default();
     Ok(json!({"handle": h, "kind": kind, "text": text}))
+}
+
+/// Dimension `d` as another type (Edit Dimension's, R101): `aligned`, `horizontal` or `vertical`
+/// for a linear or aligned dimension (aligned between two lines at their middles is the
+/// distance across them, as General Dimension makes it), `radius` or `diameter` for a radial
+/// one. The dimension line goes through the text's place; text, style, overrides (DIMLFAC) and
+/// marks stay; the measurement is taken again.
+fn retype(paper: &cadcraft_doc::Drawing, d: &Dimension, ty: &str, cmd: &str) -> Result<Dimension> {
+    use cadcraft_doc::DimKind;
+    let linear = matches!(d.kind, DimKind::Linear { .. } | DimKind::Aligned);
+    let radial = matches!(d.kind, DimKind::Radius | DimKind::Diameter);
+    let placement = d.text_mid.xy();
+    let mut out = match ty {
+        "aligned" | "horizontal" | "vertical" if linear => {
+            let anchor_of = |name: &str, at: Vec2| {
+                d.assoc
+                    .iter()
+                    .find(|a| a.point == name)
+                    .map(|a| Anchor { at, handle: a.handle, snap: a.snap.clone() })
+                    .ok_or_else(|| bad(cmd, "the dimension is not attached to what it measures"))
+            };
+            let (a, b) = (anchor_of("p13", d.p13.xy())?, anchor_of("p14", d.p14.xy())?);
+            let direction = match ty {
+                "horizontal" => measurable(a.at, b.at, Direction::Horizontal, cmd)?,
+                "vertical" => measurable(a.at, b.at, Direction::Vertical, cmd)?,
+                _ => {
+                    let line = |x: &Anchor| match (&paper.entity(x.handle).map(|e| &e.kind), &x.snap) {
+                        (Some(EntityKind::Line(l)), AssocSnap::Mid) => Some(l.b.xy() - l.a.xy()),
+                        _ => None,
+                    };
+                    match (a.handle != b.handle, line(&a), line(&b)) {
+                        (true, Some(da), Some(db)) => across(lines_parallel(da, db).map_or(LinePair::Crossing, LinePair::Parallel), a.at, b.at, cmd)?,
+                        _ => measurable(a.at, b.at, Direction::Aligned, cmd)?,
+                    }
+                }
+            };
+            dims::linear(&a, &b, direction, placement, 1.0)
+        }
+        "radius" | "diameter" if radial => {
+            let (h, (c, r)) = d
+                .assoc
+                .iter()
+                .find_map(|a| drawing::assoc::circle_of(paper, a.handle).map(|c| (a.handle, c)))
+                .ok_or_else(|| bad(cmd, "the dimension's circle is gone"))?;
+            dims::radial(paper, h, c, r, ty == "diameter", placement, 1.0).ok_or_else(|| bad(cmd, "the dimension's circle is gone"))?
+        }
+        "aligned" | "horizontal" | "vertical" | "radius" | "diameter" => {
+            let from = if linear {
+                "a linear or aligned dimension"
+            } else if radial {
+                "a radius or diameter dimension"
+            } else {
+                "this dimension"
+            };
+            let to = match ty {
+                "radius" => "a radius",
+                "diameter" => "a diameter",
+                other => other,
+            };
+            return Err(bad(cmd, format!("{from} cannot become {to}")));
+        }
+        _ => return Err(bad(cmd, "`type` must be aligned, horizontal, vertical, radius or diameter")),
+    };
+    out.text = d.text.clone();
+    out.style = d.style.clone();
+    out.overrides = d.overrides.clone();
+    out.marks = d.marks.clone();
+    out.measurement = cadcraft_render::dimension_in(paper, &out).measurement;
+    Ok(out)
 }
 
 #[cfg(test)]

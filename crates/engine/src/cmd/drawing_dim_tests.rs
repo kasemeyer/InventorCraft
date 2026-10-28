@@ -78,7 +78,7 @@ fn one_straight_edge_gives_its_length() {
     let undo = s.undo.len();
     let r = general(&mut s, v, json!([{"edge": bottom}]), [10.0, 5.8]);
     assert_eq!(s.undo.len(), undo + 1);
-    assert_eq!((r["kind"].as_str(), r["text"].as_str()), (Some("linear"), Some("3.00")));
+    assert_eq!((r["kind"].as_str(), r["text"].as_str()), (Some("linear_h"), Some("3.00")));
     let h = handle(&r);
     let (layer, d) = dim(&s, h);
     assert_eq!((layer.as_str(), d.style.as_str()), ("DIMENSION", "ANSI_INCH"));
@@ -99,7 +99,7 @@ fn a_side_edge_reads_2_00() {
     let (mut s, _, v) = front("a_side_edge_reads_2_00");
     let right = edge_at(&s, v, [12.0, 8.0]);
     let r = general(&mut s, v, json!([{"edge": right}]), [13.0, 8.0]);
-    assert_eq!((r["kind"].as_str(), r["text"].as_str()), (Some("linear"), Some("2.00")));
+    assert_eq!((r["kind"].as_str(), r["text"].as_str()), (Some("linear_v"), Some("2.00")));
     assert_eq!(dim(&s, handle(&r)).1.kind, DimKind::Linear { rotation: std::f64::consts::FRAC_PI_2 });
     // The same edge picked by a point on the paper.
     let r = general(&mut s, v, json!([{"at": [12.0, 8.0]}]), [13.5, 8.0]);
@@ -168,14 +168,14 @@ fn two_picks_are_oriented_by_the_placement() {
     let (mut s, _, v) = front("two_picks_are_oriented_by_the_placement");
     let (left, right) = (edge_at(&s, v, [8.0, 8.0]), edge_at(&s, v, [12.0, 8.0]));
     let r = general(&mut s, v, json!([{"edge": left, "snap": "mid"}, {"edge": right, "snap": "mid"}]), [10.0, 10.0]);
-    assert_eq!((r["kind"].as_str(), r["text"].as_str()), (Some("linear"), Some("4.00")));
+    assert_eq!((r["kind"].as_str(), r["text"].as_str()), (Some("linear_h"), Some("4.00")));
     let (_, d) = dim(&s, handle(&r));
     assert_eq!(d.kind, DimKind::Linear { rotation: 0.0 });
     assert!(close(d.p13.x, 8.0) && close(d.p13.y, 8.0) && close(d.p14.x, 12.0) && close(d.p14.y, 8.0), "{d:?}");
     assert_eq!(d.assoc.iter().map(|a| a.snap.clone()).collect::<Vec<_>>(), [AssocSnap::Mid, AssocSnap::Mid]);
     let (top, bottom) = (edge_at(&s, v, [10.0, 9.5]), edge_at(&s, v, [10.0, 6.5]));
     let r = general(&mut s, v, json!([{"edge": top, "snap": "mid"}, {"edge": bottom, "snap": "mid"}]), [13.0, 8.0]);
-    assert_eq!((r["kind"].as_str(), r["text"].as_str()), (Some("linear"), Some("3.00")));
+    assert_eq!((r["kind"].as_str(), r["text"].as_str()), (Some("linear_v"), Some("3.00")));
     assert_eq!(dim(&s, handle(&r)).1.kind, DimKind::Linear { rotation: std::f64::consts::FRAC_PI_2 });
     // Diagonal picks: above them horizontal, unless `orientation` says otherwise.
     let picks = json!([{"edge": top, "snap": "mid"}, {"edge": right, "snap": "mid"}]);
@@ -192,7 +192,7 @@ fn half_scale_still_reads_model_units() {
         .unwrap();
     let bottom = edge_at(&s, v, [10.0, 7.25]);
     let r = general(&mut s, v, json!([{"edge": bottom}]), [10.0, 6.8]);
-    assert_eq!((r["kind"].as_str(), r["text"].as_str()), (Some("linear"), Some("3.00")));
+    assert_eq!((r["kind"].as_str(), r["text"].as_str()), (Some("linear_h"), Some("3.00")));
     let (_, d) = dim(&s, handle(&r));
     assert!(close(d.p13.x, 9.25) && close(d.p14.x, 10.75), "{d:?}");
     assert_eq!(style(&s, handle(&r)).linear_factor, 2.0);
@@ -227,7 +227,7 @@ fn edit_sets_precision_and_text() {
     let h = handle(&general(&mut s, v, json!([{"edge": bottom}]), [10.0, 5.8]));
     let undo = s.undo.len();
     let r = run(&mut s, "drawing.dim.edit", json!({"dim": h, "precision": 3}));
-    assert_eq!((r["handle"].as_u64(), r["kind"].as_str(), r["text"].as_str()), (Some(h), Some("linear"), Some("3.000")));
+    assert_eq!((r["handle"].as_u64(), r["kind"].as_str(), r["text"].as_str()), (Some(h), Some("linear_h"), Some("3.000")));
     assert_eq!(s.undo.len(), undo + 1);
     assert_eq!(style(&s, h).decimals, 3);
     let r = run(&mut s, "drawing.dim.edit", json!({"dim": h, "hide_value": true, "text": "TYP"}));
@@ -345,7 +345,7 @@ fn direct_commands_check_their_geometry() {
     let r = run(&mut s, "drawing.dim.aligned", json!({"view": v, "picks": [{"edge": bottom}], "placement": [10.0, 5.8]}));
     assert_eq!((r["kind"].as_str(), r["text"].as_str()), (Some("aligned"), Some("3.00")));
     let r = run(&mut s, "drawing.dim.linear", json!({"view": v, "picks": [{"edge": bottom}], "placement": [10.0, 5.8]}));
-    assert_eq!((r["kind"].as_str(), r["text"].as_str()), (Some("linear"), Some("3.00")));
+    assert_eq!((r["kind"].as_str(), r["text"].as_str()), (Some("linear_h"), Some("3.00")));
     assert_eq!(
         bad_message(s.execute("drawing.dim.radius", &json!({"view": v, "picks": [{"edge": bottom}], "placement": [10.0, 5.8]}))),
         "a radius needs a circle or an arc"
@@ -577,4 +577,131 @@ fn polyline_vertices_are_dimensioned() {
         &json!({"view": v, "picks": [{"edge": rim, "snap": "vertex", "vertex": last + 1}, {"edge": rim, "snap": "end"}], "placement": [12, 10]}),
     );
     assert_eq!(bad_message(e), "the picked curve has no such point");
+}
+
+/// The block's iso (top right) view at [10, 8], scale 1; (session, view id). An iso view shows a
+/// 3 in edge along x as 3·√(2/3) = 2.449 in at -30°: its x-projection is 3/√2 = 2.121, its
+/// y-projection 3/√6 = 1.225.
+fn iso(name: &str) -> (Session, u64) {
+    let (mut s, block) = block_drawing(name);
+    let v = run(&mut s, "drawing.view.base", json!({"model": block, "orientation": "iso_top_right", "scale": 1, "position": [10, 8]}))["view"]
+        .as_u64()
+        .unwrap();
+    (s, v)
+}
+
+/// The front face's bottom edge and the back face's top edge in the iso view: both along model
+/// x, so parallel on the sheet at -30°. The front face's left edge is vertical on the sheet.
+const FRONT_BOTTOM: &str = "0/Block/e/F1:-y|F1:-z";
+const BACK_TOP: &str = "0/Block/e/F1:+y|F1:+z";
+const FRONT_LEFT: &str = "0/Block/e/F1:-x|F1:-y";
+
+/// Wave 3 item 4 (R101): one straight edge of a rotated (iso) view: aligned (the default for an
+/// edge that is neither horizontal nor vertical) reads the edge's length on the sheet, 2.449 →
+/// "2.45"; horizontal and vertical read its projections 2.121 → "2.12" and 1.225 → "1.22"
+/// (2.449² = 2.121² + 1.225²: 6 = 4.5 + 1.5).
+#[test]
+fn an_iso_edge_is_aligned_by_default_and_projects_horizontally_and_vertically() {
+    let (mut s, v) = iso("an_iso_edge_is_aligned_by_default");
+    let r = general(&mut s, v, json!([{"edge": FRONT_BOTTOM}]), [8.5, 6.0]);
+    assert_eq!((r["kind"].as_str(), r["text"].as_str()), (Some("aligned"), Some("2.45")));
+    for (orientation, kind, text) in [("horizontal", "linear_h", "2.12"), ("vertical", "linear_v", "1.22"), ("aligned", "aligned", "2.45")] {
+        let p = json!({"view": v, "picks": [{"edge": FRONT_BOTTOM}], "placement": [8.5, 6.0], "orientation": orientation});
+        let r = run(&mut s, "drawing.dim.general", p);
+        assert_eq!((r["kind"].as_str(), r["text"].as_str()), (Some(kind), Some(text)), "{orientation}");
+    }
+}
+
+/// Wave 3 item 4 (R101): two parallel lines that are neither horizontal nor vertical: General
+/// Dimension's default is aligned, the perpendicular distance between them. Front-bottom's mid
+/// point is (9.646, 6.571), back-top's (10.354, 9.429): Δ = (0.707, 2.858); the lines run along
+/// (cos -30°, sin -30°), so their normal is (cos 60°, sin 60°) = (0.5, 0.866) and the distance is
+/// 0.707·0.5 + 2.858·0.866 = 2.828 → "2.83" (2√2). Horizontal and vertical measure the mid
+/// points' projections, 0.707 → ".71" and 2.858 → "2.86".
+#[test]
+fn two_parallel_lines_are_aligned_to_their_perpendicular_distance() {
+    let (mut s, v) = iso("two_parallel_lines_are_aligned");
+    let undo = s.undo.len();
+    let r = general(&mut s, v, json!([{"edge": FRONT_BOTTOM}, {"edge": BACK_TOP}]), [12.5, 9.0]);
+    assert_eq!(s.undo.len(), undo + 1);
+    assert_eq!((r["kind"].as_str(), r["text"].as_str()), (Some("aligned"), Some("2.83")));
+    let (_, d) = dim(&s, handle(&r));
+    // A linear dimension turned to the lines' normal (60°), attached at both mid points.
+    let DimKind::Linear { rotation } = d.kind else { panic!("{:?}", d.kind) };
+    assert!(close(rotation, 60f64.to_radians()), "{rotation}");
+    assert_eq!(d.assoc.iter().map(|a| a.snap.clone()).collect::<Vec<_>>(), [AssocSnap::Mid, AssocSnap::Mid]);
+    assert!(close(d.measurement, 2.0 * 2f64.sqrt()), "{}", d.measurement);
+    for (orientation, kind, text) in [("horizontal", "linear_h", ".71"), ("vertical", "linear_v", "2.86"), ("aligned", "aligned", "2.83")] {
+        let p = json!({"view": v, "picks": [{"edge": FRONT_BOTTOM}, {"edge": BACK_TOP}], "placement": [12.5, 9.0], "orientation": orientation});
+        let r = run(&mut s, "drawing.dim.general", p);
+        assert_eq!((r["kind"].as_str(), r["text"].as_str()), (Some(kind), Some(text)), "{orientation}");
+    }
+    // The direct Aligned Dimension measures the same.
+    let r = run(&mut s, "drawing.dim.aligned", json!({"view": v, "picks": [{"edge": FRONT_BOTTOM}, {"edge": BACK_TOP}], "placement": [12.5, 9.0]}));
+    assert_eq!((r["kind"].as_str(), r["text"].as_str()), (Some("aligned"), Some("2.83")));
+    // Two points (a line's ends) measure point to point along the pair: the edge, 2.45.
+    let picks = json!([{"edge": FRONT_BOTTOM, "snap": "start"}, {"edge": FRONT_BOTTOM, "snap": "end"}]);
+    let r = run(&mut s, "drawing.dim.general", json!({"view": v, "picks": picks, "placement": [8.5, 6.0], "orientation": "aligned"}));
+    assert_eq!((r["kind"].as_str(), r["text"].as_str()), (Some("aligned"), Some("2.45")));
+    // Lines that are not parallel have no aligned distance.
+    let undo = s.undo.len();
+    let refused = s.execute(
+        "drawing.dim.general",
+        &json!({"view": v, "picks": [{"edge": FRONT_BOTTOM}, {"edge": FRONT_LEFT}], "placement": [7.0, 6.0], "orientation": "aligned"}),
+    );
+    assert_eq!(bad_message(refused), "the two lines are not parallel: an aligned dimension between two lines needs parallel lines");
+    assert_eq!(s.undo.len(), undo);
+}
+
+/// Wave 3 item 4: two parallel lines that are horizontal or vertical stay horizontal or vertical
+/// by the placement, as before (the front view's sides, 4 in apart).
+#[test]
+fn axis_aligned_parallel_lines_stay_linear_by_placement() {
+    let (mut s, _, v) = front("axis_aligned_parallel_lines_stay_linear");
+    let (left, right) = (edge_at(&s, v, [8.0, 8.0]), edge_at(&s, v, [12.0, 8.0]));
+    let r = general(&mut s, v, json!([{"edge": left}, {"edge": right}]), [10.0, 10.5]);
+    assert_eq!((r["kind"].as_str(), r["text"].as_str()), (Some("linear_h"), Some("4.00")));
+}
+
+/// Wave 3 item 4 (R101): Edit Dimension changes the type: aligned ↔ horizontal ↔ vertical
+/// (measured again: 2.83, .71, 2.86 as above), radius ↔ diameter (the hole, ⌀.75 ↔ R.38); one
+/// undo step each; a linear dimension cannot become a radius.
+#[test]
+fn edit_changes_the_dimension_type() {
+    let (mut s, v) = iso("edit_changes_the_dimension_type");
+    let h = handle(&general(&mut s, v, json!([{"edge": FRONT_BOTTOM}, {"edge": BACK_TOP}]), [12.5, 9.0]));
+    for (ty, kind, text) in [("horizontal", "linear_h", ".71"), ("vertical", "linear_v", "2.86"), ("aligned", "aligned", "2.83")] {
+        let undo = s.undo.len();
+        let r = run(&mut s, "drawing.dim.edit", json!({"dim": h, "type": ty}));
+        assert_eq!((r["handle"].as_u64(), r["kind"].as_str(), r["text"].as_str()), (Some(h), Some(kind), Some(text)), "{ty}");
+        assert_eq!(s.undo.len(), undo + 1);
+        assert_eq!(dimension_text(model(&s), h).as_deref(), Some(text));
+    }
+    let undo = s.undo.len();
+    assert_eq!(
+        bad_message(s.execute("drawing.dim.edit", &json!({"dim": h, "type": "radius"}))),
+        "a linear or aligned dimension cannot become a radius"
+    );
+    assert_eq!(
+        bad_message(s.execute("drawing.dim.edit", &json!({"dim": h, "type": "round"}))),
+        "`type` must be aligned, horizontal, vertical, radius or diameter"
+    );
+    assert_eq!(s.undo.len(), undo);
+    // The hole in the front view.
+    let (mut s, _, v) = front("edit_changes_the_dimension_type_round");
+    let hole = edge_at(&s, v, [10.375, 8.0]);
+    let r = general(&mut s, v, json!([{"edge": hole}]), [11.0, 8.6]);
+    let h = handle(&r);
+    assert_eq!((r["kind"].as_str(), r["text"].as_str()), (Some("diameter"), Some("⌀.75")));
+    let undo = s.undo.len();
+    let r = run(&mut s, "drawing.dim.edit", json!({"dim": h, "type": "radius"}));
+    assert_eq!((r["kind"].as_str(), r["text"].as_str()), (Some("radius"), Some("R.38")));
+    assert_eq!(s.undo.len(), undo + 1);
+    assert!(sick_dimensions(model(&s)).is_empty());
+    let r = run(&mut s, "drawing.dim.edit", json!({"dim": h, "type": "diameter"}));
+    assert_eq!((r["kind"].as_str(), r["text"].as_str()), (Some("diameter"), Some("⌀.75")));
+    assert_eq!(
+        bad_message(s.execute("drawing.dim.edit", &json!({"dim": h, "type": "vertical"}))),
+        "a radius or diameter dimension cannot become vertical"
+    );
 }
