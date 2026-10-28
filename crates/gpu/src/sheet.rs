@@ -277,6 +277,9 @@ struct Picture {
 }
 
 /// The sheet's pipelines and what the last scene uploaded.
+///
+/// It holds one view uniform, written in `prepare`: one sheet canvas per frame. Two canvases
+/// painted in one frame would both draw with the last one's mapping.
 pub struct SheetPass {
     ink: wgpu::RenderPipeline,
     picture: wgpu::RenderPipeline,
