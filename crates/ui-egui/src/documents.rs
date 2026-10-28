@@ -98,6 +98,8 @@ fn put_view(app: &mut SolveApp, v: DocView) {
 
 /// Put `slot` into the app and return what was there.
 fn swap_in(app: &mut SolveApp, slot: DocSlot) -> DocSlot {
+    // An export the picker answered on the leaving drawing runs before the drawing goes.
+    crate::drawing_models::flush_export(app);
     if crate::render_workspace::active(app) {
         let _ = crate::render_workspace::enter(app, false);
     }
@@ -222,6 +224,7 @@ pub fn active_is_blank(app: &SolveApp) -> bool {
 pub fn adopt(app: &mut SolveApp, mut session: Session) {
     crate::drawing_models::install(app, &mut session);
     if active_is_blank(app) {
+        crate::drawing_models::flush_export(app);
         let rev = app.session.revision;
         crate::dialogs::cancel(app);
         app.tool = None;

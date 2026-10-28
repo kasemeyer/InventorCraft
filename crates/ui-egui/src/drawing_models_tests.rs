@@ -293,3 +293,20 @@ fn a_failed_export_says_why() {
     assert!(error && text.contains("file operation"), "{text}");
     assert!(std::fs::metadata(&later).is_err());
 }
+
+#[test]
+fn an_answered_export_survives_a_tab_switch() {
+    // Final wave item 33: the picker answered, then the tab changes before the export ran.
+    let (mut h, _, _) = two_tabs(Harness::new(), false);
+    let pdf = h.dir.join("switched.pdf").to_string_lossy().into_owned();
+    answer_saves(&mut h, Some(pdf.clone()));
+    crate::drawing_models::export_pdf(&mut h.app);
+    h.frame();
+    assert!(h.app.drawing.export.is_some(), "answered, not run yet");
+    crate::documents::switch(&mut h.app, 0);
+    assert_eq!(h.app.session.doc.kind, DocumentKind::Part);
+    assert!(h.app.drawing.export.is_none());
+    assert!(std::fs::read(&pdf).is_ok_and(|b| b.starts_with(b"%PDF")), "the drawing's PDF was written");
+    let (text, _, error) = h.app.status.clone().unwrap();
+    assert!(!error && text.contains(&pdf), "{text}");
+}

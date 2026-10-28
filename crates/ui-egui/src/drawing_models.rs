@@ -145,7 +145,19 @@ pub(crate) fn tick(app: &mut SolveApp) {
         pending.painted = true;
         return;
     }
-    let Some(PendingExport { command, path, .. }) = app.drawing.export.take() else { return };
+    let Some(pending) = app.drawing.export.take() else { return };
+    run_export(app, pending);
+}
+
+/// An answered export the active drawing is about to lose (its tab is leaving, R89's paint frame
+/// not reached yet): it runs now, so the answer is never dropped.
+pub(crate) fn flush_export(app: &mut SolveApp) {
+    if let Some(pending) = app.drawing.export.take() {
+        run_export(app, pending);
+    }
+}
+
+fn run_export(app: &mut SolveApp, PendingExport { command, path, .. }: PendingExport) {
     match app.run(command, json!({ "path": path })) {
         Ok(r) => {
             let pages = r["pages"].as_u64().map_or_else(String::new, |n| n.to_string());
