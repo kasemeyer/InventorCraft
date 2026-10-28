@@ -745,10 +745,10 @@ fn start_content(app: &mut SolveApp, ui: &mut egui::Ui, action: &mut Option<File
     let tiles = [
         ("home:new_mm", "new", app.tr("home.new_mm"), app.tr("home.new_mm_hint"), true),
         ("home:new_inches", "new", app.tr("home.new_inches"), app.tr("home.new_inches_hint"), false),
+        // Beside the other New tiles (R23: every profile); Open and Import follow.
+        ("home:new_drawing", "ws_drawing", app.tr("home.new_drawing"), app.tr("home.new_drawing_hint"), false),
         ("home:open_tile", "open", app.tr("home.open"), open_hint.as_str(), false),
         ("home:import", "import", app.tr("home.import"), app.tr("home.import_hint"), false),
-        // Last, so the four tiles every design starts from keep their row (R23: every profile).
-        ("home:new_drawing", "ws_drawing", app.tr("home.new_drawing"), app.tr("home.new_drawing_hint"), false),
     ];
     FileView::section(ui, app.tr_label("New"), t.space_12, |ui| {
         FileView::grid(ui, "home_new", FileView::tile_min_width(), tiles.len(), |ui, index, width| {
@@ -759,9 +759,9 @@ fn start_content(app: &mut SolveApp, ui: &mut egui::Ui, action: &mut Option<File
                 *action = Some(match index {
                     0 => FileAction::New("mm"),
                     1 => FileAction::New("in"),
-                    2 => FileAction::Open,
-                    3 => FileAction::Import,
-                    _ => FileAction::NewDrawing,
+                    2 => FileAction::NewDrawing,
+                    3 => FileAction::Open,
+                    _ => FileAction::Import,
                 });
             }
         });
@@ -1460,10 +1460,25 @@ mod tests {
         h.frames(5);
         let page = crate::scenario::rect_of("home:page").unwrap();
         let first = crate::scenario::rect_of("home:new_mm").unwrap();
-        for id in ["home:new_mm", "home:new_inches", "home:open_tile", "home:import"] {
+        // The New tiles share the first row, New Drawing right after New (inches) (final wave
+        // item 4); Open and Import follow in order, every tile on screen.
+        let ids = ["home:new_mm", "home:new_inches", "home:new_drawing", "home:open_tile", "home:import"];
+        for id in &ids[..3] {
             let rect = crate::scenario::rect_of(id).unwrap();
-            assert!((rect.top() - first.top()).abs() < 0.5, "{id}: action tiles must share a row");
+            assert!((rect.top() - first.top()).abs() < 0.5, "{id}: the New tiles must share a row");
+        }
+        let inches = crate::scenario::rect_of("home:new_inches").unwrap();
+        let drawing = crate::scenario::rect_of("home:new_drawing").unwrap();
+        assert!(drawing.left() > inches.right(), "New Drawing sits right of New (inches)");
+        let mut previous: Option<egui::Rect> = None;
+        for id in ids {
+            let rect = crate::scenario::rect_of(id).unwrap();
             assert!(page.contains_rect(rect), "{id}: card is off screen");
+            if let Some(p) = previous {
+                let after = rect.top() > p.top() + 0.5 || ((rect.top() - p.top()).abs() < 0.5 && rect.left() > p.right());
+                assert!(after, "{id}: tiles keep their order");
+            }
+            previous = Some(rect);
         }
         let first = crate::scenario::rect_of("home:sample:0").unwrap();
         for i in 0..6 {
