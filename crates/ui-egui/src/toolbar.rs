@@ -2478,8 +2478,9 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 } else if app.drawing.tool.is_some() {
                     // A drawing tool's Esc: it ends, what it placed stays (Tasks 6, 8).
                     crate::drawing_ui::end_tool(app);
-                } else if matches!(app.drawing.panel, Some(crate::drawing_ui::DrawingPanel::View(_))) {
-                    // The Base View panel's Esc (after the marking menu's, above).
+                } else if matches!(app.drawing.panel, Some(crate::drawing_ui::DrawingPanel::View(_) | crate::drawing_ui::DrawingPanel::Properties(_)))
+                {
+                    // The Base View and Drawing Properties panels' Esc (after the marking menu's, above).
                     crate::drawing_ui::panel_cancel(app);
                 } else if !app.session.selection.is_empty() || app.session.active_sketch.is_none() {
                     app.tree.picked_joints.clear();

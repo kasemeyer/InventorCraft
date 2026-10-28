@@ -340,3 +340,29 @@ fn an_orphaned_projected_view_shows_its_model() {
     ];
     assert_eq!(tree(), want.map(|(l, d)| (l.to_string(), d)));
 }
+
+#[test]
+fn esc_over_drawing_properties_closes_only_the_menu() {
+    // Final wave item 10: with the marking menu open over Drawing Properties, Esc (and Enter)
+    // are the menu's; the next Esc closes the panel without applying it.
+    let (mut h, ..) = three_views();
+    open_properties(&mut h);
+    h.frames(3);
+    let props = |h: &Harness| matches!(h.app.drawing.panel, Some(crate::drawing_ui::DrawingPanel::Properties(_)));
+    assert!(props(&h));
+    assert_eq!(crate::marking_menu::context(&h.app), crate::profile_workflow::MenuContext::Panel);
+    let rect = rect_of("sheet_canvas").unwrap();
+    let at = crate::sheet_canvas::screen_of(&h.app, rect, [30.0, 18.0]);
+    h.step(&json!({"click": [at.x, at.y], "button": "right"})).unwrap();
+    h.frames(2);
+    assert!(crate::marking_menu::holds_keys(&h.app), "the marking menu is open over the panel");
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.frames(2);
+    assert!(h.app.viewport.context_menu.is_none(), "Esc closed the menu");
+    assert!(props(&h), "and not the panel");
+    let start = h.app.session.undo.len();
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.frames(2);
+    assert!(h.app.drawing.panel.is_none(), "the next Esc closes the panel");
+    assert_eq!(h.app.session.undo.len(), start, "without applying it");
+}

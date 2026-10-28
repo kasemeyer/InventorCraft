@@ -370,10 +370,14 @@ fn field_label(tag: &str) -> &'static str {
 /// The Drawing Properties card (a `ui_kit::Window`): Enter or OK applies, Esc or Cancel closes.
 pub(crate) fn properties_panel(app: &mut SolveApp, ctx: &egui::Context, mut p: PropertiesPanel) {
     let title = crate::i18n::tr("ui.drawing.properties_title");
+    // Enter with the marking menu open over the panel is the menu's (as for the View panel).
+    let menu_enter = crate::marking_menu::holds_keys(app) && ctx.input(|i| i.key_pressed(egui::Key::Enter));
     let mut enter = false;
     let (closed, action) = crate::ui_kit::Window::new(egui::Id::new("sc_drawing_properties"), "settings", title)
         .placed(egui::Align2::LEFT_TOP, super::panel_pos(app))
         .actions(crate::i18n::tr_label("OK"), crate::i18n::tr("ui.cancel"), None)
+        // Esc is the application's (`toolbar::shortcuts`): the marking menu takes it first.
+        .keep_open_on_escape()
         .show(ctx, true, |ui| {
             for (tag, value) in &mut p.fields {
                 let label = crate::i18n::tr(field_label(tag));
@@ -391,7 +395,7 @@ pub(crate) fn properties_panel(app: &mut SolveApp, ctx: &egui::Context, mut p: P
         app.drawing.panel = None;
         return;
     }
-    if enter || action == crate::ui_kit::Action::Ok {
+    if (enter || action == crate::ui_kit::Action::Ok) && !menu_enter {
         app.drawing.panel = if apply_properties(app, &p) { None } else { Some(crate::drawing_ui::DrawingPanel::Properties(p)) };
         return;
     }
