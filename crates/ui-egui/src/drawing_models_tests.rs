@@ -265,3 +265,31 @@ fn save_as_starts_next_to_the_model() {
     h.frames(2);
     assert_eq!(std::path::PathBuf::from(&asked.lock().unwrap()[1].0), expected);
 }
+
+#[test]
+fn a_failed_export_says_why() {
+    // Final wave item 32: an export the engine refuses reports its error, no "Exporting…" left.
+    let (mut h, _, _) = two_tabs(Harness::new(), false);
+    let bad = h.dir.join("no-such-folder").join("out.pdf").to_string_lossy().into_owned();
+    answer_saves(&mut h, Some(bad.clone()));
+    crate::drawing_models::export_pdf(&mut h.app);
+    h.frames(3);
+    assert!(h.app.drawing.export.is_none());
+    let (text, _, error) = h.app.status.clone().expect("a status");
+    assert!(error, "the failure is an error: {text}");
+    assert_ne!(text, crate::i18n::tr("ui.drawing.exporting"), "no Exporting… left");
+    assert!(!text.is_empty());
+    assert!(std::fs::metadata(&bad).is_err());
+    // Refused before the engine runs (another file operation under way): still said.
+    let later = h.dir.join("later.pdf").to_string_lossy().into_owned();
+    h.app.services.pick_save = Some(Box::new(|_: &str, _: &[&str]| Box::pin(std::future::pending())));
+    h.app.pick_save("other.pdf", &["pdf"], |_, _| {});
+    h.app.drawing.export = Some(crate::drawing_models::PendingExport { command: "drawing.export.pdf", path: later.clone(), painted: false });
+    h.app.set_status(crate::i18n::tr("ui.drawing.exporting").to_string(), false);
+    crate::drawing_models::tick(&mut h.app);
+    crate::drawing_models::tick(&mut h.app);
+    assert!(h.app.drawing.export.is_none());
+    let (text, _, error) = h.app.status.clone().expect("a status");
+    assert!(error && text.contains("file operation"), "{text}");
+    assert!(std::fs::metadata(&later).is_err());
+}

@@ -146,14 +146,24 @@ pub(crate) fn tick(app: &mut SolveApp) {
         return;
     }
     let Some(PendingExport { command, path, .. }) = app.drawing.export.take() else { return };
-    if let Ok(r) = app.run(command, json!({ "path": path })) {
-        let pages = r["pages"].as_u64().map_or_else(String::new, |n| n.to_string());
-        let text = if pages.is_empty() {
-            crate::i18n::format("ui.drawing.exported", &[("path", &path)])
-        } else {
-            crate::i18n::format("ui.drawing.exported_pages", &[("path", &path), ("pages", &pages)])
-        };
-        app.set_status(text, false);
+    match app.run(command, json!({ "path": path })) {
+        Ok(r) => {
+            let pages = r["pages"].as_u64().map_or_else(String::new, |n| n.to_string());
+            let text = if pages.is_empty() {
+                crate::i18n::format("ui.drawing.exported", &[("path", &path)])
+            } else {
+                crate::i18n::format("ui.drawing.exported_pages", &[("path", &path), ("pages", &pages)])
+            };
+            app.set_status(text, false);
+        }
+        // An engine failure has already said so (`finish_command`, as an error); a run refused
+        // before the engine (another file operation under way) has not: never leave
+        // "Exporting…" standing over a failed export.
+        Err(e) => {
+            if app.status.as_ref().is_none_or(|(_, _, error)| !*error) {
+                app.set_status(e, true);
+            }
+        }
     }
 }
 
