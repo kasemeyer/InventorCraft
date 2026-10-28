@@ -469,7 +469,9 @@ fn placed_views(app: &mut SolveApp, ui: &egui::Ui, rect: Rect, resp: &Response, 
     if resp.drag_stopped() {
         app.drawing.drag = None;
         app.drawing.preview.clear();
-        if let Err(e) = app.run("drawing.view.set_position", json!({ "view": d.view, "position": d.target })) {
+        // Back where it started: no move, no empty undo step.
+        let unmoved = (d.target[0] - v.position.x).abs() <= 1e-9 && (d.target[1] - v.position.y).abs() <= 1e-9;
+        if !unmoved && let Err(e) = app.run("drawing.view.set_position", json!({ "view": d.view, "position": d.target })) {
             app.set_status(e, true);
         }
         return true;

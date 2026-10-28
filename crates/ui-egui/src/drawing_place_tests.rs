@@ -505,3 +505,22 @@ fn esc_cancels_a_view_drag() {
     assert!(near([v.position.x, v.position.y], [10.0, 8.0], 1e-9), "{:?}", v.position);
     assert_eq!(h.app.session.undo.len(), undo);
 }
+
+#[test]
+fn a_drag_back_to_the_start_adds_no_step() {
+    // Final wave item 19.
+    let (mut h, block) = block_drawing(inventor(Drawing));
+    h.app.run("drawing.view.base", json!({"model": block, "orientation": "front", "position": [10, 8]})).unwrap();
+    h.frames(2);
+    let undo = h.app.session.undo.len();
+    let (from, away) = (screen(&h, [10.5, 8.5]), screen(&h, [14.5, 10.5]));
+    press_and_move(&mut h, from, away);
+    assert!(h.app.drawing.drag.is_some());
+    for k in 1..=8 {
+        h.app.synthetic.push(egui::Event::PointerMoved(away + (from - away) * (k as f32 / 8.0)));
+    }
+    h.settle();
+    release(&mut h, from);
+    assert!(h.app.drawing.drag.is_none());
+    assert_eq!(h.app.session.undo.len(), undo, "no empty Move View step");
+}
