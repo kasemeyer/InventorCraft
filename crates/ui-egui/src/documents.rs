@@ -316,6 +316,14 @@ pub(crate) fn create_drawing_view(app: &mut SolveApp) {
         return;
     }
     if let Some(path) = app.session.path.clone() {
+        // The drawing reads the model's file: an edited model is saved first, so the drawing shows
+        // the model as it is in memory (as Inventor works from the open model).
+        if app.session.is_dirty()
+            && let Err(e) = app.run("file.save", json!({ "path": path }))
+        {
+            app.set_status(e, true);
+            return;
+        }
         open_drawing_of(app, &path);
         return;
     }
@@ -336,8 +344,10 @@ pub(crate) fn create_drawing_view(app: &mut SolveApp) {
     });
 }
 
-/// A new drawing of the model saved at `path`, in its own tab (the model's tab stays open).
+/// A new drawing of the model saved at `path`, in its own tab (the model's tab stays open), with the
+/// Base View panel open on it, looking the way the model's tab looked (R13, spec §2.3).
 fn open_drawing_of(app: &mut SolveApp, path: &str) {
+    let look = -app.cam.back();
     // `drawing.new` reads a relative model from the open design's folder; a fresh session has
     // none, so the path goes absolute (R86).
     let absolute = std::path::absolute(path).map_or_else(|_| path.to_string(), |p| p.to_string_lossy().into_owned());
@@ -349,7 +359,9 @@ fn open_drawing_of(app: &mut SolveApp, path: &str) {
     app.home.open = false;
     if let Err(e) = open_tab(app, s) {
         app.set_status(e, true);
+        return;
     }
+    crate::drawing_view_panel::open_looking(app, Some(absolute), crate::drawing_view_panel::Origin::FromModel, Some(look));
 }
 
 /// Create a new tab directly; the File view chooses units before using [`new_design`].
@@ -528,6 +540,14 @@ pub fn tabs_info(app: &SolveApp) -> Vec<(String, bool)> {
             None => (app.session.doc.name.clone(), app.session.is_dirty()),
         })
         .collect()
+}
+
+/// Each tab's document kind, in `tabs_info`'s order.
+pub(crate) fn tab_kinds(app: &SolveApp) -> Vec<DocumentKind> {
+    if app.docs.slots.is_empty() {
+        return vec![app.session.doc.kind];
+    }
+    app.docs.slots.iter().map(|s| s.as_ref().map_or(&app.session, |d| &d.session).doc.kind).collect()
 }
 
 /// Where each tab's design is saved, in `tabs_info`'s order (`None`: not saved yet).

@@ -91,21 +91,22 @@ fn a_view_row_selects_and_offers_its_menu() {
     click(&mut h, "row:VIEW1:block.tcipart");
     assert_eq!(h.app.drawing.selection, [PaperPick::View { view: v1 }]);
     let menu = crate::drawing_menu::view_items(&h.app, v1);
-    assert_eq!(ids(&menu), ["ui.delete", "ui.drawing.openModel"]);
-    assert!(menu.iter().all(|i| i.enabled), "both enabled: {menu:?}");
-    assert_eq!((menu[0].icon.as_str(), menu[1].icon.as_str()), ("delete", "open"));
+    // Task 5 puts Edit View first (R93; updated by design).
+    assert_eq!(ids(&menu), ["ui.drawing.editView", "ui.delete", "ui.drawing.openModel"]);
+    assert!(menu.iter().all(|i| i.enabled), "all enabled: {menu:?}");
+    assert_eq!((menu[0].icon.as_str(), menu[1].icon.as_str(), menu[2].icon.as_str()), ("edit", "delete", "open"));
     // The row's right-click lists the same.
     assert_eq!(ids(&crate::context_menu::items(&h.app, &Target::DrawingView { view: v1 })), ids(&menu));
 
     // Open Model: the block opens in its own tab, which becomes the active one.
-    run_item(&mut h.app, &menu[1], egui::Pos2::ZERO);
+    run_item(&mut h.app, &menu[2], egui::Pos2::ZERO);
     h.settle();
     assert_eq!(h.app.docs.count(), 2);
     assert_eq!(h.app.session.path.as_deref(), Some(block.as_str()));
     // Open again from the drawing: the tab holding it is activated, nothing more opens.
     crate::documents::switch(&mut h.app, 0);
     h.frames(2);
-    let open = crate::drawing_menu::view_items(&h.app, v1).remove(1);
+    let open = crate::drawing_menu::view_items(&h.app, v1).remove(2);
     run_item(&mut h.app, &open, egui::Pos2::ZERO);
     h.settle();
     assert_eq!((h.app.docs.count(), h.app.docs.active), (2, 1));
@@ -116,7 +117,7 @@ fn a_view_row_selects_and_offers_its_menu() {
     h.frames(2);
     click(&mut h, "row:VIEW1:block.tcipart");
     let undo = h.app.session.undo.len();
-    let delete = crate::drawing_menu::view_items(&h.app, v1).remove(0);
+    let delete = crate::drawing_menu::view_items(&h.app, v1).remove(1);
     run_item(&mut h.app, &delete, egui::Pos2::ZERO);
     h.frames(2);
     assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
@@ -170,8 +171,8 @@ fn a_missing_model_is_flagged() {
     let view = tree().into_iter().map(|(l, _)| l).find(|l| l.starts_with("VIEW1:")).expect("the VIEW1 row");
     assert_eq!(view, format!("VIEW1:block.tcipart {suffix}"));
     let menu = crate::drawing_menu::view_items(&h.app, v1);
-    assert_eq!(ids(&menu), ["ui.delete", "ui.drawing.openModel"]);
-    assert!(!menu[1].enabled, "nothing to open");
+    assert_eq!(ids(&menu), ["ui.drawing.editView", "ui.delete", "ui.drawing.openModel"]);
+    assert!(!menu[2].enabled, "nothing to open");
 }
 
 #[test]

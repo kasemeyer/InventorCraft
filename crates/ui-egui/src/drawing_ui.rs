@@ -29,9 +29,10 @@ pub(crate) struct DrawingUi {
 /// `Dimension(drawing_dim_tool::DimTool)`, Task 9 `Note(drawing_notes_tool::NoteTool)`.
 pub(crate) enum DrawingTool {}
 
-/// Task 5 adds `View(drawing_view_panel::ViewPanel)`, Task 8 `Dimension(drawing_dim_tool::DimPanel)`,
-/// Task 9 `Text(drawing_notes_tool::TextPanel)`.
+/// Task 8 adds `Dimension(drawing_dim_tool::DimPanel)`, Task 9 `Text(drawing_notes_tool::TextPanel)`.
 pub(crate) enum DrawingPanel {
+    /// Base View and Edit View (Task 5).
+    View(crate::drawing_view_panel::ViewPanel),
     /// Drawing Properties: the title block's fields (Task 7).
     Properties(crate::browser::drawing::PropertiesPanel),
 }
@@ -41,6 +42,7 @@ pub(crate) fn panel_can_ok(app: &SolveApp) -> bool {
     match &app.drawing.panel {
         // OK with nothing changed closes the panel and sends nothing (R87).
         Some(DrawingPanel::Properties(_)) => true,
+        Some(DrawingPanel::View(p)) => p.can_ok(),
         None => false,
     }
 }
@@ -49,10 +51,17 @@ pub(crate) fn panel_can_ok(app: &SolveApp) -> bool {
 /// stays open when its command refused.
 pub(crate) fn panel_ok(app: &mut SolveApp) {
     match app.drawing.panel.take() {
-        Some(DrawingPanel::Properties(p)) if !crate::browser::drawing::apply_properties(app, &p) => {
-            app.drawing.panel = Some(DrawingPanel::Properties(p));
+        Some(DrawingPanel::Properties(p)) => {
+            if !crate::browser::drawing::apply_properties(app, &p) {
+                app.drawing.panel = Some(DrawingPanel::Properties(p));
+            }
         }
-        _ => {}
+        Some(DrawingPanel::View(mut p)) => {
+            if !crate::drawing_view_panel::apply(app, &mut p) {
+                app.drawing.panel = Some(DrawingPanel::View(p));
+            }
+        }
+        None => {}
     }
 }
 
@@ -65,17 +74,19 @@ pub(crate) fn panel_cancel(app: &mut SolveApp) {
 pub(crate) fn show_panel(app: &mut SolveApp, ctx: &egui::Context) {
     match app.drawing.panel.take() {
         Some(DrawingPanel::Properties(p)) => crate::browser::drawing::properties_panel(app, ctx, p),
+        Some(DrawingPanel::View(p)) => crate::drawing_view_panel::show(app, ctx, p),
         None => {}
     }
 }
 
 /// R2/R11: drawing command id → the UI start that runs instead of `run(id, {})`, consulted only
-/// for a Drawing document. Rows: Task 6 (`drawing.view.base`, `drawing.view.projected`), Task 8
+/// for a Drawing document. Rows: Task 5 opens the Base View panel for `drawing.view.base` (Task 6
+/// turns it into `drawing_place::start_base` and adds `drawing.view.projected`), Task 8
 /// (`drawing.dim.general`), Task 9 (`drawing.note.text`, `drawing.note.leader`,
 /// `drawing.note.hole`, `drawing.centermark`, `drawing.centerline.bisector`), Task 11
 /// (`drawing.export.pdf`, `drawing.export.dxf`). `drawing.sheet.add` and `drawing.update` take no
 /// parameters and run directly, as any command without a tool does.
-pub(crate) const DRAWING_STARTS: &[(&str, fn(&mut SolveApp))] = &[];
+pub(crate) const DRAWING_STARTS: &[(&str, fn(&mut SolveApp))] = &[("drawing.view.base", crate::drawing_view_panel::start)];
 
 /// The start `DRAWING_STARTS` gives command `id`, if any.
 pub(crate) fn start_for(id: &str) -> Option<fn(&mut SolveApp)> {

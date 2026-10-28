@@ -42,6 +42,10 @@ pub(crate) fn context(app: &SolveApp) -> MenuContext {
     if app.dialog.as_ref().is_some_and(|d| !matches!(d.kind, Kind::Sketch | Kind::Measure { .. })) {
         return MenuContext::Panel;
     }
+    // An open drawing panel (Base View, Drawing Properties) is a panel too (R72).
+    if app.session.doc.kind == DocumentKind::Drawing && app.drawing.panel.is_some() {
+        return MenuContext::Panel;
+    }
     if app.tool.is_some() {
         return MenuContext::Tool;
     }
@@ -211,6 +215,8 @@ pub(crate) fn item(app: &SolveApp, id: &str, ctx: MenuContext) -> Item {
             act("ui.showAll", "Show All", "eye").on(hidden)
         }
         "ui.drawing.openModel" => act("ui.drawing.openModel", "Open Model", "open"),
+        // Edit View (R93): the Base View panel on a placed view.
+        "ui.drawing.editView" => act("ui.drawing.editView", "Edit View", "edit").on(app.drawing.tool.is_none()),
         "ui.drawing.properties" => act("ui.drawing.properties", "Drawing Properties…", "settings").on(app.drawing.tool.is_none()),
         // A drawing of the open part or assembly (spec §2.1 path 2c).
         "ui.createDrawingView" => {

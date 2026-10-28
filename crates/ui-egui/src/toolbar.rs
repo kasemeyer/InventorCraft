@@ -2447,6 +2447,9 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                     crate::tools::finish(app);
                 } else if app.dialog.is_some() {
                     crate::dialogs::cancel(app);
+                } else if matches!(app.drawing.panel, Some(crate::drawing_ui::DrawingPanel::View(_))) {
+                    // The Base View panel's Esc (after the marking menu's, above).
+                    crate::drawing_ui::panel_cancel(app);
                 } else if !app.session.selection.is_empty() || app.session.active_sketch.is_none() {
                     app.tree.picked_joints.clear();
                     let _ = app.run("select.clear", json!({}));

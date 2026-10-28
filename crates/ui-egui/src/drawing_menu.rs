@@ -23,13 +23,14 @@ pub(crate) fn items(app: &SolveApp) -> Vec<Item> {
 }
 
 /// A view's list (R40), in the browser (Task 7) and for a view selected on the sheet (Task 10):
-/// Delete (the sheet's selection, R72) and Open Model (where the view's model is now, R77;
-/// disabled when it is found nowhere). Task 5 puts Edit View first.
+/// Edit View (the Base View panel on it, R93), Delete (the sheet's selection, R72) and Open Model
+/// (where the view's model is now, R77; disabled when it is found nowhere).
 pub(crate) fn view_items(app: &SolveApp, view: u64) -> Vec<Item> {
+    let edit = crate::marking_menu::item(app, "ui.drawing.editView", MenuContext::Empty).with(json!({ "view": view }));
     let open = crate::marking_menu::item(app, "ui.drawing.openModel", MenuContext::Empty)
         .with(json!({ "view": view }))
         .on(crate::browser::drawing::model_path_of(app, view).is_some());
-    vec![crate::marking_menu::item(app, "ui.delete", MenuContext::Empty), open]
+    vec![edit, crate::marking_menu::item(app, "ui.delete", MenuContext::Empty), open]
 }
 
 /// Delete on a drawing (the Delete key, a menu's Delete): what the sheet's selection holds goes,

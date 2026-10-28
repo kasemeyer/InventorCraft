@@ -21,6 +21,20 @@ fn title_field(app: &SolveApp, tag: &str) -> String {
 /// The active document is a new drawing: one D landscape sheet holding the border and title
 /// block inserts, no panel open and nothing to undo.
 fn assert_empty_drawing(app: &SolveApp) {
+    assert!(app.drawing.panel.is_none());
+    assert_empty_drawing_with(app);
+}
+
+/// A new drawing made by Create Drawing View: as [`assert_empty_drawing`], with the Base View panel
+/// open on the model (Task 5, R13; updated by design).
+fn assert_drawing_from_model(app: &SolveApp) {
+    let from_model = matches!(&app.drawing.panel,
+        Some(crate::drawing_ui::DrawingPanel::View(p)) if p.origin == crate::drawing_view_panel::Origin::FromModel && p.model.is_some());
+    assert!(from_model, "the Base View panel is open on the model");
+    assert_empty_drawing_with(app);
+}
+
+fn assert_empty_drawing_with(app: &SolveApp) {
     assert_eq!(app.session.doc.kind, Drawing);
     let m = app.session.doc.drawing.as_deref().expect("a drawing model");
     assert_eq!(m.sheets.len(), 1);
@@ -31,7 +45,6 @@ fn assert_empty_drawing(app: &SolveApp) {
         assert!(layout.entities.get(insert).is_some(), "the layout holds insert {insert:?}");
     }
     assert!(m.views.is_empty());
-    assert!(app.drawing.panel.is_none());
     assert_eq!(app.session.undo.len(), 0, "a new drawing has nothing to undo (no document.units step)");
 }
 
@@ -65,7 +78,7 @@ fn create_drawing_view_opens_a_drawing_of_the_model() {
     assert_eq!(h.app.docs.active, 1);
     assert_eq!(title_field(&h.app, "TITLE"), "block");
     assert_eq!(title_field(&h.app, "DWG_NO"), "block");
-    assert_empty_drawing(&h.app);
+    assert_drawing_from_model(&h.app);
     assert!(h.app.session.path.is_none(), "the drawing is new and unsaved");
     assert!(!h.app.session.is_dirty());
 }
@@ -97,7 +110,7 @@ fn an_unsaved_model_is_saved_first() {
     assert_eq!(h.app.docs.count(), 2);
     assert_eq!(h.app.session.doc.kind, Drawing);
     assert_eq!(title_field(&h.app, "DWG_NO"), "Untitled");
-    assert_empty_drawing(&h.app);
+    assert_drawing_from_model(&h.app);
     switch(&mut h.app, 0);
     assert_eq!(h.app.session.path.as_deref(), Some(saved.to_string_lossy().as_ref()));
     assert!(!h.app.session.is_dirty());

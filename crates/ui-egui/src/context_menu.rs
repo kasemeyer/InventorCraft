@@ -1165,6 +1165,11 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         }
         "ui.createDrawingView" => crate::documents::create_drawing_view(app),
         "ui.drawing.properties" => crate::browser::drawing::open_properties(app),
+        "ui.drawing.editView" => {
+            if let Some(view) = id_of(&p, "view") {
+                crate::drawing_view_panel::open(app, None, crate::drawing_view_panel::Origin::Edit(view));
+            }
+        }
         "ui.drawing.openModel" => {
             if let Some(view) = id_of(&p, "view") {
                 crate::browser::drawing::open_model(app, view);

@@ -67,7 +67,7 @@ pub(crate) fn shows(app: &SolveApp) -> bool {
 }
 
 /// The active sheet's size in inches (D landscape when there is none: the bare drawing harness).
-fn paper_size(app: &SolveApp) -> (f64, f64) {
+pub(crate) fn paper_size(app: &SolveApp) -> (f64, f64) {
     active(app).and_then(|(m, i)| m.sheets.get(i)).map_or((34.0, 22.0), |s| s.size.inches(s.landscape))
 }
 
