@@ -35,7 +35,7 @@ mod removed_later_tests;
 mod plane_target_tests;
 
 #[path = "navigation_cube.rs"]
-mod navigation_cube;
+pub(crate) mod navigation_cube;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NavMode {

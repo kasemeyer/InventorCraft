@@ -23,11 +23,16 @@ pub(crate) struct DrawingUi {
     /// The views whose model is found nowhere, and the document they were computed for (its
     /// `Arc` address, R77): the browser's suffix and Open Model read it.
     pub(crate) missing: Option<(usize, Vec<solidcraft_engine::doc::drawing::ViewId>)>,
+    /// A placed view being dragged on the sheet (Task 6).
+    pub(crate) drag: Option<crate::drawing_place::Drag>,
 }
 
-/// Declared with no variants in Task 3 (R12). Task 6 adds `Place(drawing_place::Place)`, Task 8
-/// `Dimension(drawing_dim_tool::DimTool)`, Task 9 `Note(drawing_notes_tool::NoteTool)`.
-pub(crate) enum DrawingTool {}
+/// The running drawing tool. Task 8 adds `Dimension(drawing_dim_tool::DimTool)`, Task 9
+/// `Note(drawing_notes_tool::NoteTool)`.
+pub(crate) enum DrawingTool {
+    /// Placing base and projected views (Task 6).
+    Place(crate::drawing_place::Place),
+}
 
 /// Task 8 adds `Dimension(drawing_dim_tool::DimPanel)`, Task 9 `Text(drawing_notes_tool::TextPanel)`.
 pub(crate) enum DrawingPanel {
@@ -80,13 +85,14 @@ pub(crate) fn show_panel(app: &mut SolveApp, ctx: &egui::Context) {
 }
 
 /// R2/R11: drawing command id → the UI start that runs instead of `run(id, {})`, consulted only
-/// for a Drawing document. Rows: Task 5 opens the Base View panel for `drawing.view.base` (Task 6
-/// turns it into `drawing_place::start_base` and adds `drawing.view.projected`), Task 8
+/// for a Drawing document. Rows: Task 6 places views (`drawing.view.base` opens the Base View
+/// panel with its live preview, `drawing.view.projected` picks a parent first), Task 8
 /// (`drawing.dim.general`), Task 9 (`drawing.note.text`, `drawing.note.leader`,
 /// `drawing.note.hole`, `drawing.centermark`, `drawing.centerline.bisector`), Task 11
 /// (`drawing.export.pdf`, `drawing.export.dxf`). `drawing.sheet.add` and `drawing.update` take no
 /// parameters and run directly, as any command without a tool does.
-pub(crate) const DRAWING_STARTS: &[(&str, fn(&mut SolveApp))] = &[("drawing.view.base", crate::drawing_view_panel::start)];
+pub(crate) const DRAWING_STARTS: &[(&str, fn(&mut SolveApp))] =
+    &[("drawing.view.base", crate::drawing_place::start_base), ("drawing.view.projected", crate::drawing_place::start_projected)];
 
 /// The start `DRAWING_STARTS` gives command `id`, if any.
 pub(crate) fn start_for(id: &str) -> Option<fn(&mut SolveApp)> {

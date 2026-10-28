@@ -254,8 +254,11 @@ fn enter_places_one_view_through_the_base_command() {
     assert_eq!(views(&h), 1);
     assert_eq!(last_undo(&h), (1, Some("Base View".into())));
     let v = h.app.session.doc.drawing.as_deref().unwrap().views.values().next().unwrap().clone();
-    // Until Task 6 places at the cursor, OK places at the sheet's centre.
-    assert_eq!((v.identifier.as_str(), v.position.x, v.position.y), ("VIEW1", 17.0, 11.0));
+    // The cursor never reached the sheet: the view goes to the canvas centre's paper point (Task 6,
+    // R14; was the sheet's centre until placement at the cursor).
+    let rect = crate::scenario::rect_of("sheet_canvas").unwrap();
+    let [x, y] = crate::sheet_canvas::paper_at(&h.app, rect, rect.center());
+    assert_eq!((v.identifier.as_str(), v.position.x, v.position.y), ("VIEW1", x, y));
     assert_eq!((v.lines, v.shaded, v.scale), (LineStyle::Hidden, false, 1.0));
 }
 

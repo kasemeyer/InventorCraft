@@ -2768,6 +2768,7 @@
   "ui.drawing.model_state": "Model state",
   "ui.drawing.needs_model": "Open a part or an assembly to make a drawing of it",
   "ui.drawing.open_model": "Open Model",
+  "ui.drawing.pick_parent": "Select the view to project from",
   "ui.drawing.properties": "Drawing Properties…",
   "ui.drawing.properties_title": "Drawing Properties",
   "ui.drawing.scale_from_base": "Scale from base view",

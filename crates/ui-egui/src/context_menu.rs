@@ -1190,7 +1190,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.cancelSketch" => app.cancel_sketch(),
         // The marking menu inside a tool or a panel.
         // A drawing's Done, OK and Cancel end its own tool and panel (R72).
-        "ui.done" | "ui.cancel" if crate::sheet_canvas::shows(app) && app.drawing.tool.is_some() => app.drawing.tool = None,
+        "ui.done" | "ui.cancel" if crate::sheet_canvas::shows(app) && app.drawing.tool.is_some() => crate::drawing_place::finish(app),
         "ui.ok" if crate::sheet_canvas::shows(app) && app.drawing.panel.is_some() => crate::drawing_ui::panel_ok(app),
         "ui.cancel" if crate::sheet_canvas::shows(app) && app.drawing.panel.is_some() => crate::drawing_ui::panel_cancel(app),
         "ui.done" => {

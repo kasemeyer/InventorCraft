@@ -10,11 +10,11 @@ use crate::test_support::inventor;
 
 #[test]
 fn the_table_holds_only_tool_rows() {
-    // Task 3 declares the table; Task 5 adds Base View's panel (updated by design), Tasks 6, 8, 9
-    // and 11 their rows.
+    // Task 3 declares the table; Task 6 gives it placement (updated by design), Tasks 8, 9 and 11
+    // their rows.
     let ids: Vec<&str> = DRAWING_STARTS.iter().map(|(id, _)| *id).collect();
-    assert_eq!(ids, ["drawing.view.base"]);
-    assert!(start_for("drawing.view.base").is_some());
+    assert_eq!(ids, ["drawing.view.base", "drawing.view.projected"]);
+    assert!(start_for("drawing.view.base").is_some() && start_for("drawing.view.projected").is_some());
     for id in ["drawing.sheet.add", "drawing.update", "solid.extrude"] {
         assert!(start_for(id).is_none(), "{id}");
     }

@@ -2768,6 +2768,7 @@
   "ui.drawing.model_state": "模型状态",
   "ui.drawing.needs_model": "请打开零件或装配体以创建工程图",
   "ui.drawing.open_model": "打开模型",
+  "ui.drawing.pick_parent": "选择要投影的源视图",
   "ui.drawing.properties": "工程图属性…",
   "ui.drawing.properties_title": "工程图属性",
   "ui.drawing.scale_from_base": "使用基础视图比例",

@@ -54,7 +54,7 @@ fn direction_label(d: Vec3) -> String {
 
 /// With `edges` (a profile option) the middle of each cube edge is its own edge-view target;
 /// otherwise it belongs to its face.
-fn facets(cam: &Camera, c: Pos2, half: f64, edges: bool) -> Vec<Facet> {
+pub(crate) fn facets(cam: &Camera, c: Pos2, half: f64, edges: bool) -> Vec<Facet> {
     if !cam.is_valid() {
         return Vec::new();
     }
@@ -132,8 +132,17 @@ fn contains(points: &Ring<Pos2>, p: Pos2) -> bool {
     sign != 0.0
 }
 
-fn hit(faces: &[Facet], p: Pos2) -> Option<usize> {
+pub(crate) fn hit(faces: &[Facet], p: Pos2) -> Option<usize> {
     faces.iter().enumerate().rev().find(|(_, f)| contains(&f.points, p)).map(|(i, _)| i)
+}
+
+/// The cube target under `pointer` for a cube drawn around `cam` at `centre` (`half` points per
+/// half-width), edges on: the hit facet's direction (a face, edge or corner, in the camera's
+/// Z-up frame), or `None` off the cube. A picker only: it reads `cam` and moves no camera (the
+/// drawing sheet's on-sheet cube, Plan D-2 Task 6).
+pub(crate) fn target_at(cam: &Camera, centre: Pos2, half: f64, pointer: Pos2) -> Option<Vec3> {
+    let faces = facets(cam, centre, half, true);
+    hit(&faces, pointer).and_then(|i| faces.get(i)).map(|f| f.direction)
 }
 
 /// The compass ring's screen points (frame up is +Z, so it lies under the cube in either up axis).

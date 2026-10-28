@@ -4,8 +4,8 @@
 //! view's Edit View (R93), where OK runs one `drawing.view.set_*` command per changed field (R87).
 //! The same code serves every profile's drawings (SolidCraft's included).
 //!
-//! Placement at the cursor with the live preview and the on-sheet cube is Task 6; until then OK on a
-//! new view places it at the active sheet's centre through `drawing.view.base`.
+//! On a new view the panel runs with `drawing_place` (Task 6): the live preview follows the cursor,
+//! the on-sheet cube sets `orientation`, and OK (or Enter) places the view where its preview is.
 
 use serde_json::{Map, Value, json};
 use solidcraft_engine::doc::DocumentKind;
@@ -203,12 +203,11 @@ pub(crate) fn open_looking(app: &mut SolveApp, model: Option<String>, origin: Or
     let model = model.or_else(|| if origin == Origin::Ribbon { open_models(app).into_iter().next() } else { None });
     if let Some(p) = ViewPanel::new(app, model, origin, look) {
         app.drawing.panel = Some(DrawingPanel::View(p));
+        // A new view is placed with the live preview and the on-sheet cube (Task 6).
+        if !matches!(origin, Origin::Edit(_)) {
+            crate::drawing_place::begin_base(app);
+        }
     }
-}
-
-/// The ribbon's Base and the BV alias (`DRAWING_STARTS`): the panel on the ribbon path.
-pub(crate) fn start(app: &mut SolveApp) {
-    open(app, None, Origin::Ribbon);
 }
 
 /// The open part and assembly tabs' files (absolute), in tab order: the Model combo's rows.
@@ -241,13 +240,7 @@ pub(crate) fn base_params(p: &ViewPanel, position: [f64; 2]) -> Value {
     })
 }
 
-/// The active sheet's centre, inches: where OK places a new view until Task 6 places at the cursor.
-fn sheet_centre(app: &SolveApp) -> [f64; 2] {
-    let (w, h) = crate::sheet_canvas::paper_size(app);
-    [w / 2.0, h / 2.0]
-}
-
-/// OK: a new view is placed (`drawing.view.base`, one step); an edited one runs one `set_*` command
+/// OK: a new view is placed at its preview (`drawing.view.base`, one step); an edited one runs one `set_*` command
 /// per changed field (R87). False, with `error` set, when a command refused (the panel stays).
 pub(crate) fn apply(app: &mut SolveApp, p: &mut ViewPanel) -> bool {
     p.validate();
@@ -255,9 +248,16 @@ pub(crate) fn apply(app: &mut SolveApp, p: &mut ViewPanel) -> bool {
         return false;
     }
     let Origin::Edit(view) = p.origin else {
-        let params = base_params(p, sheet_centre(app));
+        // Where the preview is (the canvas centre when the cursor never reached the sheet).
+        let params = base_params(p, crate::drawing_place::base_position(app));
         return match app.run("drawing.view.base", params) {
-            Ok(_) => true,
+            Ok(r) => {
+                // Placing goes on into projected views from it.
+                if let Some(view) = r["view"].as_u64() {
+                    crate::drawing_place::base_placed(app, view);
+                }
+                true
+            }
             Err(e) => {
                 p.error = Some(e);
                 false

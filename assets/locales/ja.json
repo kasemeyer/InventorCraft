@@ -2768,6 +2768,7 @@
   "ui.drawing.model_state": "モデル状態",
   "ui.drawing.needs_model": "図面を作成するには部品またはアセンブリを開いてください",
   "ui.drawing.open_model": "モデルを開く",
+  "ui.drawing.pick_parent": "投影元のビューを選択してください",
   "ui.drawing.properties": "図面のプロパティ…",
   "ui.drawing.properties_title": "図面のプロパティ",
   "ui.drawing.scale_from_base": "ベース ビューの尺度",

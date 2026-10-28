@@ -72,7 +72,7 @@ pub(crate) fn paper_size(app: &SolveApp) -> (f64, f64) {
 }
 
 /// A curve tessellated to points (inches).
-fn curve_points(c: &PaperCurve) -> Vec<[f32; 2]> {
+pub(crate) fn curve_points(c: &PaperCurve) -> Vec<[f32; 2]> {
     let at = |x: f64, y: f64| [x as f32, y as f32];
     let arc = |cx: f64, cy: f64, r: f64, a0: f64, a1: f64| {
         let sweep = a1 - a0;
@@ -302,8 +302,11 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     let input = crate::navigation::handle(app, ui, rect, &resp, NavCaps { orbit: false, pick: true });
     let navigating = input.mode.is_some() || (input.primary_nav.is_some() && input.primary_down);
+    // Placing views, dragging a placed one, a double-click's Edit View (Task 6).
+    let used = crate::drawing_place::input(app, ui, rect, &resp, &input, navigating);
     if resp.clicked()
         && !navigating
+        && !used
         && app.drawing.tool.is_none()
         && let Some(p) = input.hover.filter(|_| input.inside)
     {
@@ -331,6 +334,8 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         };
         painter.add(egui_wgpu::Callback::new_paint_callback(rect, crate::gpu::SheetCallback { scene, view }));
     }
+    // The on-sheet cube over the sheet, beside the base view's preview.
+    crate::drawing_place::paint(app, ui, rect);
 }
 
 #[cfg(test)]

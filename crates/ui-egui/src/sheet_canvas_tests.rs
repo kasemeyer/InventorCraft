@@ -342,3 +342,28 @@ fn suppressed_curves_are_not_drawn() {
     h.frames(2);
     assert_eq!(scene(&h.app).strokes.len(), shown);
 }
+
+#[test]
+fn drawing_starts_are_exactly_the_tool_rows() {
+    // R91 (D1): the table holds only drawing tools; Task 6 gives it its first two rows.
+    let ids: Vec<&str> = crate::drawing_ui::DRAWING_STARTS.iter().map(|(id, _)| *id).collect();
+    assert_eq!(ids, ["drawing.view.base", "drawing.view.projected"]);
+    for (i, id) in ids.iter().enumerate() {
+        assert!(id.starts_with("drawing."), "{id}");
+        assert_eq!(solidcraft_engine::find_command(id).map(|c| c.id), Some(*id), "{id} is a registry command");
+        assert!(!ids[..i].contains(id), "{id} twice");
+    }
+    // BV starts placing (the panel and Stage::Base) instead of running the command.
+    let mut h = new_drawing(inventor(DocumentKind::Drawing));
+    for c in "BV".chars() {
+        h.step(&json!({"key": c.to_string()})).unwrap();
+    }
+    h.frames(60);
+    assert!(
+        matches!(&h.app.drawing.tool, Some(crate::drawing_ui::DrawingTool::Place(p)) if matches!(p.stage, crate::drawing_place::Stage::Base)),
+        "BV starts Stage::Base"
+    );
+    assert!(matches!(h.app.drawing.panel, Some(crate::drawing_ui::DrawingPanel::View(_))));
+    assert_eq!(h.app.session.undo.len(), 0, "the command did not run");
+    assert!(h.app.session.doc.drawing.as_deref().unwrap().views.is_empty());
+}
