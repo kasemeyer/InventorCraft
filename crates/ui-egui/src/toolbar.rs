@@ -3338,8 +3338,11 @@ mod ribbon_label_tests {
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
             let painter = ui.painter().clone();
             let specs = solidcraft_engine::command_specs();
-            for section in crate::workspace::SECTIONS {
-                let (commands, count) = crate::workspace::layout(section.tab, section.panel, &specs).unwrap();
+            let lists = crate::workspace::SECTIONS
+                .iter()
+                .map(|s| crate::workspace::layout(s.tab, s.panel, &specs).unwrap())
+                .chain(crate::workspace::DRAWING_SECTIONS.iter().map(|s| crate::workspace::drawing_layout(s.panel, &specs).unwrap()));
+            for (commands, count) in lists {
                 for command in commands.iter().take(count) {
                     for catalog in crate::i18n::LOCALES {
                         let locale = crate::i18n::Locale::for_language(catalog.id);

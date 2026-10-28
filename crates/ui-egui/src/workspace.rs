@@ -382,7 +382,7 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("contact.enable_sets", "Contact Sets"),
     ("document.inspect", "Inspect"),
     ("document.units", "Units"),
-    ("drawing.centerline.bisector", "Centerline"),
+    ("drawing.centerline.bisector", "Bisector"),
     ("drawing.dim.general", "Dimension"),
     ("drawing.export.dxf", "Export DXF"),
     ("drawing.export.pdf", "Export PDF"),

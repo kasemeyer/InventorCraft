@@ -126,9 +126,9 @@ impl Ribbon {
     }
 
     /// Where a command lives: SolidCraft's Part and Assembly ribbons answer exactly as
-    /// `workspace::destination`; SolidCraft's Drawing ribbon and a data profile answer with the first (tab, panel) that lists it, searching the home tab first,
-    /// then the other `Always` tabs in order, then the rest; a visible panel anywhere wins over
-    /// a hidden one.
+    /// `workspace::destination`; SolidCraft's Drawing ribbon and a data profile answer with the
+    /// first (tab, panel) that lists it, searching the home tab first, then the other `Always`
+    /// tabs in order, then the rest; a visible panel anywhere wins over a hidden one.
     pub fn destination(&self, command: &str) -> Option<(&str, &str)> {
         self.homes.get(command).map(|(tab, panel)| (tab.as_str(), panel.as_str()))
     }
@@ -920,6 +920,16 @@ pub fn validate(profile: &Profile) -> Vec<String> {
         for (i, node) in root.iter().enumerate().filter(|&(i, node)| root[..i].contains(node)) {
             out.push(format!("{what}: {node:?} appears twice (entry {i})"));
         }
+    }
+    // A drawing's nodes belong to the drawing root only, and a design's nodes never to it.
+    let drawing_node = |n: &RootNode| matches!(n, RootNode::DrawingResources | RootNode::Sheets);
+    for (what, root) in [("browser.part_root", &profile.browser.part_root), ("browser.assembly_root", &profile.browser.assembly_root)] {
+        for node in root.iter().filter(|n| drawing_node(n)) {
+            out.push(format!("{what}: {node:?} is a drawing's node"));
+        }
+    }
+    for node in profile.browser.drawing_root.iter().filter(|n| !drawing_node(n)) {
+        out.push(format!("browser.drawing_root: {node:?} is not a drawing's node"));
     }
     // The history draws End of Part under the profile's own label (no upstream fallback).
     for (kind, root) in [("part", &profile.browser.part_root), ("assembly", &profile.browser.assembly_root)] {

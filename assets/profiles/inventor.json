@@ -128,7 +128,10 @@
     {"keys": "CB", "command": "drawing.centerline.bisector", "scope": "drawing"},
     {"keys": "HN", "command": "drawing.note.hole", "scope": "drawing"}
   ],
-  "button_labels": {"construct.plane.offset": "Plane", "construct.axis.edge": "Axis", "construct.point.vertex": "Point", "component.insert_design": "Place", "component.create": "Create"},
+  "button_labels": {"construct.plane.offset": "Plane", "construct.axis.edge": "Axis", "construct.point.vertex": "Point", "component.insert_design": "Place", "component.create": "Create",
+    "drawing.view.base": "Base", "drawing.view.projected": "Projected", "drawing.sheet.add": "New Sheet", "drawing.dim.general": "Dimension",
+    "drawing.note.hole": "Hole and Thread", "drawing.note.text": "Text", "drawing.note.leader": "Leader Text", "drawing.centermark": "Center Mark",
+    "drawing.centerline.bisector": "Centerline Bisector", "drawing.update": "Update"},
   "browser": {
     "part_root": ["named_views", "bodies", "origin", "history", "canvases", "analyses", "components", "doc_settings"],
     "assembly_root": ["named_views", {"node": "joints", "always": true}, "origin", "canvases", "analyses", "bodies", "sketches", "construction", "features", "components", "doc_settings"],
@@ -221,7 +224,7 @@
     "drawing_dimension": {"id": "DIMENSION", "label": "profile.inventor.panel.dimension", "promoted": 1, "commands": ["drawing.dim.general"]},
     "feature_notes": {"id": "FEATURE NOTES", "label": "profile.inventor.panel.feature_notes", "promoted": 1, "commands": ["drawing.note.hole"]},
     "drawing_text": {"id": "TEXT", "label": "profile.inventor.panel.text", "promoted": 2, "commands": ["drawing.note.text", "drawing.note.leader"]},
-    "drawing_symbols": {"id": "SYMBOLS", "label": "profile.inventor.panel.symbols", "promoted": 2, "commands": ["drawing.centermark", "drawing.centerline.bisector"]},
+    "drawing_symbols": {"id": "SYMBOLS", "label": "profile.inventor.panel.symbols", "promoted": 2, "commands": ["drawing.centermark", "drawing.centerline.bisector"], "small": ["drawing.centermark", "drawing.centerline.bisector"]},
     "drawing_update": {"id": "UPDATE", "label": "profile.inventor.panel.update", "promoted": 1, "commands": ["drawing.update"]}
   },
   "tabs": {

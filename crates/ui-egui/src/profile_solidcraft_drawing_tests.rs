@@ -50,6 +50,10 @@ fn solidcraft_drawing_ribbon_is_minimal() {
             }
         }
     }
+    // Review fix 4: the bisector's compact name is its own, not Centerline's.
+    let compact: BTreeMap<&str, &str> = workspace::RIBBON_LABELS.iter().copied().collect();
+    assert_eq!(compact["drawing.centerline.bisector"], "Bisector");
+    assert_eq!(compact["drawing.view.projected"], "Projected");
     // SolidCraft's own VIEW tab, as on a part.
     assert_eq!(ribbon.tab("VIEW"), p.ribbon(Part).tab("VIEW"));
     assert_eq!(ribbon.home(), "DRAWING");
