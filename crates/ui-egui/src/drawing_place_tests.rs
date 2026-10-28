@@ -447,3 +447,25 @@ fn the_cube_steps_out_of_a_larger_preview() {
     let out = CUBE_OUT * std::f32::consts::FRAC_1_SQRT_2 - 0.5;
     assert!(centre.x - corner.x >= out && corner.y - centre.y >= out, "{centre:?} beyond {corner:?}");
 }
+
+#[test]
+fn a_double_click_projects_one_view() {
+    // Final wave item 16.
+    let (mut h, _) = placing();
+    click_paper(&mut h, [10.0, 8.0]);
+    hover(&mut h, [10.0, 16.0]);
+    let at = screen(&h, [10.0, 16.0]);
+    h.step(&json!({"click": [at.x, at.y], "double": true})).unwrap();
+    h.frames(3);
+    assert_eq!(
+        views(&h).len(),
+        2,
+        "VIEW1 and one projected view: {:?}",
+        views(&h).iter().map(|v| (v.identifier.clone(), v.position)).collect::<Vec<_>>()
+    );
+    assert_eq!(h.app.session.undo.len(), 2);
+    // A later single click still projects.
+    crate::test_support::clicks_expire(&mut h);
+    click_paper(&mut h, [20.0, 8.0]);
+    assert_eq!(views(&h).len(), 3);
+}

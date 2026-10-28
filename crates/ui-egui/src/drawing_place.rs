@@ -312,7 +312,8 @@ pub(crate) fn input(app: &mut SolveApp, ui: &egui::Ui, rect: Rect, resp: &Respon
                 if let Some(pl) = place_mut(app) {
                     pl.cursor = Some(at);
                 }
-                if clicked {
+                // A fast double-click is one click's view, not two views on one spot.
+                if clicked && !resp.double_clicked() && !resp.triple_clicked() {
                     match app.run("drawing.view.projected", json!({ "parent": parent, "position": at })) {
                         Ok(r) => {
                             if let (Some(id), Some(pl)) = (r["view"].as_u64(), place_mut(app)) {
