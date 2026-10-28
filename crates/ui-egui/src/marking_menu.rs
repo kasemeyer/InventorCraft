@@ -260,12 +260,14 @@ fn drawing_item(app: &SolveApp, id: &str) -> Option<Item> {
     let d = &app.drawing;
     Some(match id {
         // Leader Text's Done is Continue: it opens the text panel (spec §2.8).
-        "ui.done" if crate::drawing_notes_tool::leader_running(app) => act("ui.done", "Continue", "finish").on(d.panel.is_none()),
+        "ui.done" if crate::drawing_notes_tool::leader_running(app) => {
+            act("ui.done", "Continue", "finish").on(d.panel.is_none() && crate::drawing_notes_tool::can_continue(app))
+        }
         "ui.done" => act("ui.done", "OK", "finish").on(d.tool.is_some()),
         // Leader Text's list (icons R91).
-        "ui.drawing.back" => act("ui.drawing.back", "Back", "rollback").on(crate::drawing_notes_tool::can_go_back(app)),
+        "ui.drawing.back" => act("ui.drawing.back", "Back", "rollback").on(d.panel.is_none() && crate::drawing_notes_tool::can_go_back(app)),
         "ui.drawing.singleSegment" => {
-            act("ui.drawing.singleSegment", "Single-Segment Leader", "line").on(crate::drawing_notes_tool::leader_running(app))
+            act("ui.drawing.singleSegment", "Single-Segment Leader", "line").on(d.panel.is_none() && crate::drawing_notes_tool::leader_running(app))
         }
         "ui.ok" => act("ui.ok", "OK", "finish").key("Enter").on(d.panel.is_some() && crate::drawing_ui::panel_can_ok(app)),
         "ui.cancel" => act("ui.cancel", "Cancel", "sketch_cancel").key("Esc").on(d.tool.is_some() || d.panel.is_some()),

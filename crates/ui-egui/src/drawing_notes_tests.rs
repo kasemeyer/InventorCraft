@@ -524,3 +524,51 @@ fn solidcraft_drawings_share_the_tools() {
     key(&mut h, "Escape");
     assert!(h.app.drawing.tool.is_none());
 }
+
+#[test]
+fn edit_note_on_a_metric_height_sends_nothing_unchanged() {
+    let (mut h, _, _, _) = sheet(inventor(Drawing));
+    let height = 3.0 / 25.4;
+    let note = h.app.run("drawing.note.text", json!({"position": [2, 2], "text": "NOTES:", "height": height})).unwrap()["handle"].as_u64().unwrap();
+    h.frames(2);
+    let start = undo(&h);
+    h.app.drawing.notes_last_sent = None;
+    open_edit(&mut h.app, note);
+    h.frames(2);
+    assert_eq!(panel(&h).height_text, "0.1181 in");
+    assert_eq!(edits(panel(&h)), None, "the rounded box is not a change");
+    click(&mut h, "dialog:ok");
+    assert!(h.app.drawing.panel.is_none());
+    assert_eq!(undo(&h), start, "no command, no undo step");
+    let info = note_at(h.app.session.doc.drawing.as_deref().unwrap(), note).unwrap();
+    assert!((info.height - height).abs() < 1e-12);
+}
+
+#[test]
+fn the_leader_list_respects_the_open_panel() {
+    let (mut h, _, _, _) = sheet(inventor(Drawing));
+    alias(&mut h, "LE");
+    click_paper(&mut h, [3.0, 3.0]);
+    // One point: Continue has nothing to continue.
+    let row = |h: &Harness, id: &str| crate::marking_menu::item(&h.app, id, crate::profile_workflow::MenuContext::Tool);
+    assert!(!row(&h, "ui.done").enabled);
+    assert!(row(&h, "ui.drawing.back").enabled && row(&h, "ui.drawing.singleSegment").enabled);
+    click_paper(&mut h, [5.0, 4.0]);
+    assert!(row(&h, "ui.done").enabled);
+    continue_leader(&mut h.app);
+    h.frames(2);
+    type_text(&mut h, "drawing_text:text", "KEEP");
+    for id in ["ui.done", "ui.drawing.back", "ui.drawing.singleSegment"] {
+        assert!(!row(&h, id).enabled, "{id} with the panel open");
+    }
+    // Even when sent, the rows leave the panel and its points alone.
+    run_menu(&mut h.app, "ui.drawing.singleSegment");
+    run_menu(&mut h.app, "ui.drawing.back");
+    assert_eq!(panel(&h).text, "KEEP");
+    assert!(matches!(tool(&h), NoteTool::Leader { points, single: false, .. } if points.len() == 2));
+    // Ending the tool takes its prompt off the status line.
+    key(&mut h, "Escape");
+    key(&mut h, "Escape");
+    assert!(h.app.drawing.tool.is_none());
+    assert_eq!(crate::status_bar::texts(&h.app).left, crate::i18n::tr("ui.status_ready"));
+}

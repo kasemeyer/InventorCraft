@@ -145,6 +145,15 @@ fn format_height(inches: f64) -> String {
     format!("{s} in")
 }
 
+/// The panel's height in inches: Edit Note's own height while the box still shows it as it
+/// opened (the box rounds it, so reading the box back would be a change nobody made).
+fn typed_height(p: &TextPanel) -> Option<f64> {
+    match &p.original {
+        Some((_, height, _)) if p.height_text.trim() == format_height(*height) => Some(*height),
+        _ => parse_height(&p.height_text),
+    }
+}
+
 /// A typed height in inches: `0.25 in`, `3 mm`, or a bare number of inches; above 0, at most 10.
 pub(crate) fn parse_height(text: &str) -> Option<f64> {
     let mm = crate::prefs::parse_length_mm(text, 1.0 / 25.4)?;
@@ -207,7 +216,12 @@ pub(crate) fn start_bisector(app: &mut SolveApp) {
 /// End the tool (Esc, Done, Cancel): what it placed stays; its picks, rubber band and an open
 /// text panel for a note not yet placed go.
 pub(crate) fn finish(app: &mut SolveApp) {
-    if tool(app).is_some() {
+    if let Some(key) = prompt(app) {
+        // The tool's prompt leaves the status line with it.
+        let shown = crate::i18n::tr(key).to_string();
+        if app.status.as_ref().is_some_and(|(text, _, _)| *text == shown) {
+            app.status = None;
+        }
         app.drawing.tool = None;
         if matches!(&app.drawing.panel, Some(DrawingPanel::Text(p)) if p.edit.is_none()) {
             app.drawing.panel = None;
@@ -435,7 +449,7 @@ fn send(app: &mut SolveApp, cmd: &'static str, params: Value) -> Option<Value> {
 /// Continue (Enter, the list's `ui.done`, a single segment's second click): the leader's text
 /// panel opens once the leader has two points.
 pub(crate) fn continue_leader(app: &mut SolveApp) {
-    if leader_points(app) >= 2 {
+    if app.drawing.panel.is_none() && leader_points(app) >= 2 {
         app.drawing.preview.clear();
         open_new(app, None);
     }
@@ -515,7 +529,7 @@ fn new_note(app: &SolveApp, p: &TextPanel) -> Option<(&'static str, Value)> {
 /// OK: Edit Note's one `drawing.note.edit` (nothing when nothing changed), or the new note's one
 /// command; the tool then goes on for the next. False when refused (the panel stays open).
 pub(crate) fn apply(app: &mut SolveApp, p: &mut TextPanel) -> bool {
-    let Some(height) = parse_height(&p.height_text) else {
+    let Some(height) = typed_height(p) else {
         p.error = Some(crate::i18n::tr("ui.drawing.bad_height").to_string());
         return false;
     };
@@ -610,7 +624,7 @@ fn body(ui: &mut egui::Ui, p: &mut TextPanel) {
         scenario::publish_handle("drawing_text:height", ui.available_rect_before_wrap().center());
         crate::ui_kit::text_field(ui, &mut p.height_text, "0.12 in");
     });
-    if let Some(h) = parse_height(&p.height_text) {
+    if let Some(h) = typed_height(p) {
         p.height = h;
     }
     crate::ui_kit::row(ui, tr("ui.drawing.justify"), |ui| {
@@ -651,6 +665,10 @@ fn body(ui: &mut egui::Ui, p: &mut TextPanel) {
 /// A row of the leader's right-click list (`context_menu::run_item`): Back, Single-Segment
 /// Leader.
 pub(crate) fn run_menu(app: &mut SolveApp, id: &str) {
+    // The open text panel holds the leader's typed text: its points stay as they are.
+    if app.drawing.panel.is_some() {
+        return;
+    }
     match id {
         "ui.drawing.back" => {
             if let Some(NoteTool::Leader { points, attach, .. }) = tool_mut(app) {
@@ -674,6 +692,11 @@ pub(crate) fn run_menu(app: &mut SolveApp, id: &str) {
         }
         _ => {}
     }
+}
+
+/// Whether the leader's Continue would open its text panel (two points at least).
+pub(crate) fn can_continue(app: &SolveApp) -> bool {
+    leader_points(app) >= 2
 }
 
 /// Whether the leader's list may go Back (a point to drop).
