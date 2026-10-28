@@ -554,7 +554,6 @@ pub(crate) fn tab_kinds(app: &SolveApp) -> Vec<DocumentKind> {
     app.docs.slots.iter().map(|s| s.as_ref().map_or(&app.session, |d| &d.session).doc.kind).collect()
 }
 
-/// Where each tab's design is saved, in `tabs_info`'s order (`None`: not saved yet).
 /// Each tab's saved path and document, in tab order.
 pub(crate) fn tab_docs(app: &SolveApp) -> Vec<(Option<String>, std::sync::Arc<solidcraft_engine::doc::Document>)> {
     let session = |s: &Session| (s.path.clone(), s.doc.clone());
@@ -564,6 +563,7 @@ pub(crate) fn tab_docs(app: &SolveApp) -> Vec<(Option<String>, std::sync::Arc<so
     app.docs.slots.iter().map(|s| session(s.as_ref().map_or(&app.session, |d| &d.session))).collect()
 }
 
+/// Where each tab's design is saved, in `tabs_info`'s order (`None`: not saved yet).
 pub(crate) fn tab_paths(app: &SolveApp) -> Vec<Option<String>> {
     if app.docs.slots.is_empty() {
         return vec![app.session.path.clone()];
