@@ -104,6 +104,24 @@ fn center_lines(h: &Harness) -> usize {
     entities(h).iter().filter(|(_, k, layer)| matches!(k, cadcraft_doc::EntityKind::Line(_)) && layer == "CENTER").count()
 }
 
+/// Where the centre mark's two CENTER lines cross (paper inches).
+fn center_cross(h: &Harness) -> [f64; 2] {
+    let lines: Vec<cadcraft_doc::Line> = entities(h)
+        .into_iter()
+        .filter_map(|(_, k, layer)| match k {
+            cadcraft_doc::EntityKind::Line(l) if layer == "CENTER" => Some(l),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(lines.len(), 2, "two CENTER lines");
+    let (p, r) = ([lines[0].a.x, lines[0].a.y], [lines[0].b.x - lines[0].a.x, lines[0].b.y - lines[0].a.y]);
+    let (q, s) = ([lines[1].a.x, lines[1].a.y], [lines[1].b.x - lines[1].a.x, lines[1].b.y - lines[1].a.y]);
+    let cross = r[0] * s[1] - r[1] * s[0];
+    assert!(cross.abs() > 1e-9, "the two lines are not parallel");
+    let t = ((q[0] - p[0]) * s[1] - (q[1] - p[1]) * s[0]) / cross;
+    [p[0] + t * r[0], p[1] + t * r[1]]
+}
+
 fn dimensions(h: &Harness) -> Vec<u64> {
     entities(h).into_iter().filter(|(_, k, _)| matches!(k, cadcraft_doc::EntityKind::Dimension(_))).map(|(handle, ..)| handle).collect()
 }
@@ -265,6 +283,7 @@ fn a_two_view_drawing_in_two_minutes_under_inventor() {
     assert_eq!(center_lines(&h), 0);
     click_paper(&mut h, [10.375, 8.0]);
     assert_eq!(center_lines(&h), 2, "the hole's centre mark");
+    assert!(near(center_cross(&h), [10.0, 8.0], 1e-3), "centred on the hole: {:?}", center_cross(&h));
     h.step(&json!({"key": "Escape"})).unwrap();
     h.frames(2);
     clicks_expire(&mut h);
@@ -336,6 +355,12 @@ fn the_same_drawing_under_solidcraft() {
     click(&mut h, "toolbar:drawing.view.base");
     // The only open model is offered first; choose it in the combo as a user does.
     assert_eq!(view_panel(&h).model.as_deref(), Some(block.as_str()));
+    // Cleared first, so the pick below is what sets it.
+    if let Some(crate::drawing_ui::DrawingPanel::View(p)) = h.app.drawing.panel.as_mut() {
+        p.model = None;
+    }
+    h.frames(2);
+    assert_eq!(view_panel(&h).model, None);
     click(&mut h, "drawing_view:model");
     click(&mut h, "drawing_view:model_row:block.tcipart");
     assert_eq!(view_panel(&h).model.as_deref(), Some(block.as_str()));
@@ -370,6 +395,7 @@ fn the_same_drawing_under_solidcraft() {
     click(&mut h, "toolbar:drawing.centermark");
     click_paper(&mut h, [10.375, 8.0]);
     assert_eq!(center_lines(&h), 2);
+    assert!(near(center_cross(&h), [10.0, 8.0], 1e-3), "centred on the hole: {:?}", center_cross(&h));
     h.step(&json!({"key": "Escape"})).unwrap();
     h.frames(2);
     clicks_expire(&mut h);
