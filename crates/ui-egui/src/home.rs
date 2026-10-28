@@ -515,6 +515,7 @@ enum FileAction {
     Back,
     Section(Section),
     New(&'static str),
+    NewDrawing,
     Open,
     Import,
     Save,
@@ -746,6 +747,8 @@ fn start_content(app: &mut SolveApp, ui: &mut egui::Ui, action: &mut Option<File
         ("home:new_inches", "new", app.tr("home.new_inches"), app.tr("home.new_inches_hint"), false),
         ("home:open_tile", "open", app.tr("home.open"), open_hint.as_str(), false),
         ("home:import", "import", app.tr("home.import"), app.tr("home.import_hint"), false),
+        // Last, so the four tiles every design starts from keep their row (R23: every profile).
+        ("home:new_drawing", "ws_drawing", app.tr("home.new_drawing"), app.tr("home.new_drawing_hint"), false),
     ];
     FileView::section(ui, app.tr_label("New"), t.space_12, |ui| {
         FileView::grid(ui, "home_new", FileView::tile_min_width(), tiles.len(), |ui, index, width| {
@@ -757,7 +760,8 @@ fn start_content(app: &mut SolveApp, ui: &mut egui::Ui, action: &mut Option<File
                     0 => FileAction::New("mm"),
                     1 => FileAction::New("in"),
                     2 => FileAction::Open,
-                    _ => FileAction::Import,
+                    3 => FileAction::Import,
+                    _ => FileAction::NewDrawing,
                 });
             }
         });
@@ -960,6 +964,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, action: FileAction) {
                 crate::prefs::apply_new_design_units(app, units);
             }
         }
+        FileAction::NewDrawing => crate::documents::new_document(app, solidcraft_engine::doc::DocumentKind::Drawing, None),
         FileAction::Open => app.pick_open(|app, path| {
             if let Some(path) = path {
                 app.open_path_async(&path);

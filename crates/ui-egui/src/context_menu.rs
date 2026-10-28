@@ -931,6 +931,11 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     v.push(Item::sep());
     v.push(cmd(app, "browser.expand_all", "Expand All").with(json!({ "component": id })));
     v.push(cmd(app, "browser.collapse_all", "Collapse All").with(json!({ "component": id })));
+    // The profile's switch (R23): Create Drawing View from the design's root.
+    if id == 0 && crate::profile::active(app).workflow.create_drawing_in_root_menu {
+        v.push(Item::sep());
+        v.push(crate::marking_menu::item(app, "ui.createDrawingView", crate::profile_workflow::MenuContext::Empty));
+    }
     v
 }
 
@@ -1131,6 +1136,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.selectOther" => {
             crate::select_other::open(app, at);
         }
+        "ui.createDrawingView" => crate::documents::create_drawing_view(app),
         "ui.delete" if item.params.is_some() => crate::delete::request(app, p),
         "ui.delete" => delete(app),
         "ui.horizontalConstraint" | "ui.verticalConstraint" => {

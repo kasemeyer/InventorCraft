@@ -416,15 +416,25 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 if !kept {
                     continue;
                 }
-                let extra = if id == "select" { arrow } else { 0.0 };
+                // New and Select are drop-down buttons: New's arrow opens its flyout of kinds.
+                let extra = if matches!(id, "select" | "new") { arrow } else { 0.0 };
                 let tip = crate::quick_access::tip(app, id);
                 let (clicked, rect) = click(ui, x, id, icon, &tip, enabled && idle, extra);
+                let mut run = id;
                 if id == "select" {
                     ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(crate::quick_access::SELECT_X), rect.left()));
                 }
+                if id == "new" {
+                    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(crate::quick_access::NEW_X), rect.left()));
+                    let split = rect.right() - extra - 2.0;
+                    crate::scenario::publish_handle("appbar:new_arrow", pos2((split + rect.right()) / 2.0, rect.center().y));
+                    if ui.ctx().input(|i| i.pointer.interact_pos()).is_some_and(|p| p.x >= split) {
+                        run = "new_arrow";
+                    }
+                }
                 if clicked {
                     let ctx = ui.ctx().clone();
-                    crate::quick_access::run(app, &ctx, id);
+                    crate::quick_access::run(app, &ctx, run);
                 }
                 last_right = rect.right();
                 x += step + extra;
@@ -573,6 +583,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
     });
     file_menu(app, ui.ctx());
     crate::quick_access::show_select(app, ui.ctx());
+    crate::quick_access::show_new(app, ui.ctx());
     let help_x = ui.ctx().data(|d| d.get_temp::<f32>(egui::Id::new("sc_help_anchor")).unwrap_or(300.0));
     crate::help::show(app, &ui.ctx().clone(), pos2(help_x - 14.0, APP_BAR_HEIGHT));
 }
@@ -586,6 +597,8 @@ pub enum FileAction {
     NewPart(Option<&'static str>),
     /// A new Assembly from a template's units ("mm", "in"; `None`: Units of new designs).
     NewAssembly(Option<&'static str>),
+    /// A new Drawing: one D landscape sheet from the inch template (owner default; §8.1, §8.3).
+    NewDrawing,
     /// Pick a design or an exchange file to open.
     Open,
     /// Save the active design, asking for a path when needed.
@@ -642,6 +655,7 @@ impl FileAction {
             Self::New => crate::documents::new_design(app),
             Self::NewPart(units) => crate::documents::new_document(app, DocumentKind::Part, *units),
             Self::NewAssembly(units) => crate::documents::new_document(app, DocumentKind::Assembly, *units),
+            Self::NewDrawing => crate::documents::new_document(app, DocumentKind::Drawing, None),
             Self::Open => app.pick_open(|app, path| {
                 if let Some(path) = path {
                     app.open_path_async(&path);
@@ -712,6 +726,11 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
                             }
                         }
                     });
+                }
+                // One template (owner default; §8.3), so no template list.
+                if item(ui, app.tr_label("New Drawing"), "", "new") {
+                    FileAction::NewDrawing.run(app);
+                    close = true;
                 }
                 if item(ui, &format!("{}…", app.tr("ui.open")), "Ctrl+O", "open") {
                     FileAction::Open.run(app);
@@ -2269,7 +2288,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
     }
     let file_menu_id = egui::Id::new("sc_file_menu");
     let file_open = !app.native_file_menu && ctx.data(|d| d.get_temp::<bool>(file_menu_id).unwrap_or(false));
-    let area_open = file_open || crate::quick_access::select_open(ctx);
+    let area_open = file_open || crate::quick_access::select_open(ctx) || crate::quick_access::new_open(ctx);
     // A typed alias waits only while the design has the keyboard: hidden behind Home, loading
     // a file, recording a shortcut, or with File, a text field, popup or value editor taking
     // the keys, it is dropped rather than run into whatever has the keyboard (Ruling C).
@@ -2288,6 +2307,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
     if area_open && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
         ctx.data_mut(|d| d.insert_temp(file_menu_id, false));
         crate::quick_access::close_select(ctx);
+        crate::quick_access::close_new(ctx);
         egui::Popup::close_all(ctx);
         ctx.input_mut(|i| {
             i.raw.events.retain(|event| !matches!(event, egui::Event::Key { key: egui::Key::Escape, modifiers, .. } if modifiers.matches_logically(egui::Modifiers::NONE)));

@@ -42,6 +42,15 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui_kit::text(ui, app.tr("prefs.crash_reports_note"), ui_kit::Text::Hint("crash_reports"));
         });
     });
+    ui_kit::settings_section(ui, "drawings", app.tr("prefs.drawings"), |ui| {
+        ui_kit::settings_form(ui, labels, |ui| {
+            ui_kit::row(ui, app.tr("prefs.drawing_company"), |ui| {
+                ui_kit::settings_control_width(ui, t.form_card_width - t.space_4, |ui| {
+                    ui_kit::text_field(ui, &mut app.preferences.drawing_company, "");
+                });
+            });
+        });
+    });
     ui_kit::settings_section(ui, "updates", app.tr("prefs.updates"), |ui| {
         ui_kit::settings_block(ui, app.tr("update.prefs_label"), labels, |ui| crate::update::prefs_rows(app, ui));
     });

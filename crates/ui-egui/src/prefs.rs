@@ -447,6 +447,9 @@ macro_rules! preference_settings {
 preference_settings! {
     /// Units of new designs.
     default_units: String = "mm".into(), PAGE_DESIGN;
+    /// The company a new drawing's title block names (R43); the Drawing Properties panel writes
+    /// it too. Empty: the field starts empty.
+    drawing_company: String = String::new(), PAGE_GENERAL;
     /// Mouse mapping: `fusion`, `solidworks` or `inventor`.
     nav: String = "fusion".into(), PAGE_NAVIGATION;
     /// Opt in to rotation through both poles with roll, without the Shift axis-snap spring.

@@ -221,6 +221,7 @@ pub(crate) fn run_ui_action(app: &mut SolveApp, id: &str) -> bool {
         "ui.view_previous" => {
             crate::view_history::previous(app);
         }
+        "ui.createDrawingView" => crate::documents::create_drawing_view(app),
         _ => return false,
     }
     true

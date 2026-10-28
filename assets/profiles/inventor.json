@@ -18,6 +18,7 @@
     "plane_drag": true,
     "sticky_split_buttons": true,
     "origin_auto_hide": true,
+    "create_drawing_in_root_menu": true,
     "marking_menu": {
       "face":   {"ring": ["ui.lookAt", "solid.extrude", "ui.selectOther", "", "sketch.create", "construct.plane.offset", "edit.undo", "inspect.measure"],
                  "overflow": ["ui.repeat", "-", "ui.previousView", "ui.home", "-", "ui.properties"],
@@ -32,7 +33,7 @@
                  "evidence": "docs/evidence/screenshots/marking-menus/body-crop.png",
                  "unmapped": ["list: Select Tangencies (no tangent-face selection)", "list: Make Part", "list: Create Note", "list: Hide Others", "list: Export Object", "list: Help Topics…"]},
       "empty":  {"ring": ["solid.fillet", "solid.extrude", "solid.revolve", "solid.hole", "sketch.create", "construct.plane.offset", "edit.undo", "inspect.measure"],
-                 "overflow": ["ui.repeat", "-", "ui.showAll", "-", "ui.previousView", "ui.home"],
+                 "overflow": ["ui.repeat", "-", "ui.showAll", "-", "ui.previousView", "ui.home", "-", "ui.createDrawingView"],
                  "evidence": "docs/evidence/screenshots/marking-menus/part-empty-crop.png",
                  "unmapped": ["list: New 3D Sketch", "list: Dimension Display", "list: Create iMate", "list: Move EOP to Top", "list: Hide Others", "list: Place Feature…", "list: Help Topics…"]},
       "sketch": {"ring": ["sketch.line", "sketch.rectangle.two_point", "sketch.trim", "sketch.project", "ui.finishSketch", "sketch.dimension", "edit.undo", "sketch.circle.center"],
@@ -60,7 +61,7 @@
                  "evidence": "docs/evidence/screenshots/marking-menus/assembly-component-crop.png",
                  "unmapped": ["N: Open", "NE: Constraint", "E: Show Relationships", "SE: Visibility", "S: Edit", "SW: Find in Browser", "list: Copy", "list: Add to New Folder", "list: Selection", "list: Isolate", "list: Undo Isolate", "list: Free Rotate", "list: Substitute", "list: Representation…", "list: Component", "list: Create Note", "list: BOM Structure", "list: Visibility", "list: iMate Glyph Visibility", "list: Grounded", "list: Adaptive", "list: Enabled", "list: Transparent", "list: Contact Set", "list: Suppress", "list: Instance Properties…", "list: iProperties…", "list: AEC Properties…", "list: How To…"]},
       "assembly_empty": {"ring": ["component.insert_design", "", "", "solid.move", "component.create", "", "edit.undo", "inspect.measure"],
-                 "overflow": ["joint.create", "-", "ui.previousView", "ui.home"],
+                 "overflow": ["joint.create", "-", "ui.previousView", "ui.home", "-", "ui.createDrawingView"],
                  "evidence": "docs/evidence/screenshots/marking-menus/assembly-empty-crop.png",
                  "unmapped": ["NE: Constraint", "E: Pattern Component", "SW: Free Rotate", "list: Replace from Content Center…", "list: Make Layout", "list: Create Pipe Run…", "list: Create Harness…", "list: Assemble", "list: Show Relationships", "list: Hide All", "list: Create iMate", "list: Dimension Display", "list: Help Topics…"]}
     }

@@ -21,6 +21,23 @@ pub(crate) fn inventor(kind: solidcraft_engine::doc::DocumentKind) -> Harness {
     h
 }
 
+/// The drawing tests' block (D-1's fixture, `engine/src/cmd/drawing_fixture.rs`): 4 x 3 x 1 in
+/// with a drilled hole and four rounded corners, saved as `<dir>/block.tcipart`.
+pub(crate) fn block_part(dir: &std::path::Path) -> String {
+    let path = dir.join("block.tcipart").to_string_lossy().into_owned();
+    let mut s = Session::default();
+    let mut run = |id: &str, p: Value| {
+        s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+    };
+    run("document.new_part", json!({}));
+    run("document.units", json!({"units": "in"}));
+    run("solid.box", json!({"length": "4 in", "width": "1 in", "height": "3 in", "corner": [-50.8, 0, 0], "name": "Block", "body_name": "Block"}));
+    run("solid.hole", json!({"position": [0, 0, 38.1], "direction": [0, 1, 0], "diameter": "0.75 in", "name": "Drill"}));
+    run("solid.fillet", json!({"edges": [[-50.8, 12.7, 0], [50.8, 12.7, 0], [-50.8, 12.7, 76.2], [50.8, 12.7, 76.2]], "radius": "0.5 in"}));
+    run("file.save", json!({"path": path}));
+    path
+}
+
 pub(crate) fn sample_app() -> SolveApp {
     app_with_script(solidcraft_engine::sample::script())
 }

@@ -262,28 +262,94 @@ pub fn new_design_in(app: &mut SolveApp, units: Option<&str>) {
     }
 }
 
-/// A new Part or Assembly from a template: `units` is the template's ("mm", "in"); `None` takes
-/// Units of new designs. It replaces a blank active design (keeping its project), otherwise it
-/// opens in its own tab; either way it starts clean. A drawing is not offered here.
+/// A new Part, Assembly or Drawing from a template: `units` is the template's ("mm", "in"); `None`
+/// takes Units of new designs. It replaces a blank active design (keeping its project), otherwise
+/// it opens in its own tab; either way it starts clean. A drawing is D landscape from the inch
+/// template (owner default; §8.1, §8.3): it takes neither units nor the template's decimals (R86).
 pub fn new_document(app: &mut SolveApp, kind: DocumentKind, units: Option<&str>) {
-    let command = match kind {
-        DocumentKind::Part => "document.new_part",
-        DocumentKind::Assembly => "document.new_assembly",
-        DocumentKind::Drawing => return,
+    let (command, params) = match kind {
+        DocumentKind::Part => ("document.new_part", json!({})),
+        DocumentKind::Assembly => ("document.new_assembly", json!({})),
+        DocumentKind::Drawing => ("drawing.new", drawing_params(app, None)),
     };
     if app.file_picker_busy() {
         return;
     }
     let mut s = Session::default();
-    if let Err(e) = s.execute(command, &json!({})) {
+    if let Err(e) = s.execute(command, &params) {
         app.set_status(e.to_string(), true);
         return;
     }
     app.home.open = false;
     adopt(app, s);
+    if kind == DocumentKind::Drawing {
+        return;
+    }
     let units = units.map_or_else(|| app.preferences.default_units.clone(), str::to_string);
     crate::prefs::apply_new_design_units(app, &units);
     crate::prefs::apply_template_decimals(app);
+}
+
+/// `drawing.new`'s parameters: the model (an absolute path) and the company preference (R43).
+fn drawing_params(app: &SolveApp, model: Option<&str>) -> Value {
+    let mut p = json!({});
+    if let Some(model) = model {
+        p["model"] = json!(model);
+    }
+    let company = app.preferences.drawing_company.trim();
+    if !company.is_empty() {
+        p["properties"] = json!({"company": company});
+    }
+    p
+}
+
+/// Create Drawing View (spec §2.1 path 2c): save the model first if it never was (Save As;
+/// cancelling cancels), then open a drawing tab with `drawing.new {model: <absolute path>,
+/// properties: {company}}`. Task 5 adds the Base View panel opening (R13).
+pub(crate) fn create_drawing_view(app: &mut SolveApp) {
+    if app.file_picker_busy() || app.file_load.busy() {
+        return;
+    }
+    let kind = app.session.doc.kind;
+    if kind == DocumentKind::Drawing {
+        app.set_status(crate::i18n::tr("ui.drawing.needs_model").to_string(), true);
+        return;
+    }
+    if let Some(path) = app.session.path.clone() {
+        open_drawing_of(app, &path);
+        return;
+    }
+    // A model never saved has no file for the drawing to refer to: Save As first.
+    let name = format!("{}.{}", app.session.doc.name, kind.extension());
+    app.pick_save(&name, &[kind.extension()], |app, path| {
+        let Some(path) = path else {
+            app.set_status(crate::i18n::tr("ui.drawing.model_not_saved").to_string(), true);
+            return;
+        };
+        if app.run("file.save_as", json!({"path": path})).is_err() {
+            return;
+        }
+        match app.session.path.clone() {
+            Some(saved) => open_drawing_of(app, &saved),
+            None => app.set_status(crate::i18n::tr("ui.drawing.model_not_saved").to_string(), true),
+        }
+    });
+}
+
+/// A new drawing of the model saved at `path`, in its own tab (the model's tab stays open).
+fn open_drawing_of(app: &mut SolveApp, path: &str) {
+    // `drawing.new` reads a relative model from the open design's folder; a fresh session has
+    // none, so the path goes absolute (R86).
+    let absolute = std::path::absolute(path).map_or_else(|_| path.to_string(), |p| p.to_string_lossy().into_owned());
+    let mut s = Session::default();
+    if let Err(e) = s.execute("drawing.new", &drawing_params(app, Some(&absolute))) {
+        app.set_status(e.to_string(), true);
+        return;
+    }
+    app.home.open = false;
+    if let Err(e) = open_tab(app, s) {
+        app.set_status(e, true);
+    }
 }
 
 /// Create a new tab directly; the File view chooses units before using [`new_design`].
@@ -941,6 +1007,10 @@ pub(crate) fn saved_for_close(app: &mut SolveApp) {
 #[cfg(test)]
 #[path = "documents_profile_tests.rs"]
 mod documents_profile_tests;
+
+#[cfg(test)]
+#[path = "new_drawing_tests.rs"]
+mod new_drawing_tests;
 
 #[cfg(test)]
 mod tests {

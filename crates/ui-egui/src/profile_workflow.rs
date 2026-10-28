@@ -49,6 +49,9 @@ pub struct Workflow {
     /// Assembly with no component placed) and hidden once it is not, until the browser's Origin
     /// eye is toggled (that choice is saved with the design and wins). A plane pick still shows it.
     pub origin_auto_hide: bool,
+    /// The browser root's menu offers Create Drawing View (spec §2.1 path 2c, R23). File › New
+    /// Drawing and Home's tile are in every profile.
+    pub create_drawing_in_root_menu: bool,
 }
 
 impl Default for Workflow {
@@ -70,6 +73,7 @@ impl Default for Workflow {
             plane_drag: false,
             sticky_split_buttons: false,
             origin_auto_hide: false,
+            create_drawing_in_root_menu: false,
         }
     }
 }
@@ -170,6 +174,7 @@ pub const MARKING_ACTIONS: &[&str] = &[
     "ui.hide",
     "ui.showAll",
     "ui.findBrowser",
+    "ui.createDrawingView",
 ];
 
 /// The ring has this many slots, clockwise from north.

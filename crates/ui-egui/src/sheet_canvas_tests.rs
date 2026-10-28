@@ -15,28 +15,10 @@ use solidcraft_gpu::sheet::SheetScene;
 use super::*;
 use crate::scenario::Harness;
 use crate::space_mouse::{DeviceMotion, Motion};
-use crate::test_support::inventor;
+use crate::test_support::{block_part, inventor};
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
     s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"))
-}
-
-/// The drawing tests' block (D-1's fixture, `engine/src/cmd/drawing_fixture.rs`): 4 x 3 x 1 in
-/// with a drilled hole and four rounded corners, saved as `<dir>/block.tcipart`.
-fn block_part(dir: &std::path::Path) -> String {
-    let path = dir.join("block.tcipart").to_string_lossy().into_owned();
-    let mut s = Session::default();
-    run(&mut s, "document.new_part", json!({}));
-    run(&mut s, "document.units", json!({"units": "in"}));
-    run(
-        &mut s,
-        "solid.box",
-        json!({"length": "4 in", "width": "1 in", "height": "3 in", "corner": [-50.8, 0, 0], "name": "Block", "body_name": "Block"}),
-    );
-    run(&mut s, "solid.hole", json!({"position": [0, 0, 38.1], "direction": [0, 1, 0], "diameter": "0.75 in", "name": "Drill"}));
-    run(&mut s, "solid.fillet", json!({"edges": [[-50.8, 12.7, 0], [50.8, 12.7, 0], [-50.8, 12.7, 76.2], [50.8, 12.7, 76.2]], "radius": "0.5 in"}));
-    run(&mut s, "file.save", json!({"path": path}));
-    path
 }
 
 /// `h` with Home closed and a new D drawing (`drawing.new {}`) on its session.
