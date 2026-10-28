@@ -389,3 +389,21 @@ fn drawing_starts_are_exactly_the_tool_rows() {
     assert_eq!(h.app.session.undo.len(), 0, "the command did not run");
     assert!(h.app.session.doc.drawing.as_deref().unwrap().views.is_empty());
 }
+
+#[test]
+fn a_drawing_hides_the_history_bar() {
+    // Final wave item 36: SolidCraft's History bar never draws over a sheet; a part keeps it.
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.frames(3);
+    assert!(crate::timeline::shown(&h.app), "a SolidCraft part shows its history");
+    assert!(h.app.shell.history.is_some());
+    let mut h = new_drawing(h);
+    assert!(!crate::timeline::shown(&h.app));
+    assert_eq!(h.app.shell.history, None, "no History bar over the sheet");
+    assert!(h.app.ui.show_timeline, "the preference is untouched");
+    h.app.run("file.new", json!({})).unwrap();
+    h.frames(3);
+    assert_eq!(h.app.session.doc.kind, DocumentKind::Part);
+    assert!(crate::timeline::shown(&h.app) && h.app.shell.history.is_some(), "back on a part it returns");
+}
