@@ -705,3 +705,17 @@ fn edit_changes_the_dimension_type() {
         "a radius or diameter dimension cannot become vertical"
     );
 }
+
+/// Wave 3 item 5: a .375 radius reads "R.38" whatever way its leader points (the tip is never
+/// measured a hair under the radius, which rounded .375 down to "R.37" at some placements).
+#[test]
+fn a_radius_rounds_the_same_at_every_placement() {
+    let (mut s, _, v) = front("a_radius_rounds_the_same_at_every_placement");
+    let hole = edge_at(&s, v, [10.375, 8.0]);
+    for i in 0..36 {
+        let a = f64::from(i) * 10f64.to_radians() + 0.013;
+        let at = [10.0 + 1.3 * a.cos(), 8.0 + 1.3 * a.sin()];
+        let r = run(&mut s, "drawing.dim.radius", json!({"view": v, "picks": [{"edge": hole}], "placement": at}));
+        assert_eq!(r["text"].as_str(), Some("R.38"), "at {at:?}");
+    }
+}

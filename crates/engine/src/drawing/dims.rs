@@ -114,9 +114,23 @@ pub(crate) fn linear(first: &Anchor, second: &Anchor, direction: Direction, plac
 pub(crate) fn radial(paper: &Drawing, h: Handle, c: Vec2, r: f64, diameter: bool, placement: Vec2, scale: f64) -> Option<Dimension> {
     let u = (placement - c).normalized();
     let u = if u == Vec2::ZERO || !u.is_finite() { Vec2::X } else { u };
-    let tip = c + u * r;
-    let mut d = blank(if diameter { DimKind::Diameter } else { DimKind::Radius }, scale);
+    // A model radius reaches the sheet through mm/in and projection arithmetic a hair off its
+    // value (.375 in as 0.37499999999999994), and the renderer measures |tip - defpt| with float
+    // noise of its own: a .375 radius then read R.37 or R.38 by the leader's direction (wave 3).
+    // The radius is taken to the nearest 1e-9 in (three decimals finer than the finest precision
+    // shown), and the tip steps out (by at most 8e-12 in) until it measures at least that, so the
+    // value rounds as the exact one does.
+    let r = (r * 1e9).round() / 1e9;
     let defpt = if diameter { c - u * r } else { c };
+    let want = if diameter { 2.0 * r } else { r };
+    let mut tip = c + u * r;
+    for k in 1..=8 {
+        if tip.dist(defpt) >= want {
+            break;
+        }
+        tip = c + u * (r + f64::from(k) * 1e-12);
+    }
+    let mut d = blank(if diameter { DimKind::Diameter } else { DimKind::Radius }, scale);
     d.defpt = v3(defpt);
     d.p15 = v3(tip);
     d.text_mid = v3(placement);
@@ -160,6 +174,12 @@ pub(crate) fn dimension_of(m: &DrawingModel, handle: u64) -> Option<&Dimension> 
         EntityKind::Dimension(d) => Some(d),
         _ => None,
     }
+}
+
+/// What dimension `handle` is (`kind_name`: linear_h, linear_v, aligned, diameter, radius), for
+/// the UI's Dimension Type list (wave 3, R101).
+pub fn dimension_kind(m: &DrawingModel, handle: u64) -> Option<&'static str> {
+    dimension_of(m, handle).map(kind_name)
 }
 
 /// The text a dimension draws (measurement formatted by its style and overrides, prefix, user text).

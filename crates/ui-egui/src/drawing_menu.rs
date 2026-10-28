@@ -20,9 +20,18 @@ const TOOL: [&str; 2] = ["ui.done", "ui.cancel"];
 /// Leader Text's rows (spec §2.8): Continue, Back, Single-Segment Leader, Cancel.
 const LEADER: [&str; 4] = ["ui.done", "ui.drawing.back", "ui.drawing.singleSegment", "ui.cancel"];
 
-/// A dimension's rows (spec §2.7; a list, never a ring).
-const DIMENSION: [&str; 7] =
-    ["ui.repeat", "ui.delete", "ui.drawing.moveDim", "ui.drawing.precision", "ui.drawing.editDim", "ui.drawing.hideExt", "ui.drawing.showExt"];
+/// A dimension's rows (spec §2.7; a list, never a ring). Dimension Type ▸ (wave 3, R101) sits
+/// where the capture's Options ▸ does, after Move Dimension.
+const DIMENSION: [&str; 8] = [
+    "ui.repeat",
+    "ui.delete",
+    "ui.drawing.moveDim",
+    "ui.drawing.dimType",
+    "ui.drawing.precision",
+    "ui.drawing.editDim",
+    "ui.drawing.hideExt",
+    "ui.drawing.showExt",
+];
 
 /// The sheet's right-click list now.
 pub(crate) fn items(app: &SolveApp) -> Vec<Item> {
@@ -41,10 +50,45 @@ pub(crate) fn items(app: &SolveApp) -> Vec<Item> {
     } else {
         (MenuContext::Empty, &EMPTY_SHEET)
     };
-    ids.iter().map(|id| crate::marking_menu::item(app, id, ctx)).collect()
+    let mut items: Vec<Item> = ids.iter().map(|id| crate::marking_menu::item(app, id, ctx)).collect();
+    // General Dimension with its picks: Dimension Type ▸ (wave 3, R101).
+    if let Some((rows, chosen)) = crate::drawing_dim_tool::type_choices(app) {
+        items.push(crate::marking_menu::item(app, "-", ctx));
+        items.push(dim_type_item(app, rows, chosen, None));
+    }
+    items
 }
 
-/// A selected dimension's list: Repeat, Delete, Move, Precision ▸ 0-6, Edit Dimension, Hide and
+/// Dimension Type ▸ with `rows` (`drawing_dim_tool::LINEAR_TYPES` or `RADIAL_TYPES`), `chosen`
+/// checked; on placed dimension `dim` when given, else on the running tool's live dimension.
+fn dim_type_item(app: &SolveApp, rows: &[(&str, &str)], chosen: Option<&str>, dim: Option<u64>) -> Item {
+    let mut item = crate::marking_menu::item(app, "ui.drawing.dimType", MenuContext::Empty);
+    item.children = rows
+        .iter()
+        .map(|(ty, label)| {
+            let params = match dim {
+                Some(dim) => json!({ "dim": dim, "type": ty }),
+                None => json!({ "type": ty }),
+            };
+            crate::context_menu::act("ui.drawing.dimType", label, "").with(params).key(if chosen == Some(*ty) { "current" } else { "" })
+        })
+        .collect();
+    item.on(!rows.is_empty())
+}
+
+/// A placed dimension's Dimension Type rows and its type now.
+fn placed_types(app: &SolveApp, dim: u64) -> (&'static [(&'static str, &'static str)], Option<&'static str>) {
+    use crate::drawing_dim_tool::{LINEAR_TYPES, RADIAL_TYPES};
+    match app.session.doc.drawing.as_deref().and_then(|m| solidcraft_engine::drawing::dimension_kind(m, dim)) {
+        Some("linear_h") => (&LINEAR_TYPES, Some("horizontal")),
+        Some("linear_v") => (&LINEAR_TYPES, Some("vertical")),
+        Some("aligned") => (&LINEAR_TYPES, Some("aligned")),
+        Some(k @ ("radius" | "diameter")) => (&RADIAL_TYPES, Some(k)),
+        _ => (&[], None),
+    }
+}
+
+/// A selected dimension's list: Repeat, Delete, Move, Dimension Type ▸, Precision ▸ 0-6, Edit Dimension, Hide and
 /// Show Extension Lines.
 fn dimension_items(app: &SolveApp, dim: u64) -> Vec<Item> {
     let params = json!({ "dim": dim });
@@ -54,6 +98,10 @@ fn dimension_items(app: &SolveApp, dim: u64) -> Vec<Item> {
             let item = crate::marking_menu::item(app, id, MenuContext::Empty);
             match *id {
                 "ui.repeat" | "ui.delete" => item,
+                "ui.drawing.dimType" => {
+                    let (rows, now) = placed_types(app, dim);
+                    dim_type_item(app, rows, now, Some(dim))
+                }
                 "ui.drawing.precision" => {
                     let mut item = item.with(params.clone());
                     item.children =

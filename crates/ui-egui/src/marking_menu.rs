@@ -230,6 +230,8 @@ pub(crate) fn item(app: &SolveApp, id: &str, ctx: MenuContext) -> Item {
         // A dimension's list (Task 8; icons R91).
         "ui.drawing.moveDim" => act("ui.drawing.moveDim", "Move Dimension", "move").on(app.drawing.tool.is_none()),
         "ui.drawing.precision" => act("ui.drawing.precision", "Precision", "dimension"),
+        // Dimension Type ▸ (wave 3, R101): its rows come from `drawing_menu`.
+        "ui.drawing.dimType" => act("ui.drawing.dimType", "Dimension Type", "dimension"),
         "ui.drawing.editDim" => act("ui.drawing.editDim", "Edit Dimension", "edit").on(app.drawing.tool.is_none()),
         "ui.drawing.hideExt" => act("ui.drawing.hideExt", "Hide Extension Lines", "dimension"),
         "ui.drawing.showExt" => act("ui.drawing.showExt", "Show Extension Lines", "dimension"),

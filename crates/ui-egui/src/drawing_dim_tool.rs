@@ -62,9 +62,21 @@ pub(crate) struct DimTool {
     pub last_sent: Option<Value>,
     /// Move Dimension: the dimension whose text the next click places (the tool ends after it).
     pub moving: Option<u64>,
+    /// The Dimension Type chosen from the list for these picks (wave 3, R101): aligned,
+    /// horizontal or vertical for linear picks, radius or diameter for a circle or an arc. None:
+    /// the engine's choice. It goes when the picks change.
+    pub kind: Option<String>,
+    /// What the live dimension says now.
+    pub live: Option<String>,
     /// The cell (0.05 in steps) and pick count the live dimension was computed for.
     preview_key: Option<([i64; 2], usize)>,
 }
+
+/// Dimension Type's rows for linear picks (wave 3, R101), as `drawing.dim.edit`'s `type` names
+/// them, with their labels.
+pub(crate) const LINEAR_TYPES: [(&str, &str); 3] = [("aligned", "Aligned"), ("horizontal", "Horizontal"), ("vertical", "Vertical")];
+/// Dimension Type's rows for a circle or an arc.
+pub(crate) const RADIAL_TYPES: [(&str, &str); 2] = [("radius", "Radius"), ("diameter", "Diameter")];
 
 /// The Edit Dimension panel (`DrawingPanel::Dimension`).
 #[derive(Clone, Debug, PartialEq)]
@@ -208,10 +220,29 @@ pub(crate) fn input(app: &mut SolveApp, rect: Rect, resp: &Response, input: &Cam
     }
     let params = tool(app).and_then(|t| ready(t).then(|| params(t, at)));
     match params {
-        Some(params) => refresh(app, at, |s| s.execute("drawing.dim.general", &params).ok().and_then(|r| r["handle"].as_u64())),
+        Some((cmd, params)) => refresh(app, at, |s| s.execute(cmd, &params).ok().and_then(|r| r["handle"].as_u64())),
         None => clear_preview(app),
     }
     true
+}
+
+/// The Dimension Type rows the running tool's list shows now (the picks make a dimension with
+/// one more click), and the one chosen.
+pub(crate) fn type_choices(app: &SolveApp) -> Option<(&'static [(&'static str, &'static str)], Option<&str>)> {
+    let t = tool(app).filter(|t| t.moving.is_none() && ready(t))?;
+    let rows: &'static [(&str, &str)] = match t.picks.as_slice() {
+        [(_, CurveKind::Circle | CurveKind::Arc)] => &RADIAL_TYPES,
+        _ => &LINEAR_TYPES,
+    };
+    Some((rows, t.kind.as_deref()))
+}
+
+/// Dimension Type ▸ `ty` while the tool has its picks: the live dimension turns to it at once
+/// and the next click places that type.
+pub(crate) fn set_type(app: &mut SolveApp, ty: &str) {
+    let Some(t) = tool_mut(app) else { return };
+    t.kind = Some(ty.to_string());
+    t.preview_key = None;
 }
 
 /// Whether the picks make a dimension with one more click: one straight edge, circle or arc, or
@@ -220,11 +251,23 @@ fn ready(t: &DimTool) -> bool {
     matches!(t.picks.as_slice(), [(_, CurveKind::Line | CurveKind::Circle | CurveKind::Arc)] | [_, _])
 }
 
-/// `drawing.dim.general`'s parameters for the picks and a placement (R81).
-fn params(t: &DimTool, placement: [f64; 2]) -> Value {
+/// The command and its parameters for the picks and a placement (R81): `drawing.dim.general`,
+/// with the chosen Dimension Type as its `orientation`; `drawing.dim.radius` or
+/// `drawing.dim.diameter` when one of those was chosen.
+fn params(t: &DimTool, placement: [f64; 2]) -> (&'static str, Value) {
     let picks: Vec<Value> =
         t.picks.iter().map(|(at, kind)| if *kind == CurveKind::Poly { json!({ "at": at, "snap": "vertex" }) } else { json!({ "at": at }) }).collect();
-    json!({ "view": t.view, "picks": picks, "placement": placement })
+    let mut p = json!({ "view": t.view, "picks": picks, "placement": placement });
+    let cmd = match t.kind.as_deref() {
+        Some("radius") => "drawing.dim.radius",
+        Some("diameter") => "drawing.dim.diameter",
+        Some(orientation) => {
+            p["orientation"] = json!(orientation);
+            "drawing.dim.general"
+        }
+        None => "drawing.dim.general",
+    };
+    (cmd, p)
 }
 
 /// A click at paper point `at`: a pick, or the placement.
@@ -246,6 +289,7 @@ fn click(app: &mut SolveApp, rect: Rect, at: [f64; 2]) {
         if let Some((view, curve)) = edge {
             t.view = Some(view);
             t.picks.push((at, curve));
+            t.kind = None;
             t.preview_key = None;
         }
         if let Some(hit) = hit {
@@ -260,8 +304,8 @@ fn click(app: &mut SolveApp, rect: Rect, at: [f64; 2]) {
 
 /// Place the dimension the picks make at `at`: one `drawing.dim.general`.
 fn place(app: &mut SolveApp, at: [f64; 2]) {
-    let Some(params) = tool(app).map(|t| params(t, at)) else { return };
-    let result = app.run("drawing.dim.general", params.clone());
+    let Some((cmd, params)) = tool(app).map(|t| params(t, at)) else { return };
+    let result = app.run(cmd, params.clone());
     app.drawing.preview.clear();
     app.drawing.selection.clear();
     let handle = match result {
@@ -274,6 +318,8 @@ fn place(app: &mut SolveApp, at: [f64; 2]) {
     if let Some(t) = tool_mut(app) {
         t.view = None;
         t.picks.clear();
+        t.kind = None;
+        t.live = None;
         t.preview_key = None;
         t.last_sent = Some(params);
         t.placed.extend(handle);
@@ -295,10 +341,13 @@ fn refresh(app: &mut SolveApp, at: [f64; 2], make: impl FnOnce(&mut solidcraft_e
         return;
     }
     let mut scratch = app.session.scratch();
-    let curves = make(&mut scratch).map(|h| curves_of(&scratch, h)).unwrap_or_default();
+    let made = make(&mut scratch);
+    let curves = made.map(|h| curves_of(&scratch, h)).unwrap_or_default();
+    let live = made.and_then(|h| solidcraft_engine::drawing::dimension_text(scratch.doc.drawing.as_deref()?, h));
     app.drawing.preview = curves;
     if let Some(t) = tool_mut(app) {
         t.preview_key = Some(key);
+        t.live = live;
     }
 }
 
@@ -308,6 +357,7 @@ fn clear_preview(app: &mut SolveApp) {
     }
     if let Some(t) = tool_mut(app) {
         t.preview_key = None;
+        t.live = None;
     }
 }
 
@@ -548,6 +598,14 @@ fn precision_tab(ui: &mut egui::Ui, p: &mut DimPanel) {
 
 /// A row of a dimension's right-click list (`context_menu::run_item`'s `ui.drawing.*` arms).
 pub(crate) fn run_menu(app: &mut SolveApp, id: &str, p: &Value) {
+    // Dimension Type ▸ while the tool has its picks (no `dim`): the live dimension's type.
+    if id == "ui.drawing.dimType"
+        && p.get("dim").is_none()
+        && let Some(ty) = p.get("type").and_then(Value::as_str)
+    {
+        set_type(app, ty);
+        return;
+    }
     let Some(dim) = p.get("dim").and_then(Value::as_u64) else { return };
     let edit = |app: &mut SolveApp, params: Value| {
         if let Err(e) = app.run("drawing.dim.edit", params) {
@@ -560,6 +618,12 @@ pub(crate) fn run_menu(app: &mut SolveApp, id: &str, p: &Value) {
         "ui.drawing.precision" => {
             if let Some(n) = p.get("precision").and_then(Value::as_u64) {
                 edit(app, json!({ "dim": dim, "precision": n }));
+            }
+        }
+        // Dimension Type ▸ on a placed dimension: one `drawing.dim.edit` (R101).
+        "ui.drawing.dimType" => {
+            if let Some(ty) = p.get("type").and_then(Value::as_str) {
+                edit(app, json!({ "dim": dim, "type": ty }));
             }
         }
         "ui.drawing.hideExt" => edit(app, json!({ "dim": dim, "ext_lines": { "first": false, "second": false } })),

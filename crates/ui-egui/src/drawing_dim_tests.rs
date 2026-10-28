@@ -233,7 +233,8 @@ fn done_in_the_list_ends_the_tool_and_a_view_does_not_drag() {
     right_click_paper(&mut h, [25.0, 15.0]);
     let menu = crate::context_menu::describe(&h.app);
     assert!(ids(&menu, "radial").is_empty(), "{menu}");
-    assert_eq!(ids(&menu, "items"), ["ui.done", "ui.cancel"]);
+    // The picks make a dimension: Dimension Type ▸ follows (wave 3, R101).
+    assert_eq!(ids(&menu, "items"), ["ui.done", "ui.cancel", "-", "ui.drawing.dimType"]);
     click(&mut h, "menu:ui.done");
     assert!(h.app.drawing.tool.is_none() && h.app.drawing.preview.is_empty() && h.app.drawing.selection.is_empty());
     assert_eq!(h.app.session.undo.len(), 1);
@@ -327,14 +328,23 @@ fn the_dimension_menu_is_a_list() {
     assert!(ids(&menu, "radial").is_empty(), "a list, never a ring: {menu}");
     assert_eq!(
         ids(&menu, "items"),
-        ["ui.repeat", "ui.delete", "ui.drawing.moveDim", "ui.drawing.precision", "ui.drawing.editDim", "ui.drawing.hideExt", "ui.drawing.showExt"]
+        [
+            "ui.repeat",
+            "ui.delete",
+            "ui.drawing.moveDim",
+            "ui.drawing.dimType",
+            "ui.drawing.precision",
+            "ui.drawing.editDim",
+            "ui.drawing.hideExt",
+            "ui.drawing.showExt"
+        ]
     );
-    let precision = &menu["items"][3];
+    let precision = &menu["items"][4];
     let children: Vec<&str> = precision["children"].as_array().unwrap().iter().map(|c| c["label"].as_str().unwrap()).collect();
     assert_eq!(children, ["0", "1", "2", "3", "4", "5", "6"]);
     // The icons R91 pins.
     let icons: Vec<&str> = menu["items"].as_array().unwrap()[2..].iter().map(|i| i["icon"].as_str().unwrap()).collect();
-    assert_eq!(icons, ["move", "dimension", "edit", "dimension", "dimension"]);
+    assert_eq!(icons, ["move", "dimension", "dimension", "edit", "dimension", "dimension"]);
     crate::context_menu::pick(&mut h.app, "1").unwrap();
     h.frames(2);
     assert_eq!(text(&h, linear), "3.0");
@@ -521,4 +531,102 @@ fn edit_when_created_is_a_saved_preference_per_profile() {
     let mut other = other;
     other.app.preferences.dim_edit_when_created = h.app.preferences.dim_edit_when_created.clone();
     assert!(!crate::drawing_dim_tool::edit_when_created(&other.app));
+}
+
+/// The rows of the open list's "Dimension Type" submenu: (label, checked).
+fn dim_types(h: &Harness) -> Vec<(String, bool)> {
+    let menu = crate::context_menu::describe(&h.app);
+    assert!(ids(&menu, "radial").is_empty(), "a list, never a ring (R72): {menu}");
+    let row =
+        menu["items"].as_array().unwrap().iter().find(|i| i["id"] == "ui.drawing.dimType").unwrap_or_else(|| panic!("no Dimension Type: {menu}"));
+    row["children"].as_array().unwrap().iter().map(|c| (c["label"].as_str().unwrap().to_string(), c["shortcut"] == json!("current"))).collect()
+}
+
+/// Wave 3 item 5 (R101): two parallel diagonal edges of an iso view (the front face's bottom
+/// edge, mid point (9.646, 6.571), and the back face's top edge, (10.354, 9.429)) make an aligned
+/// dimension by default, 2.83 (the engine's item 4 arithmetic); the right-click list's Dimension
+/// Type ▸ Horizontal turns the live dimension to the mid points' x-projection, 0.707 → ".71", and
+/// the next click places that; the choice goes with the picks.
+#[test]
+fn dimension_type_in_the_tool_list_changes_the_live_dimension() {
+    let (mut h, _) = view_of(inventor(Drawing), "iso_top_right");
+    alias(&mut h, "D");
+    let (front_bottom, back_top) = ([9.6464, 6.5711], [10.3536, 9.4289]);
+    click_paper(&mut h, front_bottom);
+    click_paper(&mut h, back_top);
+    assert_eq!(tool(&h).picks.len(), 2);
+    hover(&mut h, [12.5, 9.0]);
+    assert_eq!(tool(&h).live.as_deref(), Some("2.83"));
+    right_click_paper(&mut h, [12.5, 9.0]);
+    let labels: Vec<String> = dim_types(&h).into_iter().map(|(l, _)| l).collect();
+    assert_eq!(labels, ["Aligned", "Horizontal", "Vertical"]);
+    let undo = h.app.session.undo.len();
+    crate::context_menu::pick(&mut h.app, "Horizontal").unwrap();
+    h.frames(2);
+    assert_eq!(tool(&h).kind.as_deref(), Some("horizontal"));
+    assert_eq!(h.app.session.undo.len(), undo, "choosing a type places nothing");
+    hover(&mut h, [12.55, 9.0]);
+    assert_eq!(tool(&h).live.as_deref(), Some(".71"));
+    right_click_paper(&mut h, [12.55, 9.0]);
+    assert_eq!(dim_types(&h)[1], ("Horizontal".to_string(), true));
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.frames(2);
+    click_paper(&mut h, [12.5, 9.0]);
+    let dim = *tool(&h).placed.last().expect("placed");
+    assert_eq!(text(&h, dim), ".71");
+    assert_eq!(tool(&h).last_sent.as_ref().unwrap()["orientation"], json!("horizontal"));
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+    // The picks are gone and so is the choice.
+    assert!(tool(&h).picks.is_empty() && tool(&h).kind.is_none());
+}
+
+/// Wave 3 item 5: a circle's live diameter becomes a radius from the list (".75" hole → "R.38"),
+/// and a placed ⌀ dimension becomes a radius from its own list: one `drawing.dim.edit` step.
+#[test]
+fn dimension_type_turns_a_diameter_into_a_radius() {
+    let (mut h, v1) = front_view(inventor(Drawing));
+    alias(&mut h, "D");
+    click_paper(&mut h, [10.375, 8.0]);
+    hover(&mut h, [11.0, 8.6]);
+    assert_eq!(tool(&h).live.as_deref(), Some("⌀.75"));
+    right_click_paper(&mut h, [11.0, 8.6]);
+    let labels: Vec<String> = dim_types(&h).into_iter().map(|(l, _)| l).collect();
+    assert_eq!(labels, ["Radius", "Diameter"]);
+    crate::context_menu::pick(&mut h.app, "Radius").unwrap();
+    h.frames(2);
+    hover(&mut h, [11.05, 8.6]);
+    assert_eq!(tool(&h).live.as_deref(), Some("R.38"));
+    click_paper(&mut h, [11.0, 8.6]);
+    let dim = *tool(&h).placed.last().expect("placed");
+    assert_eq!(text(&h, dim), "R.38");
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.frames(2);
+    assert!(h.app.drawing.tool.is_none());
+
+    // A placed ⌀ dimension: its list's Dimension Type ▸ Radius.
+    let r = h.app.run("drawing.dim.general", json!({"view": v1, "picks": [{"at": [10.375, 8.0]}], "placement": [8.8, 9.0]})).unwrap();
+    let diameter = r["handle"].as_u64().unwrap();
+    h.frames(2);
+    assert_eq!(text(&h, diameter), "⌀.75");
+    let undo = h.app.session.undo.len();
+    right_click_paper(&mut h, [8.8, 9.0]);
+    assert_eq!(h.app.drawing.selection, [solidcraft_engine::drawing::PaperPick::Dimension { handle: diameter }]);
+    assert_eq!(dim_types(&h), [("Radius".to_string(), false), ("Diameter".to_string(), true)]);
+    crate::context_menu::pick(&mut h.app, "Radius").unwrap();
+    h.frames(2);
+    assert_eq!(text(&h, diameter), "R.38");
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+}
+
+/// Wave 3 item 5: SolidCraft's drawings share the list (no vendor branch).
+#[test]
+fn solidcraft_drawings_share_the_dimension_type_list() {
+    let (mut h, _) = front_view(Harness::new());
+    h.app.start("drawing.dim.general");
+    h.frames(2);
+    click_paper(&mut h, [10.0, 6.5]);
+    hover(&mut h, [10.0, 5.8]);
+    right_click_paper(&mut h, [10.0, 5.8]);
+    let labels: Vec<String> = dim_types(&h).into_iter().map(|(l, _)| l).collect();
+    assert_eq!(labels, ["Aligned", "Horizontal", "Vertical"]);
 }

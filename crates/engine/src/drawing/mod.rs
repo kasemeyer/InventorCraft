@@ -23,7 +23,7 @@ use serde_json::Value;
 use solidcraft_doc::{DocumentKind, DrawingModel, DrawingProps};
 
 pub use centermark::MARK_OVERSHOOT_IN;
-pub use dims::{VALUE_TOKEN, dimension_text, sick_dimensions};
+pub use dims::{VALUE_TOKEN, dimension_kind, dimension_text, sick_dimensions};
 pub(crate) use model_ref::rebased_models;
 pub use model_ref::{ModelProvider, missing_views, model_path, stale_views};
 pub use notes::{LEADER_ARROW, NOTE_HEIGHT_IN, NoteInfo, note_at};

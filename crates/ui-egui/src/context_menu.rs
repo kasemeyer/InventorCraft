@@ -1171,7 +1171,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             }
         }
         // A dimension's list (Task 8).
-        "ui.drawing.moveDim" | "ui.drawing.precision" | "ui.drawing.editDim" | "ui.drawing.hideExt" | "ui.drawing.showExt" => {
+        "ui.drawing.moveDim" | "ui.drawing.dimType" | "ui.drawing.precision" | "ui.drawing.editDim" | "ui.drawing.hideExt" | "ui.drawing.showExt" => {
             crate::drawing_dim_tool::run_menu(app, &item.id, &p);
         }
         // A note's list (Task 10).
