@@ -184,8 +184,12 @@ fn cube_shown(app: &SolveApp) -> Option<CubeTarget> {
     new_view_panel(app).filter(|p| placing && p.cube_enabled()).map(|p| p.orientation)
 }
 
-/// The cube target under screen point `p`, if the cube is up.
+/// The cube target under screen point `p`, if the cube is up and `p` is not under the shell.
 fn cube_target_at(app: &SolveApp, rect: Rect, p: Pos2) -> Option<CubeTarget> {
+    // Under a card or the browser the cube is not there to be clicked.
+    if crate::shell::covered(app, p) {
+        return None;
+    }
     let t = cube_shown(app)?;
     crate::viewport::navigation_cube::target_at(&cube_camera(t), cube_centre(app, rect), f64::from(CUBE_HALF), p).and_then(target_of)
 }
@@ -264,7 +268,7 @@ fn view_of(pick: &PaperPick) -> Option<u64> {
 
 /// The view under screen point `p` (its curves, else its box).
 fn view_at(app: &SolveApp, rect: Rect, p: Pos2) -> Option<u64> {
-    // Points per inch: the canvas height over the camera's paper height.
+    // Inches per point (the camera's paper height over the canvas height) times the pick radius.
     let tol = PICK_PX * 2.0 * app.cam.half_height() / f64::from(rect.height().max(1.0));
     solidcraft_engine::drawing::pick(&app.session, paper_at(app, rect, p), tol).as_ref().and_then(view_of)
 }

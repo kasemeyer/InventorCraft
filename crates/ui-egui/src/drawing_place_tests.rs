@@ -524,3 +524,14 @@ fn a_drag_back_to_the_start_adds_no_step() {
     assert!(h.app.drawing.drag.is_none());
     assert_eq!(h.app.session.undo.len(), undo, "no empty Move View step");
 }
+
+#[test]
+fn a_covered_cube_is_not_picked() {
+    // Final wave item 20: a point of the cube under a card picks nothing.
+    let (mut h, _) = placing();
+    let at = handle_at("drawing_place:cube:front").expect("the cube is drawn");
+    assert_eq!(cube_target_at(&h.app, canvas(), at), CubeTarget::from_name("front"));
+    h.app.ui.show_browser = true;
+    h.app.shell.browser = Some(Rect::from_center_size(at, egui::vec2(40.0, 40.0)));
+    assert_eq!(cube_target_at(&h.app, canvas(), at), None);
+}
