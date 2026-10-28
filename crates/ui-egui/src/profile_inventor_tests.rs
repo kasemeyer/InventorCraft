@@ -446,8 +446,10 @@ fn inventor_commands() -> BTreeSet<&'static str> {
 }
 
 /// Registry commands neither Inventor modelling ribbon places, from `docs/features.md` at
-/// 9bb4d408 (466 commands, 305 placed). The count may only fall.
-const INVENTOR_UNPLACED: usize = 190;
+/// 9bb4d408 (466 commands, 305 placed). The count may only fall, except by a plan's new
+/// commands: Plan D-1's 29 drawing commands (161 to 190) and Plan D-2 Task 0's
+/// `drawing.note.edit` (191; R74), which Task 1's DRAWING ribbon does not place.
+const INVENTOR_UNPLACED: usize = 191;
 
 #[test]
 fn inventor_assembly_ribbon_follows_the_capture() {

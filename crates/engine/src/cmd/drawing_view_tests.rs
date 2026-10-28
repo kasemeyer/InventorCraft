@@ -11,7 +11,7 @@ use solidcraft_doc::{CubeTarget, DrawingModel, DrawingView, LineStyle};
 
 use crate::cmd::drawing::drawing_fixture::{block_drawing, block_part, front_view, temp_dir};
 use crate::drawing::mapper::{self, Seg, XKey, xkey_of};
-use crate::drawing::{CurveKind, PaperPick, pick, preview_view};
+use crate::drawing::{CurveKind, PaperPick, dimension_text, pick, preview_view, sick_dimensions, suppressed_annotations};
 use crate::{EngineError, Session};
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
@@ -347,4 +347,105 @@ fn placing_again_changes_entities_in_place() {
     assert_eq!(mapper::handle_of(&m, &key), None);
     let group = m.paper.groups.iter().find(|g| g.name == mapper::group_name(v.group)).unwrap();
     assert_eq!(group.members.len(), 8);
+}
+
+/// View `id`'s Lines on VISIBLE: (drawn, invisible). R94: tangent edges turned off stay on paper
+/// as invisible entities.
+fn visible_lines(s: &Session, id: u64) -> (usize, usize) {
+    let m = model(s);
+    let layout = m.paper.layout(&m.sheets[view(s, id).sheet].layout).unwrap();
+    let on: Vec<bool> = layout
+        .entities
+        .iter()
+        .filter(|e| xkey_of(e).is_some_and(|k| k.view == id && k.seg != Seg::Mark))
+        .filter(|e| e.common.layer == "VISIBLE" && matches!(e.kind, EntityKind::Line(_)))
+        .map(|e| e.common.visible)
+        .collect();
+    (on.iter().filter(|v| **v).count(), on.iter().filter(|v| !**v).count())
+}
+
+/// The block's front view at [10, 8] and its top view projected at [10, 16].
+fn front_and_top(name: &str) -> (Session, u64, u64) {
+    let (mut s, block) = block_drawing(name);
+    let v1 = front_view(&mut s, &block);
+    let v2 = run(&mut s, "drawing.view.projected", json!({"parent": v1, "position": [10, 16]}))["view"].as_u64().unwrap();
+    (s, v1, v2)
+}
+
+/// R66, R73: `set_style`'s `tangent_edges` re-projects the view and the views that follow its
+/// style, in one step. The top view's joins at sheet x = 8.5 and 11.5 (R64) are drawn only when
+/// on; when off they stay on paper, invisible (R94).
+#[test]
+fn set_style_turns_tangent_edges_on_and_off() {
+    let (mut s, v1, v2) = front_and_top("set_style_turns_tangent_edges_on_and_off");
+    assert_eq!(visible_lines(&s, v2), (10, 2));
+    let off: BTreeSet<Handle> = entities_of(&s, v2).into_iter().map(|(h, ..)| h).collect();
+    let undo = s.undo.len();
+    let r = run(&mut s, "drawing.view.set_style", json!({"view": v1, "tangent_edges": true}));
+    assert_eq!(r["changed"], json!([v1, v2]));
+    assert_eq!(r["suppressed"], json!(0));
+    assert_eq!((s.undo.len(), s.undo.last().map(|u| u.label.as_str())), (undo + 1, Some("View Style")));
+    assert!(view(&s, v1).tangent_edges && view(&s, v2).tangent_edges && view(&s, v2).style_from_base);
+    assert_eq!(visible_lines(&s, v2), (12, 0));
+    // The same handles: the joins were on paper all along.
+    assert_eq!(entities_of(&s, v2).into_iter().map(|(h, ..)| h).collect::<BTreeSet<_>>(), off);
+    let joins: Vec<f64> = entities_of(&s, v2)
+        .into_iter()
+        .filter_map(|(_, _, k, kind)| match kind {
+            EntityKind::Line(l) if k.edge.contains("F1:+z|F3:blend") => Some(l.a.x),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(joins.len(), 2, "{joins:?}");
+    assert!(joins.iter().any(|x| (x - 8.5).abs() <= 1e-9) && joins.iter().any(|x| (x - 11.5).abs() <= 1e-9), "{joins:?}");
+    // Again: nothing changes, no step.
+    let r = run(&mut s, "drawing.view.set_style", json!({"view": v1, "tangent_edges": true}));
+    assert_eq!(r["changed"], json!([]));
+    assert_eq!(s.undo.len(), undo + 1);
+    // Off on the projected view alone: it stops following its parent.
+    let r = run(&mut s, "drawing.view.set_style", json!({"view": v2, "tangent_edges": false}));
+    assert_eq!(r["changed"], json!([v2]));
+    assert_eq!(visible_lines(&s, v2), (10, 2));
+    assert!(!view(&s, v2).style_from_base && !view(&s, v2).tangent_edges && view(&s, v1).tangent_edges);
+    assert_eq!(
+        bad_message(s.execute("drawing.view.set_style", &json!({"view": v1, "tangent_edges": "yes"}))),
+        "`tangent_edges` must be true or false"
+    );
+    assert_eq!(bad_message(s.execute("drawing.view.set_style", &json!({"view": v1}))), "name lines, shaded, tangent_edges or style_from_base");
+    assert_eq!(
+        bad_message(s.execute("drawing.view.set_style", &json!({"view": v2, "style_from_base": true, "tangent_edges": true}))),
+        "style_from_base: true takes the parent's style; give lines, shaded or tangent_edges without it"
+    );
+    // Following the parent again takes its tangent edges.
+    run(&mut s, "drawing.view.set_style", json!({"view": v2, "style_from_base": true}));
+    assert_eq!(visible_lines(&s, v2), (12, 0));
+}
+
+/// R94 (overrides R73): a dimension on a tangent edge is suppressed, not sick, while tangent
+/// edges are off (its edge stays on paper, invisible, as a hidden line does under Hidden Line
+/// Removed, R61), and comes back with them.
+#[test]
+fn a_dimension_on_a_tangent_edge_is_suppressed_when_they_turn_off() {
+    let (mut s, v1, v2) = front_and_top("a_dimension_on_a_tangent_edge_is_suppressed_when_they_turn_off");
+    run(&mut s, "drawing.view.set_style", json!({"view": v1, "tangent_edges": true}));
+    let r = run(&mut s, "drawing.dim.general", json!({"view": v2, "picks": [{"at": [8.5, 16]}], "placement": [7.5, 16]}));
+    assert_eq!(r["text"], "1.00");
+    let dim = r["handle"].as_u64().unwrap();
+    let r = run(&mut s, "drawing.view.set_style", json!({"view": v1, "tangent_edges": false}));
+    assert_eq!(r["suppressed"], json!(1));
+    let m = model(&s);
+    assert_eq!(suppressed_annotations(m), BTreeSet::from([dim]));
+    assert!(sick_dimensions(m).is_empty());
+    assert!(!m.paper.entity(Handle(dim)).unwrap().common.visible);
+    assert_eq!(dimension_text(m, dim).as_deref(), Some("1.00"));
+    // Picking there finds no edge: the join is not drawn.
+    assert!(s.execute("drawing.dim.general", &json!({"view": v2, "picks": [{"at": [8.5, 16]}], "placement": [7.5, 16]})).is_err());
+    let r = run(&mut s, "drawing.update", json!({}));
+    assert_eq!(r["orphans"], json!(0));
+    let r = run(&mut s, "drawing.view.set_style", json!({"view": v1, "tangent_edges": true}));
+    assert_eq!(r["suppressed"], json!(0));
+    let m = model(&s);
+    assert!(suppressed_annotations(m).is_empty() && sick_dimensions(m).is_empty());
+    assert!(m.paper.entity(Handle(dim)).unwrap().common.visible);
+    assert_eq!(dimension_text(m, dim).as_deref(), Some("1.00"));
 }

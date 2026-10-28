@@ -1095,6 +1095,10 @@ impl Session {
             visibility: self.visibility.clone(),
         };
         self.doc = c.doc;
+        // The active drawing sheet is view state: clamped as undo clamps it (R7, R79).
+        if let Some(m) = self.doc.drawing.as_deref() {
+            self.drawing_sheet = self.drawing_sheet.min(m.sheets.len().saturating_sub(1));
+        }
         self.active_sketch = c.active_sketch;
         self.pending_moves = c.pending_moves;
         self.visibility = c.visibility;

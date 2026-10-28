@@ -20,11 +20,13 @@
 //! on a visible arc or circle of the same centre and radius, a polyline on visible chords, all
 //! within 1e-6 mm) is dropped.
 //!
-//! The styles: Hidden Line keeps the hidden curves, Hidden Line Removed drops them. A shaded view
-//! draws the same curves over its raster (the edge overlay; the raster is `ViewRasterizer`'s),
-//! so shading changes nothing here. Tangent edges (`SourcedLine::smooth`) are dropped unless the
-//! view asks for them, before the visibility rules run; one that is also a silhouette
-//! (`SourcedLine::silhouette`) is an outline and always stays (R54).
+//! The styles: Hidden Line keeps the hidden curves, Hidden Line Removed does not draw them. A
+//! shaded view draws the same curves over its raster (the edge overlay; the raster is
+//! `ViewRasterizer`'s), so shading changes nothing here. Tangent edges (`SourcedLine::smooth`) are
+//! not drawn unless the view asks for them: the drawn curves are made without them, before the
+//! visibility rules run; one that is also a silhouette (`SourcedLine::silhouette`) is an outline
+//! and always stays (R54). The curves a style does not draw are kept aside
+//! (`ViewGeometry::suppressed`, R61, R94).
 // Drawing views (Task 7) are the first caller outside the tests.
 #![cfg_attr(not(test), allow(dead_code))]
 
@@ -83,9 +85,10 @@ pub struct ViewGeometry {
     pub curves: Vec<ViewCurve>,
     pub min: Vec2,
     pub max: Vec2,
-    /// The hidden curves the view's style does not draw (Hidden Line Removed), moved like
-    /// `curves`: placed as invisible entities, so the annotations on them keep their handles and
-    /// come back with the style (R58, R61).
+    /// The curves the view's style does not draw, moved like `curves`: the hidden ones under
+    /// Hidden Line Removed (R61) and, with tangent edges off, the tangent edges' curves as they
+    /// are drawn with them on (R94). Placed as invisible entities, so the annotations on them
+    /// keep their handles and come back with the style (R58).
     pub suppressed: Vec<ViewCurve>,
 }
 
@@ -142,33 +145,53 @@ pub(crate) fn project_view(model: &Session, o: &Orientation, opts: &ProjectOptio
     let frame = Frame { target, right, up, back };
 
     let mut lines = sourced_lines(model, &cam, opts.tolerance_mm)?;
-    if !opts.tangent_edges {
-        // R54: a tangent edge that is also a silhouette is an outline, and stays.
-        lines.retain(|l| !l.smooth || l.silhouette);
-    }
     lines.retain(|l| l.a.dist(l.b) >= SAME);
+    // Silhouettes only: the tangent edges below (B-rep edges) neither move nor renumber them.
     snap_silhouettes(&world, &frame, o.dir, opts.tolerance_mm, &mut lines);
     renumber_silhouettes(&mut lines);
 
+    // Tangent edges off: their curves are what the view draws with them on, kept aside (R94,
+    // R61's form), so the annotations on them are suppressed, not orphaned, and come back with
+    // them. R54: a tangent edge that is also a silhouette is an outline, and stays.
+    let tangent = |l: &SourcedLine| l.smooth && !l.silhouette;
+    let mut tangent_curves = Vec::new();
+    let mut curves = if opts.tangent_edges || !lines.iter().any(tangent) {
+        view_curves(&world, &frame, o.dir, extent, lines)
+    } else {
+        // The edges all of whose pieces are tangent; an edge with an outline piece too keeps
+        // that piece and loses the rest, as before R94.
+        let kept_ids: std::collections::BTreeSet<String> = lines.iter().filter(|l| !tangent(l)).map(|l| l.source.model_edge_id()).collect();
+        let ids: std::collections::BTreeSet<String> =
+            lines.iter().filter(|l| tangent(l)).map(|l| l.source.model_edge_id()).filter(|id| !kept_ids.contains(id)).collect();
+        let kept: Vec<SourcedLine> = lines.iter().filter(|l| !tangent(l)).cloned().collect();
+        tangent_curves = view_curves(&world, &frame, o.dir, extent, lines);
+        tangent_curves.retain(|c| c.sources.iter().all(|s| ids.contains(s)));
+        view_curves(&world, &frame, o.dir, extent, kept)
+    };
+    let mut suppressed = Vec::new();
+    if opts.lines == LineStyle::Removed {
+        // R61: kept aside, not dropped (`ViewGeometry::suppressed`).
+        (suppressed, curves) = curves.into_iter().partition(|c| c.hidden);
+    }
+    suppressed.append(&mut tangent_curves);
+    let order = |a: &ViewCurve, b: &ViewCurve| a.edge.cmp(&b.edge).then(a.segment.cmp(&b.segment)).then(a.hidden.cmp(&b.hidden));
+    curves.sort_by(order);
+    suppressed.sort_by(order);
+    Ok(centred(curves, suppressed))
+}
+
+/// The curves `lines` make: grouped by model edge, built (`curves_of`), circles joined, and the
+/// hidden ones a visible one draws over dropped (module comment).
+fn view_curves(world: &ModelState, frame: &Frame, dir: Vec3, extent: f64, lines: Vec<SourcedLine>) -> Vec<ViewCurve> {
     let mut sources: BTreeMap<String, Vec<SourcedLine>> = BTreeMap::new();
     for l in lines {
         sources.entry(l.source.model_edge_id()).or_default().push(l);
     }
     let mut built = Vec::new();
     for (id, pieces) in &sources {
-        built.extend(curves_of(&world, &frame, o.dir, extent, id, pieces));
+        built.extend(curves_of(world, frame, dir, extent, id, pieces));
     }
-    let built = join_circles(built);
-    let mut curves = visible_wins(built.into_iter().map(|b| b.curve).collect());
-    let mut suppressed = Vec::new();
-    if opts.lines == LineStyle::Removed {
-        // R61: kept aside, not dropped (`ViewGeometry::suppressed`).
-        (suppressed, curves) = curves.into_iter().partition(|c| c.hidden);
-    }
-    let order = |a: &ViewCurve, b: &ViewCurve| a.edge.cmp(&b.edge).then(a.segment.cmp(&b.segment)).then(a.hidden.cmp(&b.hidden));
-    curves.sort_by(order);
-    suppressed.sort_by(order);
-    Ok(centred(curves, suppressed))
+    visible_wins(join_circles(built).into_iter().map(|b| b.curve).collect())
 }
 
 /// R52: moves each silhouette piece of a cylindrical face onto the exact generator it runs

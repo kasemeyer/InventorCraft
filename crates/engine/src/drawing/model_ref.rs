@@ -114,6 +114,21 @@ impl Loads {
     }
 }
 
+/// Where the model `r` names is now (R77): the first candidate (in [`load`]'s order) an open tab
+/// holds or a file exists at; None when it is found nowhere. Nothing is read or evaluated.
+pub fn model_path(s: &crate::Session, r: &ModelRef) -> Option<PathBuf> {
+    candidates(s, r)
+        .into_iter()
+        .find(|path| s.model_provider.as_ref().is_some_and(|p| p.document(path).is_some()) || solidcraft_io::vfs::exists(&path.to_string_lossy()))
+}
+
+/// The views of the active drawing whose model is found nowhere ([`model_path`] is None), in
+/// view id order; none when the active document is not a drawing (R77).
+pub fn missing_views(s: &crate::Session) -> Vec<ViewId> {
+    let Some(m) = s.doc.drawing.as_deref().filter(|_| s.doc.kind == DocumentKind::Drawing) else { return Vec::new() };
+    m.views.values().filter(|v| model_path(s, &v.model).is_none()).map(|v| v.id).collect()
+}
+
 /// Views whose model's current revision differs from their stored one (models that cannot be loaded are
 /// not stale; `drawing.update` reports them as missing). D-2 runs `drawing.update` when this is non-empty.
 pub fn stale_views(s: &crate::Session) -> Vec<ViewId> {

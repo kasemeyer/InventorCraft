@@ -190,8 +190,9 @@ pub(crate) fn fits(r: &RasterRef, rect: [f64; 4]) -> bool {
 
 /// Whether shaded view `v` of `m` has a fresh picture: drawn of the model revision, orientation
 /// and scale the view shows now (`RasterRef::drawn_for`), and its pixel size [`fits`] the view's
-/// [`raster_rect`]. A picture of the same size drawn of something else is stale.
-pub(crate) fn fresh(m: &DrawingModel, v: &DrawingView) -> bool {
+/// [`raster_rect`]. A picture of the same size drawn of something else is stale. Public as
+/// `drawing::raster_fresh` (R76): the canvas draws a picture only when it is fresh.
+pub fn fresh(m: &DrawingModel, v: &DrawingView) -> bool {
     let now = RasterKey { revision: v.revision.clone(), orientation: v.orientation, scale: v.scale };
     match (&v.raster, raster_rect(m, v)) {
         (Some(r), Some(rect)) => r.drawn_for.as_ref() == Some(&now) && fits(r, rect),
@@ -200,12 +201,13 @@ pub(crate) fn fresh(m: &DrawingModel, v: &DrawingView) -> bool {
 }
 
 /// Where view `v`'s raster lies on its sheet, `[x0, y0, x1, y1]` in paper inches: the box of
-/// its visible curves (the picture frames the model as the curves do), drawn under them.
+/// its visible curves (the picture frames the model as the curves do), drawn under them. Curves
+/// kept invisible (tangent edges turned off, R94) do not count.
 pub fn raster_rect(m: &DrawingModel, v: &DrawingView) -> Option<[f64; 4]> {
     let layout = m.paper.layout(&m.sheets.get(v.sheet)?.layout)?;
     let mut b = cadcraft_doc::geom::Bounds2::EMPTY;
     for e in layout.entities.iter() {
-        if mapper::xkey_of(e).is_some_and(|k| k.view == v.id && k.seg != Seg::Mark) && e.common.layer == mapper::VISIBLE_LAYER {
+        if mapper::xkey_of(e).is_some_and(|k| k.view == v.id && k.seg != Seg::Mark) && e.common.layer == mapper::VISIBLE_LAYER && e.common.visible {
             b = b.union(&cadcraft_doc::entity_bounds(&m.paper, e, 0));
         }
     }

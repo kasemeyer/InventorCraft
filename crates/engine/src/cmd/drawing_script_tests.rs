@@ -167,6 +167,11 @@ fn the_example_script_makes_the_two_view_drawing() {
     // (DIMLFAC 1) and every key, read back with cadcraft-io (R63).
     let layout = m.sheets[0].layout.clone();
     let paper = crate::drawing::export::sheet_paper(m, 0).unwrap();
+    // R94: the top view's tangent joins are on the drawing's own paper, invisible (21 on
+    // VISIBLE, 2 of them invisible); the export leaves them out (R61).
+    let sheet = m.paper.layout(&layout).unwrap();
+    assert_eq!(per_layer(&m.paper, &layout).get("VISIBLE"), Some(&21));
+    assert_eq!(sheet.entities.iter().filter(|e| !e.common.visible).map(|e| e.common.layer.as_str()).collect::<Vec<_>>(), ["VISIBLE"; 2]);
     let expected: BTreeMap<String, usize> = EXPECTED_LAYERS.iter().map(|(l, n)| (l.to_string(), *n)).collect();
     assert_eq!(per_layer(&paper, &layout), expected);
     let dxf = results_of(&script, &results, "drawing.export.dxf");
@@ -189,5 +194,6 @@ fn the_example_script_makes_the_two_view_drawing() {
 /// the outline's sides (2), front (3 pieces: the fillets' edges and the top face's) and back (5
 /// pieces: the same, the left end split where two fillet edges' names alternate, a 0.0077 in piece). The two lines
 /// where the top face meets the fillets (x = 8.5 and 11.5) are tangent (R64) and the views leave
-/// tangent edges off.
+/// tangent edges off: they stay on the drawing's paper as invisible entities (R94), which the
+/// export leaves out.
 const EXPECTED_LAYERS: &[(&str, usize)] = &[("BORDER", 2), ("CENTER", 2), ("DIMENSION", 4), ("HIDDEN", 2), ("NOTE", 2), ("VISIBLE", 19)];

@@ -131,6 +131,83 @@ pub(crate) fn note_of(e: &Entity) -> Option<Note> {
     Some(Note { kind, partner, attach, edge })
 }
 
+/// A note as the UI shows it (R75): what Edit Note starts from.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NoteInfo {
+    /// The note's MText (a leader note's text, not its leader).
+    pub text_handle: u64,
+    /// What it says, its lines joined by `'\n'`.
+    pub text: String,
+    /// Inches.
+    pub height: f64,
+    /// `left`, `center` or `right`.
+    pub justify: &'static str,
+    /// A hole note (its text comes from its hole).
+    pub hole: bool,
+}
+
+/// The MText of the note entity `e` and whether it is a hole note: a text note is its own text;
+/// a leader or hole note's leader, or its text, gives that text. None for anything else.
+pub(crate) fn note_text(paper: &Drawing, e: &Entity) -> Option<(Handle, bool)> {
+    let note = note_of(e)?;
+    let (text, hole) = match note.kind {
+        NoteKind::Text => (e.handle, false),
+        NoteKind::Leader | NoteKind::Hole => (note.partner?, note.kind == NoteKind::Hole),
+        NoteKind::Label => {
+            let leader = note_of(paper.entity(note.partner?)?)?;
+            (e.handle, leader.kind == NoteKind::Hole)
+        }
+    };
+    matches!(paper.entity(text)?.kind, EntityKind::MText(_)).then_some((text, hole))
+}
+
+/// `contents` (MTEXT, as [`contents`] writes it) as plain text: `\P` a new line, `\\`, `\{` and
+/// `\}` the character.
+pub(crate) fn plain(contents: &str) -> String {
+    let mut out = String::with_capacity(contents.len());
+    let mut chars = contents.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('P') => out.push('\n'),
+            Some(n @ ('\\' | '{' | '}')) => out.push(n),
+            Some(n) => {
+                out.push('\\');
+                out.push(n);
+            }
+            None => out.push('\\'),
+        }
+    }
+    out
+}
+
+/// The column (0 left, 1 centre, 2 right) of MText attachment `attach` (1-9).
+pub(crate) fn column_of(attach: u8) -> u8 {
+    attach.saturating_sub(1) % 3
+}
+
+/// The justification names, by column.
+pub(crate) const JUSTIFY: [&str; 3] = ["left", "center", "right"];
+
+/// The note entity `handle` is (a text note, a leader note by its leader or its text, or a hole
+/// note), as [`NoteInfo`]; None for anything else (a dimension, a centre mark, a view's label or
+/// curve, a handle that is gone) (R75).
+pub fn note_at(m: &DrawingModel, handle: u64) -> Option<NoteInfo> {
+    let paper = &m.paper;
+    let (text, hole) = note_text(paper, paper.entity(Handle(handle))?)?;
+    let EntityKind::MText(t) = &paper.entity(text)?.kind else { return None };
+    Some(NoteInfo {
+        text_handle: text.0,
+        text: plain(&t.contents),
+        height: t.height,
+        justify: JUSTIFY.get(usize::from(column_of(t.attach))).copied().unwrap_or("left"),
+        hole,
+    })
+}
+
 /// The MText of the leader note `leader`.
 // The tests read notes through it; D-2's note editing will too.
 #[cfg_attr(not(test), allow(dead_code))]

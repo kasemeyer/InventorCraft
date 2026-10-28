@@ -15,7 +15,7 @@ use solidcraft_geom::Vec3;
 
 use crate::cmd::drawing::drawing_fixture::{block_drawing, edit_model, front_view};
 use crate::drawing::mapper::{self, xkey_of};
-use crate::drawing::{ModelProvider, PaperPick, pick, stale_views};
+use crate::drawing::{ModelProvider, PaperPick, missing_views, model_path, pick, stale_views};
 use crate::{EngineError, Session};
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
@@ -135,7 +135,7 @@ fn set_style_children_follow() {
     assert_eq!(view(&s, v2).lines, LineStyle::Hidden);
     assert_eq!(s.undo.len(), undo + 4);
     // Nothing to set is refused.
-    assert_eq!(bad_message(s.execute("drawing.view.set_style", &json!({"view": v1}))), "name lines, shaded or style_from_base");
+    assert_eq!(bad_message(s.execute("drawing.view.set_style", &json!({"view": v1}))), "name lines, shaded, tangent_edges or style_from_base");
 }
 
 #[test]
@@ -530,4 +530,34 @@ fn no_op_view_edits_add_no_undo_step() {
     assert_eq!((s.undo.len(), s.revision), (undo, revision));
     run(&mut s, "drawing.view.set_label", json!({"view": v3, "label_visible": true}));
     assert_eq!(s.undo.len(), undo + 1);
+}
+
+/// R77: `model_path` finds a view's model without reading it (the provider first, then the
+/// file); `missing_views` lists the views whose model is found nowhere.
+#[test]
+fn model_path_and_missing_views() {
+    let (mut s, block) = block_drawing("model_path_and_missing_views");
+    let v1 = front_view(&mut s, &block);
+    let dir = Path::new(&block).parent().unwrap().to_path_buf();
+    let drw = dir.join("drw.tcidrw").to_string_lossy().into_owned();
+    run(&mut s, "file.save", json!({"path": drw}));
+    let absolute = crate::drawing::model_ref::absolute(Path::new(&block));
+    assert_eq!(model_path(&s, &view(&s, v1).model), Some(absolute.clone()));
+    assert!(missing_views(&s).is_empty());
+    std::fs::rename(&block, dir.join("away.tcipart")).unwrap();
+    assert_eq!(model_path(&s, &view(&s, v1).model), None);
+    assert_eq!(missing_views(&s), [v1]);
+    let r = run(&mut s, "drawing.update", json!({}));
+    assert_eq!(r["missing"], json!(["block.tcipart"]));
+    // An open tab still holds it.
+    let mut tab = Session::default();
+    run(&mut tab, "doc.open", json!({"path": dir.join("away.tcipart").to_string_lossy()}));
+    s.model_provider = Some(Arc::new(Tab(absolute.clone(), tab.doc.clone())));
+    assert_eq!(model_path(&s, &view(&s, v1).model), Some(absolute));
+    assert!(missing_views(&s).is_empty());
+    assert!(!Path::new(&block).exists());
+    // Not a drawing: no views.
+    let mut part = Session::default();
+    run(&mut part, "document.new_part", json!({}));
+    assert!(missing_views(&part).is_empty());
 }

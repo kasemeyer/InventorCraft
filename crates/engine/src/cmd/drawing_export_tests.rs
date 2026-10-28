@@ -523,7 +523,15 @@ fn long_keys_round_trip_through_dxf() {
         Ok(())
     })
     .unwrap();
-    let before = keys(&model(&s).paper, &layout);
+    // What is written: the drawn entities' keys (R61; VIEW3's tangent joins are on paper,
+    // invisible, R94).
+    let paper = &model(&s).paper;
+    let before: Vec<XKey> = {
+        let mut k: Vec<XKey> = paper.layout(&layout).unwrap().entities.iter().filter(|e| e.common.visible).filter_map(|e| xkey_of(e)).collect();
+        k.sort();
+        k
+    };
+    assert_eq!(keys(paper, &layout).len(), before.len() + 2);
     assert!(before.iter().any(|k| k.edge == long));
     for version in ["R2018", "R2000"] {
         let (_, text) = dxf(&mut s, &out(&dir, &format!("long-{version}.dxf")), 0, version);
@@ -564,7 +572,8 @@ fn dxf_leaves_out_suppressed_annotations() {
     assert!(suppressed.contains(&cl) && suppressed.contains(&dim));
     let layout = model(&s).sheets[0].layout.clone();
     let invisible = model(&s).paper.layout(&layout).unwrap().entities.iter().filter(|e| !e.common.visible).count();
-    assert_eq!(invisible, 4, "2 hidden curves, the centreline and the dimension");
+    // R94: VIEW3's tangent joins (sheet y = 7 and 9) are on paper, invisible, too.
+    assert_eq!(invisible, 6, "2 hidden curves, 2 tangent joins, the centreline and the dimension");
     let (r, text) = dxf(&mut s, &out(&dir, "suppressed.dxf"), 0, "R2018");
     let back = cadcraft_io::read(text.as_bytes(), "x.dxf").unwrap();
     let entities = &back.layout(&layout).unwrap().entities;

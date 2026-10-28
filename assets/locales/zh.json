@@ -758,6 +758,7 @@
   "cmd.drawing_export_dxf": "将图纸导出为 DXF",
   "cmd.drawing_export_pdf": "将图纸导出为 PDF",
   "cmd.drawing_new": "新建工程图",
+  "cmd.drawing_note_edit": "编辑注释",
   "cmd.drawing_note_hole": "孔和螺纹注释",
   "cmd.drawing_note_leader": "引线文本",
   "cmd.drawing_note_text": "文本",

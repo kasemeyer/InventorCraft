@@ -205,3 +205,14 @@ fn properties_set_fills_every_title_block() {
     assert_eq!(field(model(&s), 1, "TITLE"), "");
     assert_eq!(model(&s).properties.rev, "");
 }
+
+/// R79: going back to a checkpoint clamps the active sheet, as undo does (R7).
+#[test]
+fn restoring_a_checkpoint_clamps_the_sheet() {
+    let mut s = new_drawing();
+    let id = s.checkpoint();
+    run(&mut s, "drawing.sheet.add", json!({}));
+    assert_eq!(s.drawing_sheet, 1);
+    s.restore_checkpoint(id).unwrap();
+    assert_eq!((model(&s).sheets.len(), s.drawing_sheet), (1, 0));
+}

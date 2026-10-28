@@ -17,7 +17,7 @@ use crate::Session;
 use crate::capture::Picture;
 use crate::cmd::drawing::drawing_fixture::{block_drawing, edit_model};
 use crate::drawing::mapper::xkey_of;
-use crate::drawing::{FLAT_GREY, PaperPick, ViewRasterizer, pick, raster_rect};
+use crate::drawing::{FLAT_GREY, PaperPick, ViewRasterizer, pick, raster_fresh, raster_rect};
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
     s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"))
@@ -210,7 +210,8 @@ fn lines_still_draw_over_the_shading() {
     assert_eq!(r["raster"], "fresh");
     assert_eq!(on_layer(&s, v1, "HIDDEN"), (2, 0));
     assert!(on_layer(&s, v1, "VISIBLE").0 >= 4);
-    assert_eq!(on_layer(&s, v1, "VISIBLE").1, 0);
+    // R94: the joins at x = 8.5 and 11.5 stay on paper, invisible, with tangent edges off.
+    assert_eq!(on_layer(&s, v1, "VISIBLE").1, 2);
     // The top view is 4 x 1 in.
     assert_eq!(rec.calls().iter().map(|c| (c.width, c.height)).collect::<Vec<_>>(), vec![(800, 200)]);
 }
@@ -325,4 +326,23 @@ fn update_draws_stale_pictures_again() {
     let r = run(&mut s, "drawing.update", json!({}));
     assert_eq!(r["rasters"], json!({}));
     assert_eq!((s.undo.len(), rec.calls().len()), (undo + 1, 2));
+}
+
+/// R76: `raster_fresh` (the public `raster::fresh`) follows the view: fresh once drawn, stale
+/// after a rescale nothing could draw, fresh again after `drawing.update`; never for an
+/// unshaded view.
+#[test]
+fn raster_fresh_follows_the_view() {
+    let (mut s, block, _) = recorded("raster_fresh_follows_the_view");
+    let (v1, _) = shaded_view(&mut s, &block, json!({}));
+    assert!(raster_fresh(model(&s), view(&s, v1)));
+    let keep = s.view_rasterizer.take();
+    let r = run(&mut s, "drawing.view.set_scale", json!({"view": v1, "scale": 2}));
+    assert_eq!(r["raster"], "stale");
+    assert!(!raster_fresh(model(&s), view(&s, v1)));
+    s.view_rasterizer = keep;
+    run(&mut s, "drawing.update", json!({}));
+    assert!(raster_fresh(model(&s), view(&s, v1)));
+    let (v2, _) = shaded_view(&mut s, &block, json!({"shaded": false, "position": [25, 8]}));
+    assert!(!raster_fresh(model(&s), view(&s, v2)));
 }

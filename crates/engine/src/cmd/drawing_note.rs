@@ -4,7 +4,7 @@
 //! feature, centre marks and centreline bisectors that regenerate with their edges
 //! (`drawing::mapper`), and moving and deleting annotations. One command = one undo step.
 
-use cadcraft_doc::{DimKind, Drawing, Entity, EntityKind, Handle};
+use cadcraft_doc::{AssocSnap, DimKind, Drawing, Entity, EntityKind, Handle};
 use cadcraft_geom::{Vec2, Vec3};
 use serde_json::{Value, json};
 use solidcraft_doc::{DrawingModel, DrawingView, ViewId};
@@ -29,6 +29,12 @@ pub static COMMANDS: &[CommandSpec] = &[
          height?: inches (default 0.12); justify?: left, center or right: the text starts at, centres on or ends at the last point \
          (default: starts there when the leader comes in from the left, ends there otherwise) → handle: the leader, text_handle: its text",
     ),
+    CommandSpec::new("drawing.note.edit", "Edit Note", edit_note).icon("text").params(
+        "handle: a text note, a leader note's leader or text, or a hole note; text?: what it says (a new line starts a line; not a hole note's, \
+         which comes from its hole); height?: inches; justify?: left, center or right (a text note's lines line up on its left side, centre or right side, \
+         a boxed note staying in its box; a leader note's text starts at, centres on or ends at its leader's last point); at least one of them \
+         → handle: the note's text",
+    ),
     CommandSpec::new("drawing.note.hole", "Hole and Thread Note", hole).icon("hole").params(
         "view: a view id; edge: the edge of a hole the view shows (a model edge id, {edge, segment?} or {at: [x, y]}); placement: [x, y] in inches, where the text goes. \
          The text comes from the model's hole feature: ⌀ the diameter, then THRU or ↧ the depth, then the thread on a second line, and is read again by drawing.update \
@@ -44,7 +50,8 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("drawing.annotation.move", "Move Annotation", move_annotation).icon("move").params(
         "handle: a note, a leader, a dimension or a centre mark; placement: [x, y] in inches: where a note's text or a dimension's text goes \
-         (an attached arrow end and a dimension's measured points stay), or a centre mark's centre → handle, placement",
+         (an attached arrow end and a dimension's measured points stay; a radius or diameter turns its leader to the text), or a centre mark's centre \
+         → handle, placement",
     ),
     CommandSpec::new("drawing.annotation.delete", "Delete Annotation", delete_annotation).icon("delete").params(
         "handles: notes, leaders, dimensions or centre marks (a leader note's leader and text go together, as do a centre mark's lines) → deleted: every handle removed",
@@ -255,6 +262,66 @@ fn bisector(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"handle": handles.first().map(|h| h.0)}))
 }
 
+/// `drawing.note.edit` (R74): a note's text, height or justification, one undo step; nothing
+/// changed, no step.
+fn edit_note(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "drawing.note.edit";
+    let m = drawing::require(s, cmd)?;
+    let h = handle_param(p, cmd)?;
+    let given = |key: &str| p.get(key).is_some_and(|v| !v.is_null());
+    if !given("text") && !given("height") && !given("justify") {
+        return Err(bad(cmd, "name text, height or justify"));
+    }
+    let value = if given("text") { Some(text_param(p, cmd)?) } else { None };
+    let height = if given("height") { Some(height_param(p, cmd)?) } else { None };
+    let column = justify_param(p, cmd)?;
+    let paper: &Drawing = &m.paper;
+    let e = paper.entity(Handle(h)).ok_or_else(|| bad(cmd, format!("no entity {h}")))?;
+    if matches!(e.kind, EntityKind::Dimension(_)) {
+        return Err(bad(cmd, "a dimension: use drawing.dim.edit"));
+    }
+    if xkey_of(e).is_some_and(|k| k.seg == Seg::Mark) {
+        return Err(bad(cmd, "a centre mark has no text"));
+    }
+    if mapper::label_of(e).is_some() {
+        return Err(bad(cmd, "a view's label: use drawing.view.set_label"));
+    }
+    let (th, hole) = notes::note_text(paper, e).ok_or_else(|| bad(cmd, format!("{h} is not a note")))?;
+    if hole && value.is_some() {
+        return Err(bad(cmd, "a hole note's text comes from its hole"));
+    }
+    let Some(EntityKind::MText(old)) = paper.entity(th).map(|t| &t.kind) else { return Err(bad(cmd, format!("{h} is not a note"))) };
+    let mut new = old.clone();
+    if let Some(v) = &value {
+        new.contents = notes::contents(v);
+    }
+    if let Some(height) = height {
+        new.height = height;
+    }
+    if let Some(column) = column {
+        // A text note's attachment is 1-3 (top), a leader note's 4-6 (middle) (R65).
+        let (row, was) = ((old.attach.saturating_sub(1) / 3) * 3, notes::column_of(old.attach));
+        new.attach = row + 1 + column;
+        // A boxed text note stays in its box: its insert is the box's upper left, centre or right.
+        if old.width > 0.0 {
+            let left = old.insert.x - old.width * f64::from(was) / 2.0;
+            new.insert.x = left + old.width * f64::from(column) / 2.0;
+        }
+    }
+    if new != *old {
+        drawing::edit(s, cmd, |m, _| {
+            m.paper
+                .modify_entity(th, |e| {
+                    if let EntityKind::MText(t) = &mut e.kind {
+                        *t = new;
+                    }
+                })
+                .map_err(|e| EngineError::Other(format!("{cmd}: {e}")))
+        })?;
+    }
+    Ok(json!({"handle": th.0}))
+}
+
 /// What an annotation command acts on.
 enum Target {
     /// A text note's MText.
@@ -320,6 +387,42 @@ fn moved(p: Vec3, d: Vec2) -> Vec3 {
     Vec3::new(p.x + d.x, p.y + d.y, p.z)
 }
 
+/// Where a radius or diameter dimension's points on its circle go when its text moves (R80):
+/// `p15` towards the text from the centre, a diameter's `defpt` opposite.
+struct Aim {
+    centre: Vec2,
+    p15: Vec2,
+    defpt: Option<Vec2>,
+}
+
+impl Aim {
+    fn points(&self) -> impl Iterator<Item = (&'static str, Vec2)> + '_ {
+        std::iter::once(("p15", self.p15)).chain(self.defpt.map(|p| ("defpt", p)))
+    }
+}
+
+/// The [`Aim`] of dimension `dh` with its text at `to`; None for a linear or aligned one, one
+/// whose circle or arc is gone (it is sick: only its text moves), or a text at the centre.
+fn radial_aim(paper: &Drawing, dh: Handle, to: Vec2) -> Option<Aim> {
+    let EntityKind::Dimension(d) = &paper.entity(dh)?.kind else { return None };
+    let diameter = match d.kind {
+        DimKind::Diameter => true,
+        DimKind::Radius => false,
+        _ => return None,
+    };
+    let on = d.assoc.iter().find(|a| a.point == "p15" && matches!(a.snap, AssocSnap::OnCircle { .. }))?;
+    let (centre, r) = match &paper.entity(on.handle)?.kind {
+        EntityKind::Circle(c) => (c.center.xy(), c.radius),
+        EntityKind::Arc(a) => (a.center.xy(), a.radius),
+        _ => return None,
+    };
+    let u = (to - centre).normalized();
+    if u == Vec2::ZERO || !u.is_finite() {
+        return None;
+    }
+    Some(Aim { centre, p15: centre + u * r, defpt: diameter.then_some(centre - u * r) })
+}
+
 /// Moves the annotation `t` so its text (or a mark's centre) is at `to`.
 fn move_target(paper: &mut Drawing, t: Target, to: Vec2) -> cadcraft_doc::Result<()> {
     match t {
@@ -356,29 +459,45 @@ fn move_target(paper: &mut Drawing, t: Target, to: Vec2) -> cadcraft_doc::Result
                 }
             })
         }
-        Target::Dimension(dh) => paper.modify_entity(dh, |e| {
-            if let EntityKind::Dimension(d) = &mut e.kind {
-                // Task 10 review: the text and the dimension line move; the attached definition
-                // points (what it measures) never do, or the next regeneration would leave the
-                // dimension behind (`assoc::recompute` drops a point moved off its object).
-                let delta = to - d.text_mid.xy();
-                let line_points: &[&str] = match d.kind {
-                    DimKind::Linear { .. } | DimKind::Aligned => &["defpt"],
-                    _ => &["defpt", "p15", "p16"],
-                };
-                let free: Vec<&str> = line_points.iter().copied().filter(|n| !d.assoc.iter().any(|a| a.point == *n)).collect();
-                for name in free {
-                    match name {
-                        "defpt" => d.defpt = moved(d.defpt, delta),
-                        "p15" => d.p15 = moved(d.p15, delta),
-                        _ => d.p16 = moved(d.p16, delta),
+        Target::Dimension(dh) => {
+            let aim = radial_aim(paper, dh, to);
+            paper.modify_entity(dh, |e| {
+                if let EntityKind::Dimension(d) = &mut e.kind {
+                    // Task 10 review: the text and the dimension line move; the attached definition
+                    // points (what it measures) never do, or the next regeneration would leave the
+                    // dimension behind (`assoc::recompute` drops a point moved off its object).
+                    let delta = to - d.text_mid.xy();
+                    let line_points: &[&str] = match d.kind {
+                        DimKind::Linear { .. } | DimKind::Aligned => &["defpt"],
+                        _ => &["defpt", "p15", "p16"],
+                    };
+                    let free: Vec<&str> = line_points.iter().copied().filter(|n| !d.assoc.iter().any(|a| a.point == *n)).collect();
+                    for name in free {
+                        match name {
+                            "defpt" => d.defpt = moved(d.defpt, delta),
+                            "p15" => d.p15 = moved(d.p15, delta),
+                            _ => d.p16 = moved(d.p16, delta),
+                        }
                     }
+                    // R80: a radius or diameter turns its leader to the text: its points on the
+                    // circle move, their attachments' angles with them.
+                    if let Some(aim) = &aim {
+                        for (name, at) in aim.points() {
+                            match name {
+                                "p15" => d.p15 = Vec3::new(at.x, at.y, d.p15.z),
+                                _ => d.defpt = Vec3::new(at.x, at.y, d.defpt.z),
+                            }
+                            if let Some(AssocSnap::OnCircle { angle }) = d.assoc.iter_mut().find(|a| a.point == name).map(|a| &mut a.snap) {
+                                *angle = aim.centre.angle_to(at);
+                            }
+                        }
+                    }
+                    d.text_mid = Vec3::new(to.x, to.y, d.text_mid.z);
+                    d.user_text_pos = true;
+                    d.block = None;
                 }
-                d.text_mid = Vec3::new(to.x, to.y, d.text_mid.z);
-                d.user_text_pos = true;
-                d.block = None;
-            }
-        }),
+            })
+        }
         Target::Mark(lines) => {
             // The mark's centre (its first line's middle) to the placement; the next
             // regeneration of its view puts it back on what it marks.

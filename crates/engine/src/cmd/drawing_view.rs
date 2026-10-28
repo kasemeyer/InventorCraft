@@ -37,8 +37,9 @@ pub static COMMANDS: &[CommandSpec] = &[
          an orthographic view stays aligned with its parent; style and scale come from the parent → view, identifier, entities: {visible, hidden}, raster",
     ),
     CommandSpec::new("drawing.view.set_style", "View Style", set_style).icon("appearance").params(
-        "view: a view id; lines?: hidden or removed; shaded?: bool; style_from_base?: bool (a projected view takes its parent's style; giving lines or shaded stops it). \
-         Projected views that take their style from this one follow → view, changed: the views changed",
+        "view: a view id; lines?: hidden or removed; shaded?: bool; tangent_edges?: bool (the edges where faces meet smoothly: drawn, or kept on the sheet undrawn \
+         with the annotations on them); style_from_base?: bool (a projected view takes its parent's style; giving lines, shaded or tangent_edges stops it). \
+         Projected views that take their style from this one follow → view, changed: the views changed, suppressed: how many annotations the styles now hide",
     ),
     CommandSpec::new("drawing.view.set_scale", "View Scale", set_scale).icon("scale").params(
         "view: a view id; scale: a number > 0 or \"1:2\", or scale_from_base: bool (a projected view takes its parent's scale). \
@@ -423,32 +424,40 @@ fn set_style(s: &mut Session, p: &Value) -> Result<Value> {
         None | Some(Value::Null) => None,
         Some(_) => Some(bool_param(p, "shaded", false, cmd)?),
     };
+    // R66, R73: tangent edges are part of the style.
+    let given_tangent = match p.get("tangent_edges") {
+        None | Some(Value::Null) => None,
+        Some(_) => Some(bool_param(p, "tangent_edges", false, cmd)?),
+    };
     let follow = match p.get("style_from_base") {
         None | Some(Value::Null) => None,
         Some(_) => Some(bool_param(p, "style_from_base", false, cmd)?),
     };
-    if given_lines.is_none() && given_shaded.is_none() && follow.is_none() {
-        return Err(bad(cmd, "name lines, shaded or style_from_base"));
+    let given = given_lines.is_some() || given_shaded.is_some() || given_tangent.is_some();
+    if !given && follow.is_none() {
+        return Err(bad(cmd, "name lines, shaded, tangent_edges or style_from_base"));
     }
+    let style = |v: &DrawingView| (v.lines, v.shaded, v.tangent_edges);
     let mut views = m.views.clone();
-    let parent = views.get(&id).and_then(|v| v.parent).and_then(|p| views.get(&p)).map(|p| (p.lines, p.shaded));
+    let parent = views.get(&id).and_then(|v| v.parent).and_then(|p| views.get(&p)).map(style);
     let Some(v) = views.get_mut(&id) else { return Err(bad(cmd, format!("no view {id}"))) };
     match (follow, parent) {
         (Some(true), None) => return Err(bad(cmd, format!("{} is a base view: it has no parent style to follow", v.identifier))),
-        (Some(true), Some(_)) if given_lines.is_some() || given_shaded.is_some() => {
-            return Err(bad(cmd, "style_from_base: true takes the parent's style; give lines or shaded without it"));
+        (Some(true), Some(_)) if given => {
+            return Err(bad(cmd, "style_from_base: true takes the parent's style; give lines, shaded or tangent_edges without it"));
         }
-        (Some(true), Some((lines, shaded))) => (v.style_from_base, v.lines, v.shaded) = (true, lines, shaded),
+        (Some(true), Some((lines, shaded, tangent))) => (v.style_from_base, v.lines, v.shaded, v.tangent_edges) = (true, lines, shaded, tangent),
         _ => {
             v.style_from_base = false;
             v.lines = given_lines.unwrap_or(v.lines);
             v.shaded = given_shaded.unwrap_or(v.shaded);
+            v.tangent_edges = given_tangent.unwrap_or(v.tangent_edges);
         }
     }
     for child in descendants(&views, id) {
-        let Some(parent) = views.get(&child).and_then(|c| c.parent).and_then(|p| views.get(&p)).map(|p| (p.lines, p.shaded)) else { continue };
+        let Some(parent) = views.get(&child).and_then(|c| c.parent).and_then(|p| views.get(&p)).map(style) else { continue };
         if let Some(c) = views.get_mut(&child).filter(|c| c.style_from_base) {
-            (c.lines, c.shaded) = parent;
+            (c.lines, c.shaded, c.tangent_edges) = parent;
         }
     }
     let (mut redraw, mut changed) = (Vec::new(), Vec::new());
@@ -456,7 +465,8 @@ fn set_style(s: &mut Session, p: &Value) -> Result<Value> {
     let mut loads = Loads::default();
     for (vid, v) in &views {
         match m.views.get(vid) {
-            Some(old) if old.lines != v.lines => redraw.push(v.clone()),
+            // The curves change with the lines or the tangent edges: projected again.
+            Some(old) if old.lines != v.lines || old.tangent_edges != v.tangent_edges => redraw.push(v.clone()),
             Some(old) if old != v => {
                 let mut v = v.clone();
                 // Shading turned on or off: the raster is drawn, or dropped (the curves stay).

@@ -25,12 +25,14 @@ use solidcraft_doc::{DocumentKind, DrawingModel, DrawingProps};
 pub use centermark::MARK_OVERSHOOT_IN;
 pub use dims::{VALUE_TOKEN, dimension_text, sick_dimensions};
 pub(crate) use model_ref::rebased_models;
-pub use model_ref::{ModelProvider, stale_views};
-pub use notes::{LEADER_ARROW, NOTE_HEIGHT_IN};
+pub use model_ref::{ModelProvider, missing_views, model_path, stale_views};
+pub use notes::{LEADER_ARROW, NOTE_HEIGHT_IN, NoteInfo, note_at};
 pub use orient::{Projection, aligned_position, projected_orientation, projection_at};
 pub use pick::{CurveKind, PaperPick, pick, preview_view};
 pub use project::{PaperCurve, camera_for};
-pub use raster::{CaptureRasterizer, FLAT_GREY, MAX_RASTER_SIDE, PDF_PX_PER_IN, SCREEN_PX_PER_IN, ViewRasterizer, raster_rect};
+pub use raster::{
+    CaptureRasterizer, FLAT_GREY, MAX_RASTER_SIDE, PDF_PX_PER_IN, SCREEN_PX_PER_IN, ViewRasterizer, fresh as raster_fresh, raster_rect,
+};
 pub use template::*;
 
 use crate::{EngineError, Result, Session};
@@ -68,10 +70,10 @@ pub(crate) fn edit<T>(s: &mut Session, cmd: &str, f: impl FnOnce(&mut DrawingMod
     Ok(out)
 }
 
-/// R58, R61: a dimension or an attached note on a curve the view's style suppresses (an
-/// invisible view entity, Hidden Line Removed) is suppressed too: kept with its handle and its
-/// attachment, invisible, never sick or orphaned; it is shown again with the curve. Returns how
-/// many entities changed.
+/// R58, R61, R94: a dimension or an attached note on a curve the view's style suppresses (an
+/// invisible view entity: a hidden curve under Hidden Line Removed, a tangent edge with tangent
+/// edges off) is suppressed too: kept with its handle and its attachment, invisible, never sick
+/// or orphaned; it is shown again with the curve. Returns how many entities changed.
 pub(crate) fn sync_suppressed(paper: &mut cadcraft_doc::Drawing) -> usize {
     use std::collections::BTreeMap;
 

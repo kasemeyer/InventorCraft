@@ -14,7 +14,9 @@ use solidcraft_doc::DrawingModel;
 
 use crate::cmd::drawing::drawing_fixture::{block_drawing, edge_at, edit_model, front_view};
 use crate::drawing::mapper::{Seg, xkey_of};
-use crate::drawing::{LEADER_ARROW, MARK_OVERSHOOT_IN, NOTE_HEIGHT_IN, PaperPick, dimension_text, pick, sick_dimensions, suppressed_annotations};
+use crate::drawing::{
+    LEADER_ARROW, MARK_OVERSHOOT_IN, NOTE_HEIGHT_IN, NoteInfo, PaperPick, dimension_text, note_at, pick, sick_dimensions, suppressed_annotations,
+};
 use crate::{EngineError, Session};
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
@@ -464,6 +466,7 @@ fn note_commands_need_a_drawing() {
         ("drawing.centerline.bisector", json!({"view": 1, "a": "e", "b": "f"})),
         ("drawing.annotation.move", json!({"handle": 1, "placement": [1, 1]})),
         ("drawing.annotation.delete", json!({"handles": [1]})),
+        ("drawing.note.edit", json!({"handle": 1, "text": "A"})),
     ] {
         let e = s.execute(id, &p).unwrap_err().to_string();
         assert!(e.contains("not a drawing"), "{id}: {e}");
@@ -592,4 +595,203 @@ fn edge_names_split_on_whole_face_names() {
     assert_eq!(edge_faces("F2:bore:side:0|F4:blend:F1:-y|F2:bore:side:0~2", &known), ["F2:bore:side:0", "F4:blend:F1:-y|F2:bore:side:0"]);
     assert_eq!(edge_faces("F1:-y|F2:bore:side:0", &known), ["F1:-y", "F2:bore:side:0"]);
     assert!(edge_faces("F1:+z|F9:x", &known).is_empty());
+}
+
+/// A note as `note_at` reads it: (text, height, justify).
+fn read_note(s: &Session, h: u64) -> (String, f64, &'static str) {
+    let n = note_at(model(s), h).unwrap_or_else(|| panic!("{h} is not a note"));
+    (n.text, n.height, n.justify)
+}
+
+fn undo_label(s: &Session) -> Option<&str> {
+    s.undo.last().map(|u| u.label.as_str())
+}
+
+/// R74: `drawing.note.edit` changes a note's text, height and justification in one undo step;
+/// a leader note is edited through its leader or its text; the same values add no step.
+#[test]
+fn edit_note_changes_text_height_and_justify() {
+    let (mut s, _, _) = front("edit_note_changes_text_height_and_justify");
+    let h = handle(&run(&mut s, "drawing.note.text", json!({"position": [2, 2], "text": "NOTES:"})));
+    let undo = s.undo.len();
+    let r = run(&mut s, "drawing.note.edit", json!({"handle": h, "text": "NOTES: 1", "height": 0.25, "justify": "center"}));
+    assert_eq!(r, json!({"handle": h}));
+    assert_eq!((s.undo.len(), undo_label(&s)), (undo + 1, Some("Edit Note")));
+    assert_eq!(read_note(&s, h), ("NOTES: 1".to_string(), 0.25, "center"));
+    let t = mtext(&s, h);
+    assert_eq!((t.attach, t.contents.as_str()), (2, "NOTES: 1"));
+    assert!(near(t.insert.xy(), [2.0, 2.0]), "{t:?}");
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(read_note(&s, h), ("NOTES:".to_string(), 0.12, "left"));
+    assert_eq!(mtext(&s, h).attach, 1);
+    // Two lines: stored as \P (braces escaped), read back with a new line.
+    run(&mut s, "drawing.note.edit", json!({"handle": h, "text": "A\nB{1}"}));
+    assert_eq!(mtext(&s, h).contents, "A\\PB\\{1\\}");
+    assert_eq!(read_note(&s, h).0, "A\nB{1}");
+    // A leader note through its leader: its text entity changes, attachment 4/5/6.
+    let r = run(&mut s, "drawing.note.leader", json!({"points": [[5, 5], [6, 6]], "text": "X"}));
+    let (lh, th) = (handle(&r), r["text_handle"].as_u64().unwrap());
+    let undo = s.undo.len();
+    let r = run(&mut s, "drawing.note.edit", json!({"handle": lh, "text": "Y", "justify": "right"}));
+    assert_eq!(r, json!({"handle": th}));
+    assert_eq!(s.undo.len(), undo + 1);
+    let t = mtext(&s, th);
+    assert_eq!((t.contents.as_str(), t.attach, t.height), ("Y", 6, 0.12));
+    assert!(near(t.insert.xy(), [6.0, 6.0]), "{t:?}");
+    assert_eq!(note_at(model(&s), lh).map(|n| n.text_handle), Some(th));
+    // Through its text.
+    run(&mut s, "drawing.note.edit", json!({"handle": th, "justify": "center", "height": 0.2}));
+    let t = mtext(&s, th);
+    assert_eq!((t.contents.as_str(), t.attach, t.height), ("Y", 5, 0.2));
+    // The same values again: no step.
+    let undo = s.undo.len();
+    let r = run(&mut s, "drawing.note.edit", json!({"handle": lh, "text": "Y", "justify": "center", "height": 0.2}));
+    assert_eq!(r, json!({"handle": th}));
+    run(&mut s, "drawing.note.edit", json!({"handle": h, "text": "A\nB{1}", "justify": "left"}));
+    assert_eq!(s.undo.len(), undo);
+}
+
+/// A boxed text note keeps its box when its justification changes: the insert moves to the
+/// box's upper centre or right.
+#[test]
+fn edit_note_keeps_a_boxed_note_in_its_box() {
+    let (mut s, _, _) = front("edit_note_keeps_a_boxed_note_in_its_box");
+    let h = handle(&run(&mut s, "drawing.note.text", json!({"position": [2, 2], "corner": [6, 1], "text": "A"})));
+    run(&mut s, "drawing.note.edit", json!({"handle": h, "justify": "right"}));
+    let t = mtext(&s, h);
+    assert!(t.attach == 3 && close(t.width, 4.0) && near(t.insert.xy(), [6.0, 2.0]), "{t:?}");
+    run(&mut s, "drawing.note.edit", json!({"handle": h, "justify": "center"}));
+    let t = mtext(&s, h);
+    assert!(t.attach == 2 && near(t.insert.xy(), [4.0, 2.0]), "{t:?}");
+}
+
+/// The label entity (the identifier line) of view `v`.
+fn view_label(s: &Session, v: u64) -> u64 {
+    let m = model(s);
+    let layout = m.paper.layout(&m.sheets[0].layout).unwrap();
+    layout
+        .entities
+        .iter()
+        .find(|e| crate::drawing::mapper::view_of(e) == Some(v) && xkey_of(e).is_none())
+        .unwrap_or_else(|| panic!("view {v} has no label"))
+        .handle
+        .0
+}
+
+/// R74: what is not a note is refused, naming its command; nothing is added to the undo
+/// history. A hole note takes a height (its text comes from its hole) and keeps it through an
+/// update.
+#[test]
+fn edit_note_refuses_what_is_not_a_note() {
+    let (mut s, _, v) = front("edit_note_refuses_what_is_not_a_note");
+    let hole = edge_at(&s, v, [10.375, 8.0]);
+    let note = handle(&run(&mut s, "drawing.note.text", json!({"position": [2, 2], "text": "NOTES:"})));
+    let dim = handle(&run(&mut s, "drawing.dim.general", json!({"view": v, "picks": [{"edge": hole}], "placement": [11, 9.5]})));
+    let mark = run(&mut s, "drawing.centermark", json!({"view": v, "edge": hole}))["handles"][0].as_u64().unwrap();
+    run(&mut s, "drawing.view.set_label", json!({"view": v, "label_visible": true}));
+    let label = view_label(&s, v);
+    let hn = handle(&run(&mut s, "drawing.note.hole", json!({"view": v, "edge": hole, "placement": [12, 10]})));
+    let m = model(&s);
+    let curve =
+        m.paper.layout(&m.sheets[0].layout).unwrap().entities.iter().find(|e| xkey_of(e).is_some_and(|k| k.seg != Seg::Mark)).unwrap().handle.0;
+    let not_a_note = format!("{curve} is not a note");
+    let undo = s.undo.len();
+    for (p, msg) in [
+        (json!({"handle": note}), "name text, height or justify"),
+        (json!({"handle": note, "text": null}), "name text, height or justify"),
+        (json!({"handle": dim, "text": "A"}), "a dimension: use drawing.dim.edit"),
+        (json!({"handle": mark, "height": 0.2}), "a centre mark has no text"),
+        (json!({"handle": label, "text": "A"}), "a view's label: use drawing.view.set_label"),
+        (json!({"handle": hn, "text": "A"}), "a hole note's text comes from its hole"),
+        (json!({"handle": note, "height": 0}), "`height` must be a number of inches above 0, at most 10"),
+        (json!({"handle": note, "height": 11}), "`height` must be a number of inches above 0, at most 10"),
+        (json!({"handle": note, "justify": "up"}), "`justify` must be left, center or right"),
+        (json!({"handle": note, "text": " "}), "`text` must be some text"),
+        (json!({"handle": "x", "text": "A"}), "`handle` must be an entity's handle"),
+        (json!({"handle": 999_999, "text": "A"}), "no entity 999999"),
+        (json!({"handle": curve, "text": "A"}), not_a_note.as_str()),
+    ] {
+        assert_eq!(bad_message(s.execute("drawing.note.edit", &p)), msg, "{p}");
+    }
+    assert_eq!(s.undo.len(), undo);
+    // A hole note's height: its text stays the hole's, at 0.2, through an update.
+    let th = run(&mut s, "drawing.note.edit", json!({"handle": hn, "height": 0.2}))["handle"].as_u64().unwrap();
+    assert_eq!(s.undo.len(), undo + 1);
+    run(&mut s, "drawing.update", json!({"views": [v]}));
+    let t = mtext(&s, th);
+    assert_eq!((t.contents.as_str(), t.height), ("⌀.75 THRU", 0.2));
+}
+
+/// R75: `note_at` reads a text, leader or hole note (by either handle of a leader note) and
+/// nothing else.
+#[test]
+fn note_at_reads_notes_only() {
+    let (mut s, _, v) = front("note_at_reads_notes_only");
+    let hole = edge_at(&s, v, [10.375, 8.0]);
+    let note = handle(&run(&mut s, "drawing.note.text", json!({"position": [2, 2], "text": "NOTES:"})));
+    assert_eq!(note_at(model(&s), note), Some(NoteInfo { text_handle: note, text: "NOTES:".into(), height: 0.12, justify: "left", hole: false }));
+    let r = run(&mut s, "drawing.note.leader", json!({"points": [[7, 5], [6, 6]], "text": "X\nY"}));
+    let (lh, th) = (handle(&r), r["text_handle"].as_u64().unwrap());
+    let by_leader = note_at(model(&s), lh).unwrap();
+    assert_eq!(by_leader, NoteInfo { text_handle: th, text: "X\nY".into(), height: 0.12, justify: "right", hole: false });
+    assert_eq!(note_at(model(&s), th), Some(by_leader));
+    let hn = handle(&run(&mut s, "drawing.note.hole", json!({"view": v, "edge": hole, "placement": [12, 10]})));
+    let n = note_at(model(&s), hn).unwrap();
+    assert_eq!((n.text.as_str(), n.hole, n.justify), ("⌀.75 THRU", true, "left"));
+    assert_eq!(note_at(model(&s), n.text_handle), Some(n.clone()));
+    let dim = handle(&run(&mut s, "drawing.dim.general", json!({"view": v, "picks": [{"edge": hole}], "placement": [11, 9.5]})));
+    let mark = run(&mut s, "drawing.centermark", json!({"view": v, "edge": hole}))["handles"][0].as_u64().unwrap();
+    run(&mut s, "drawing.view.set_label", json!({"view": v, "label_visible": true}));
+    let label = view_label(&s, v);
+    for h in [dim, mark, label, 999_999] {
+        assert_eq!(note_at(model(&s), h), None, "{h}");
+    }
+}
+
+/// A dimension's (p15, defpt, text_mid).
+fn radial_points(s: &Session, h: u64) -> (Vec2, Vec2, Vec2) {
+    match &model(s).paper.entity(Handle(h)).unwrap().kind {
+        EntityKind::Dimension(d) => (d.p15.xy(), d.defpt.xy(), d.text_mid.xy()),
+        other => panic!("{h} is not a dimension: {other:?}"),
+    }
+}
+
+fn within(p: Vec2, q: [f64; 2], tol: f64) -> bool {
+    (p.x - q[0]).abs() <= tol && (p.y - q[1]).abs() <= tol
+}
+
+/// R80: moving a radius or diameter dimension turns its leader to the text: `p15` (and a
+/// diameter's `defpt`, opposite) on the circle towards the placement, kept by an update.
+#[test]
+fn moving_a_radius_reaims_its_leader() {
+    let (mut s, _, v) = front("moving_a_radius_reaims_its_leader");
+    let r = run(&mut s, "drawing.dim.general", json!({"view": v, "picks": [{"at": [8.146, 6.646]}], "placement": [7.2, 6.0]}));
+    assert_eq!((r["kind"].as_str(), r["text"].as_str()), (Some("radius"), Some("R.50")));
+    let h = handle(&r);
+    let undo = s.undo.len();
+    let r = run(&mut s, "drawing.annotation.move", json!({"handle": h, "placement": [8.0, 5.5]}));
+    assert_eq!(r["handle"], json!(h));
+    assert_eq!(s.undo.len(), undo + 1);
+    let n = 2.5f64.sqrt();
+    let want = [8.5 + 0.5 * (-0.5 / n), 7.0 + 0.5 * (-1.5 / n)];
+    let (p, defpt, text) = radial_points(&s, h);
+    assert!(within(p, want, 1e-9), "{p:?} {want:?}");
+    assert!(within(defpt, [8.5, 7.0], 1e-9), "{defpt:?}");
+    assert!(within(text, [8.0, 5.5], 1e-12), "{text:?}");
+    assert_eq!(dimension_text(model(&s), h).as_deref(), Some("R.50"));
+    assert!(!sick_dimensions(model(&s)).contains(&h));
+    run(&mut s, "drawing.update", json!({"views": [v]}));
+    let (p, ..) = radial_points(&s, h);
+    assert!(within(p, want, 1e-9), "{p:?} {want:?}");
+    assert!(!sick_dimensions(model(&s)).contains(&h));
+    // A diameter: both ends on the circle, along the text's direction.
+    let hole = edge_at(&s, v, [10.375, 8.0]);
+    let d = handle(&run(&mut s, "drawing.dim.general", json!({"view": v, "picks": [{"edge": hole}], "placement": [9, 9.5]})));
+    run(&mut s, "drawing.annotation.move", json!({"handle": d, "placement": [12, 10]}));
+    let k = 0.375 * std::f64::consts::FRAC_1_SQRT_2;
+    let (p15, defpt, _) = radial_points(&s, d);
+    assert!(within(p15, [10.0 + k, 8.0 + k], 1e-9), "{p15:?}");
+    assert!(within(defpt, [10.0 - k, 8.0 - k], 1e-9), "{defpt:?}");
+    assert_eq!(dimension_text(model(&s), d).as_deref(), Some("⌀.75"));
+    assert!(!sick_dimensions(model(&s)).contains(&d));
 }

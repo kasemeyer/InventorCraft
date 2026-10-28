@@ -308,6 +308,10 @@ fn tangent_edges_appear_only_when_asked() {
         assert_eq!((counts(&off), counts(&on)), ((12, 0, 0, 0, 2), (14, 0, 0, 0, 2)), "{target}");
         let added: Vec<&ViewCurve> = on.curves.iter().filter(|c| !off.curves.contains(c)).collect();
         assert_eq!(added.len(), 2, "{target}: {added:#?}");
+        // R94: off, the joins are kept aside as suppressed curves (placed invisible), exactly as
+        // they are drawn when on.
+        assert_eq!(off.suppressed.iter().collect::<Vec<_>>(), added, "{target}");
+        assert!(on.suppressed.is_empty(), "{target}");
         assert!(off.curves.iter().all(|c| on.curves.contains(c)), "{target}");
         for (edge, a, b) in joins {
             let c = added.iter().find(|c| c.edge == edge).unwrap_or_else(|| panic!("{target}: {edge} in {added:#?}"));
@@ -328,6 +332,8 @@ fn tangent_edges_appear_only_when_asked() {
         |g: &ViewGeometry| -> Vec<ViewCurve> { g.curves.iter().filter(|c| c.edge.starts_with("0/Tube/e/F2:side:s1|F2:side:s2~")).cloned().collect() };
     assert_eq!(joins(&on).len(), 2, "{:#?}", on.curves);
     assert!(joins(&off).is_empty(), "{:#?}", off.curves);
+    let kept: Vec<&ViewCurve> = off.suppressed.iter().collect();
+    assert_eq!(kept, joins(&on).iter().collect::<Vec<_>>(), "R94");
     assert_eq!(
         on.curves.len(),
         off.curves.len() + 2,

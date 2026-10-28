@@ -144,7 +144,7 @@ pub(crate) fn view_of(e: &Entity) -> Option<ViewId> {
 }
 
 /// The label line (0: the identifier, 1: the scale) an entity is, with its view.
-fn label_of(e: &Entity) -> Option<(ViewId, u8)> {
+pub(crate) fn label_of(e: &Entity) -> Option<(ViewId, u8)> {
     let xdata = &e.common.xdata;
     let at = xdata.iter().position(|t| t.code == 1001 && t.value == XDATA_APP)?;
     let mut rest = xdata.get(at + 1..)?.iter().take_while(|t| t.code != 1001);
@@ -279,9 +279,9 @@ fn segments(curves: &[&ViewCurve]) -> Vec<u32> {
 /// Writes `g` for view `v` into its sheet's layout: modify_entity for keys that exist, Drawing::add for new
 /// keys, remove_entity for keys no longer produced; `v.group` then lists exactly the view's entities.
 ///
-/// The curves the style suppresses (`g.suppressed`, R61) are placed too, as invisible entities
-/// keyed exactly as under Hidden Line (keys are made over all the curves in one order), so
-/// switching the style back shows the same handles again.
+/// The curves the style suppresses (`g.suppressed`: hidden curves, R61; tangent edges turned
+/// off, R94) are placed too, as invisible entities keyed exactly as when drawn (keys are made
+/// over all the curves in one order), so switching the style back shows the same handles again.
 ///
 /// Centre marks and centrelines (`Seg::Mark`) are not curves of `g`: they are regenerated from
 /// the curves they mark (in place, handles kept) and stay in the group; a mark whose circle or
