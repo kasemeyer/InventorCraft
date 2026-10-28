@@ -264,7 +264,7 @@ fn place(app: &mut SolveApp, at: [f64; 2]) {
         t.placed.extend(handle);
     }
     if let Some(dim) = handle
-        && app.drawing.dim_edit_when_created
+        && edit_when_created(app)
     {
         open_panel(app, dim);
     }
@@ -350,7 +350,7 @@ pub(crate) fn open_panel(app: &mut SolveApp, dim: u64) {
         text: text.clone(),
         hide_value,
         precision,
-        edit_when_created: app.drawing.dim_edit_when_created,
+        edit_when_created: edit_when_created(app),
         justify,
         error: None,
         measurement: d.measurement,
@@ -385,9 +385,21 @@ pub(crate) fn edits(p: &DimPanel) -> Option<Value> {
     Some(Value::Object(out))
 }
 
+/// "Edit dimension when created", saved per profile (`Prefs::dim_edit_when_created`).
+pub(crate) fn edit_when_created(app: &SolveApp) -> bool {
+    app.preferences.dim_edit_when_created.get(&crate::profile::active(app).id).copied().unwrap_or(false)
+}
+
+pub(crate) fn set_edit_when_created(app: &mut SolveApp, on: bool) {
+    if edit_when_created(app) != on {
+        let profile = crate::profile::active(app).id.clone();
+        app.preferences.dim_edit_when_created.insert(profile, on);
+    }
+}
+
 /// OK: one `drawing.dim.edit` with what changed (nothing when nothing did). False when refused.
 pub(crate) fn apply(app: &mut SolveApp, p: &mut DimPanel) -> bool {
-    app.drawing.dim_edit_when_created = p.edit_when_created;
+    set_edit_when_created(app, p.edit_when_created);
     let Some(params) = edits(p) else { return true };
     match app.run("drawing.dim.edit", params) {
         Ok(_) => true,
@@ -449,7 +461,7 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context, mut p: DimPanel) {
             },
         );
     p.edit_when_created = edit_when_created;
-    app.drawing.dim_edit_when_created = edit_when_created;
+    set_edit_when_created(app, edit_when_created);
     if closed || action == crate::ui_kit::Action::Cancel {
         app.drawing.panel = None;
         return;

@@ -553,6 +553,10 @@ preference_settings! {
     /// Per profile id, each ribbon split button's last pick: drop-down id → command id
     /// (`split_buttons`, under the profile's `workflow.sticky_split_buttons`). Not written while
     /// empty, so a profile without the switch leaves the file as it was.
+    /// Per profile id, Edit Dimension's "edit dimension when created" (each dimension placed
+    /// opens the panel); absent = off. Not written while empty.
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    dim_edit_when_created: std::collections::BTreeMap<String, bool> = Default::default();
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     split_faces: std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>> = Default::default();
     /// Interface language (a registered locale ID).

@@ -25,8 +25,6 @@ pub(crate) struct DrawingUi {
     pub(crate) missing: Option<((usize, usize), Vec<solidcraft_engine::doc::drawing::ViewId>)>,
     /// A placed view being dragged on the sheet (Task 6).
     pub(crate) drag: Option<crate::drawing_place::Drag>,
-    /// Edit Dimension's "edit dimension when created": each dimension placed opens the panel.
-    pub(crate) dim_edit_when_created: bool,
     /// The last annotation command the note tools sent, and its parameters (Task 9).
     pub(crate) notes_last_sent: Option<(&'static str, serde_json::Value)>,
     /// An export the save picker answered, waiting a frame for its status to paint (Task 11).

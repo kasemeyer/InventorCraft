@@ -467,7 +467,7 @@ fn the_live_dimension_is_fast_enough_for_hover() {
 fn the_lists_cancel_closes_a_panel_over_the_tool() {
     // R72: Cancel and OK act on the open panel first, as Esc does; the tool under it goes on.
     let (mut h, _) = front_view(inventor(Drawing));
-    h.app.drawing.dim_edit_when_created = true;
+    crate::drawing_dim_tool::set_edit_when_created(&mut h.app, true);
     alias(&mut h, "D");
     let hole = dimension(&mut h, &[[10.375, 8.0]], [11.5, 9.5]);
     assert_eq!(panel(&h).dim, hole);
@@ -478,4 +478,29 @@ fn the_lists_cancel_closes_a_panel_over_the_tool() {
     assert!(h.app.drawing.panel.is_none(), "Cancel closes the panel");
     assert!(matches!(h.app.drawing.tool, Some(DrawingTool::Dimension(_))), "the tool goes on");
     assert_eq!(h.app.session.undo.len(), undo);
+}
+
+#[test]
+fn edit_when_created_is_a_saved_preference_per_profile() {
+    // Final wave item 21: the footer's check box survives a new tab and a restart (prefs), and
+    // is kept per profile.
+    let (mut h, _) = front_view(inventor(Drawing));
+    assert!(!crate::drawing_dim_tool::edit_when_created(&h.app));
+    crate::drawing_dim_tool::set_edit_when_created(&mut h.app, true);
+    let inventor_id = crate::profile::active(&h.app).id.clone();
+    assert_eq!(h.app.preferences.dim_edit_when_created.get(&inventor_id), Some(&true));
+    // A fresh drawing UI (tab switch) keeps it.
+    h.app.drawing = Default::default();
+    assert!(crate::drawing_dim_tool::edit_when_created(&h.app));
+    // Saved and read back.
+    let saved = serde_json::to_value(&h.app.preferences).unwrap();
+    assert_eq!(saved["dim_edit_when_created"][inventor_id.as_str()], json!(true));
+    let back: crate::prefs::Prefs = serde_json::from_value(saved).unwrap();
+    assert_eq!(back.dim_edit_when_created.get(&inventor_id), Some(&true));
+    // Another profile has its own (off).
+    let other = crate::scenario::Harness::new();
+    assert_ne!(crate::profile::active(&other.app).id, inventor_id);
+    let mut other = other;
+    other.app.preferences.dim_edit_when_created = h.app.preferences.dim_edit_when_created.clone();
+    assert!(!crate::drawing_dim_tool::edit_when_created(&other.app));
 }
