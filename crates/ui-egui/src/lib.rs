@@ -2177,4 +2177,6 @@ mod starts_new_design_tests;
 #[cfg(test)]
 mod test_support;
 #[cfg(test)]
+mod two_minute_drawing_tests;
+#[cfg(test)]
 mod two_minute_part_tests;

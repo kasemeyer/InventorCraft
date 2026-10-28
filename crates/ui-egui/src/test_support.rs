@@ -38,6 +38,51 @@ pub(crate) fn block_part(dir: &std::path::Path) -> String {
     path
 }
 
+/// Type an alias as a user does: each letter pressed and released, then wait out the
+/// profile's prefix wait.
+pub(crate) fn alias(h: &mut Harness, keys: &str) {
+    h.app.alias.fired = None;
+    for c in keys.chars() {
+        h.step(&json!({"key": c.to_string()})).unwrap();
+    }
+    // A prefix waits the profile's alias_wait_ms for the next letter (an exact match fired at once).
+    if h.app.alias.fired.is_none() {
+        h.frames(frames_for(f64::from(crate::profile::active(&h.app).alias_wait_ms) / 1000.0));
+    }
+    assert!(h.app.alias.fired.is_some(), "alias {keys} ran nothing");
+    h.frames(3);
+}
+
+/// Harness frames (60 Hz) that cover `seconds`, plus one.
+pub(crate) fn frames_for(seconds: f64) -> usize {
+    (seconds * 60.0).ceil() as usize + 1
+}
+
+/// Let the last clicks expire (egui's double-click delay), so the next click is a new one.
+pub(crate) fn clicks_expire(h: &mut Harness) {
+    let delay = h.ctx.options(|o| o.input_options.max_double_click_delay);
+    h.frames(frames_for(delay));
+}
+
+/// A right-click at `at`: under Inventor the marking menu opens there.
+pub(crate) fn right_click(h: &mut Harness, at: Value) {
+    h.step(&json!({"click": at, "button": "right"})).unwrap();
+    h.frames(2);
+}
+
+/// Click the drawn menu entry `id`: a ring pill (`marking:`) or a list row (`menu:`).
+pub(crate) fn menu_pick(h: &mut Harness, prefix: &str, id: &str) {
+    let handle = format!("{prefix}:{id}");
+    assert!(
+        crate::scenario::handle_at(&handle).is_some(),
+        "{handle} is not drawn: {:?} {}",
+        crate::scenario::handles(prefix),
+        crate::context_menu::describe(&h.app)
+    );
+    h.step(&json!({"click": {"handle": handle}})).unwrap();
+    h.frames(3);
+}
+
 pub(crate) fn sample_app() -> SolveApp {
     app_with_script(solidcraft_engine::sample::script())
 }

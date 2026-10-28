@@ -9,48 +9,8 @@ use solidcraft_engine::doc::FeatureKind;
 use solidcraft_engine::geom::Vec3;
 
 use crate::dialogs::Kind;
-use crate::scenario::{Harness, handle_at, handles};
-use crate::test_support::inventor;
-
-/// Type an alias as a user does: each letter pressed and released, then wait out the
-/// profile's prefix wait.
-fn alias(h: &mut Harness, keys: &str) {
-    h.app.alias.fired = None;
-    for c in keys.chars() {
-        h.step(&json!({"key": c.to_string()})).unwrap();
-    }
-    // A prefix waits the profile's alias_wait_ms for the next letter (an exact match fired at once).
-    if h.app.alias.fired.is_none() {
-        h.frames(frames_for(f64::from(crate::profile::active(&h.app).alias_wait_ms) / 1000.0));
-    }
-    assert!(h.app.alias.fired.is_some(), "alias {keys} ran nothing");
-    h.frames(3);
-}
-
-/// Harness frames (60 Hz) that cover `seconds`, plus one.
-fn frames_for(seconds: f64) -> usize {
-    (seconds * 60.0).ceil() as usize + 1
-}
-
-/// Let the last clicks expire (egui's double-click delay), so the next click is a new one.
-fn clicks_expire(h: &mut Harness) {
-    let delay = h.ctx.options(|o| o.input_options.max_double_click_delay);
-    h.frames(frames_for(delay));
-}
-
-/// A right-click at `at`: under Inventor the marking menu opens there.
-fn right_click(h: &mut Harness, at: Value) {
-    h.step(&json!({"click": at, "button": "right"})).unwrap();
-    h.frames(2);
-}
-
-/// Click the drawn menu entry `id`: a ring pill (`marking:`) or a list row (`menu:`).
-fn menu_pick(h: &mut Harness, prefix: &str, id: &str) {
-    let handle = format!("{prefix}:{id}");
-    assert!(handle_at(&handle).is_some(), "{handle} is not drawn: {:?} {}", handles(prefix), crate::context_menu::describe(&h.app));
-    h.step(&json!({"click": {"handle": handle}})).unwrap();
-    h.frames(3);
-}
+use crate::scenario::{Harness, handle_at};
+use crate::test_support::{alias, clicks_expire, inventor, menu_pick, right_click};
 
 fn ring_ids(h: &Harness) -> Vec<String> {
     crate::context_menu::describe(&h.app)["radial"].as_array().into_iter().flatten().map(|i| i["id"].as_str().unwrap().to_string()).collect()
