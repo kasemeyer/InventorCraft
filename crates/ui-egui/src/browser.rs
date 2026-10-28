@@ -363,6 +363,9 @@ pub(crate) struct Row<'a> {
     pub(crate) badges: &'a [&'a str],
     /// Lit by the selection or the 3D view's pointer: the item's own row, or a row leading to it.
     pub(crate) mark: Mark,
+    /// An automation name unique where the label repeats (a drawing's Border on each sheet):
+    /// its handles are published under this too, besides the label's.
+    pub(crate) handle: Option<&'a str>,
 }
 
 /// How a row relates to what the selection and the 3D view's pointer light.
@@ -452,6 +455,9 @@ pub(crate) fn draw_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
         crate::ui_kit::disclosure(ui.painter(), pos2(x + 6.0, cy), open, if hover_on == 1 { t.text } else { t.text_dim });
         out.fold = resp.clicked() && click_on == 1;
         crate::scenario::publish_handle(&format!("fold:{}", row.label), fold_r.center());
+        if let Some(h) = row.handle {
+            crate::scenario::publish_handle(&format!("fold:{h}"), fold_r.center());
+        }
     }
     x += 14.0;
     // Eye.
@@ -495,7 +501,11 @@ pub(crate) fn draw_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
     let galley = ui.painter().layout_job(job);
     let lw = galley.size().x;
     let elided = galley.elided;
-    crate::scenario::publish_rect(&format!("row_label:{}", row.label), Rect::from_min_size(pos2(x, cy - galley.size().y / 2.0), galley.size()));
+    let label_rect = Rect::from_min_size(pos2(x, cy - galley.size().y / 2.0), galley.size());
+    crate::scenario::publish_rect(&format!("row_label:{}", row.label), label_rect);
+    if let Some(h) = row.handle {
+        crate::scenario::publish_rect(&format!("row_label:{h}"), label_rect);
+    }
     ui.painter().with_clip_rect(ui.painter().clip_rect().intersect(r)).galley(pos2(x, cy - galley.size().y / 2.0), galley, col);
     let mut bx = (x + lw + 6.0).min(r.right() - 16.0);
     for b in row.badges {
@@ -504,6 +514,9 @@ pub(crate) fn draw_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
         bx += 15.0;
     }
     crate::scenario::publish_handle(&format!("row:{}", row.label), r.center());
+    if let Some(h) = row.handle {
+        crate::scenario::publish_handle(&format!("row:{h}"), r.center());
+    }
     let tip = match hover_on {
         1 => Some(if row.fold == Some(true) { crate::i18n::tr("ui.collapse") } else { crate::i18n::tr("ui.expand") }),
         2 => Some(if row.eye == Some(true) { crate::i18n::tr("ui.hide") } else { crate::i18n::tr("ui.show") }),

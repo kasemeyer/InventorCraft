@@ -121,7 +121,10 @@ fn sheet(app: &mut SolveApp, ui: &mut egui::Ui, m: &DrawingModel, index: usize, 
     }
     for (node, icon) in [("border", "rect"), ("title_block", "text")] {
         let label = node_label(app, node);
-        draw_row(ui, ui.id().with((&key, node)), &Row { depth: depth + 1, icon, label: &label, name: true, ..Default::default() });
+        // Every sheet has these two: their handles carry the sheet (`Border@sheet2`).
+        let handle = format!("{label}@sheet{}", index + 1);
+        let row = Row { depth: depth + 1, icon, label: &label, name: true, handle: Some(&handle), ..Default::default() };
+        draw_row(ui, ui.id().with((&key, node)), &row);
     }
     for v in m.views.values().filter(|v| v.sheet == index && v.parent.is_none_or(|p| !m.views.contains_key(&p))) {
         view(app, ui, m, v, missing, depth + 1);
@@ -200,7 +203,10 @@ fn view(app: &mut SolveApp, ui: &mut egui::Ui, m: &DrawingModel, v: &DrawingView
     if base {
         let icon = if v.model.kind == ModelKind::Assembly { "component" } else { "body" };
         let file = model_file(v);
-        let row = Row { depth: depth + 1, icon, label: &file, name: true, dim: missing.contains(&v.id), ..Default::default() };
+        // One model can sit under base views on several sheets: its handle carries the sheet and
+        // the view (`block.tcipart@sheet2:VIEW4`).
+        let handle = format!("{file}@sheet{}:{}", v.sheet + 1, v.identifier);
+        let row = Row { depth: depth + 1, icon, label: &file, name: true, dim: missing.contains(&v.id), handle: Some(&handle), ..Default::default() };
         draw_row(ui, ui.id().with((&key, "model")), &row);
     }
 }

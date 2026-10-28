@@ -265,3 +265,27 @@ fn the_header_counts_sheets_on_a_drawing() {
     h.frames(2);
     assert_eq!(header_count(&h.app), "1 body");
 }
+
+#[test]
+fn same_label_rows_have_handles_per_sheet() {
+    // Final wave item 6: Border / Title Block on each sheet and a model under base views on two
+    // sheets each have their own automation handle.
+    let (mut h, block, _, [v1, ..]) = three_views();
+    h.app.run("drawing.sheet.add", json!({})).unwrap();
+    drawing::activate_sheet(&mut h.app, 1);
+    let r = h.app.run("drawing.view.base", json!({"model": block, "orientation": "top", "scale": 1, "position": [10, 8]})).unwrap();
+    let v4 = r["view"].as_u64().unwrap();
+    h.frames(3);
+    let m = h.app.session.doc.drawing.clone().unwrap();
+    assert_eq!((m.views[&v1].sheet, m.views[&v4].sheet), (0, 1));
+    let id4 = m.views[&v4].identifier.clone();
+    let y = |name: &str| rect_of(&format!("row_label:{name}")).unwrap_or_else(|| panic!("no {name}")).center().y;
+    for label in ["Border", "Title Block"] {
+        let (one, two) = (y(&format!("{label}@sheet1")), y(&format!("{label}@sheet2")));
+        assert!(two > one, "{label}: sheet 2's row is below sheet 1's ({one} {two})");
+    }
+    let (one, two) = (y("block.tcipart@sheet1:VIEW1"), y(&format!("block.tcipart@sheet2:{id4}")));
+    assert!(two > one, "{one} {two}");
+    let handle = |name: &str| crate::scenario::handle_at(name);
+    assert!(handle("row:Border@sheet2").is_some() && handle("row:Border").is_some(), "the label's handle stays");
+}
