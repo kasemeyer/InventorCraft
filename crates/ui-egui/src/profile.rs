@@ -86,8 +86,8 @@ impl Profile {
         &self.ribbons[kind_index(kind)]
     }
 
-    /// Which of the profile's ribbons a kind shows: kinds with the same ribbon (every kind under
-    /// SolidCraft) answer the same, so moving between them keeps the ribbon's tab.
+    /// Which of the profile's ribbons a kind shows: kinds with the same ribbon (a part and an
+    /// assembly under SolidCraft) answer the same, so moving between them keeps the ribbon's tab.
     pub fn ribbon_identity(&self, kind: DocumentKind) -> usize {
         self.shared[kind_index(kind)]
     }
@@ -125,8 +125,8 @@ impl Ribbon {
             .unwrap_or_default()
     }
 
-    /// Where a command lives: SolidCraft answers exactly as `workspace::destination`; a data
-    /// profile answers with the first (tab, panel) that lists it, searching the home tab first,
+    /// Where a command lives: SolidCraft's Part and Assembly ribbons answer exactly as
+    /// `workspace::destination`; SolidCraft's Drawing ribbon and a data profile answer with the first (tab, panel) that lists it, searching the home tab first,
     /// then the other `Always` tabs in order, then the rest; a visible panel anywhere wins over
     /// a hidden one.
     pub fn destination(&self, command: &str) -> Option<(&str, &str)> {
@@ -470,42 +470,85 @@ pub struct OriginEntry {
     pub label: Option<String>,
 }
 
-/// Upstream SolidCraft's ribbon, read from the `workspace` tables, for every document kind.
-pub fn solidcraft() -> Profile {
-    let specs = command_specs();
-    let tabs = workspace::TABS
+/// One of SolidCraft's `workspace` tabs, its panels from `SECTIONS`.
+fn solidcraft_tab(tab: &str, shown: Shown, specs: &[&CommandSpec]) -> RibbonTab {
+    RibbonTab {
+        id: tab.into(),
+        label: None,
+        shown,
+        panels: workspace::panels(tab)
+            .into_iter()
+            .filter_map(|panel| {
+                let (commands, promoted) = workspace::layout(tab, panel, specs)?;
+                Some(RibbonPanel {
+                    id: panel.into(),
+                    label: None,
+                    promoted,
+                    commands: commands.iter().map(|c| c.id.to_string()).collect(),
+                    shown: Shown::Always,
+                    groups: workspace::groups(tab, panel)
+                        .iter()
+                        .map(|g| Group { label: g.label.into(), commands: g.ids.iter().map(|id| id.to_string()).collect() })
+                        .collect(),
+                    small: Vec::new(),
+                    grid: Vec::new(),
+                    hidden: false,
+                    dropdowns: Vec::new(),
+                })
+            })
+            .collect(),
+    }
+}
+
+/// SolidCraft's Drawing ribbon (spec §5.2): `DRAWING_TABS`, the DRAWING tab's panels from
+/// `DRAWING_SECTIONS` (R67, R90) and VIEW as on a part. Its homes are its own panels'.
+fn solidcraft_drawing_ribbon(specs: &[&CommandSpec]) -> Ribbon {
+    let tabs = workspace::DRAWING_TABS
         .iter()
-        .map(|t| (*t, Shown::Always))
-        .chain([("SKETCH", Shown::Sketch), ("SHEET METAL", Shown::Always), ("RENDER", Shown::Render)])
-        .map(|(tab, shown)| RibbonTab {
-            id: tab.into(),
-            label: None,
-            shown,
-            panels: workspace::panels(tab)
+        .map(|&tab| {
+            let own: Vec<&workspace::Section> = workspace::DRAWING_SECTIONS.iter().filter(|s| s.tab == tab).collect();
+            if own.is_empty() {
+                return solidcraft_tab(tab, Shown::Always, specs);
+            }
+            let panels = own
                 .into_iter()
-                .filter_map(|panel| {
-                    let (commands, promoted) = workspace::layout(tab, panel, &specs)?;
+                .filter_map(|s| {
+                    let (commands, promoted) = workspace::drawing_layout(s.panel, specs)?;
                     Some(RibbonPanel {
-                        id: panel.into(),
+                        id: s.panel.into(),
                         label: None,
                         promoted,
                         commands: commands.iter().map(|c| c.id.to_string()).collect(),
                         shown: Shown::Always,
-                        groups: workspace::groups(tab, panel)
-                            .iter()
-                            .map(|g| Group { label: g.label.into(), commands: g.ids.iter().map(|id| id.to_string()).collect() })
-                            .collect(),
+                        groups: Vec::new(),
                         small: Vec::new(),
                         grid: Vec::new(),
                         hidden: false,
                         dropdowns: Vec::new(),
                     })
                 })
-                .collect(),
+                .collect();
+            RibbonTab { id: tab.into(), label: None, shown: Shown::Always, panels }
         })
+        .collect();
+    let mut ribbon = Ribbon { tabs, home: None, homes: BTreeMap::new() };
+    ribbon.homes = ribbon.search_homes();
+    ribbon
+}
+
+/// Upstream SolidCraft's ribbon, read from the `workspace` tables: one ribbon for a part and an
+/// assembly, and a minimal one for a drawing.
+pub fn solidcraft() -> Profile {
+    let specs = command_specs();
+    let tabs = workspace::TABS
+        .iter()
+        .map(|t| (*t, Shown::Always))
+        .chain([("SKETCH", Shown::Sketch), ("SHEET METAL", Shown::Always), ("RENDER", Shown::Render)])
+        .map(|(tab, shown)| solidcraft_tab(tab, shown, &specs))
         .collect();
     let homes = specs.iter().filter_map(|c| workspace::destination(c).map(|(t, p)| (c.id.to_string(), (t.to_string(), p.to_string())))).collect();
     let ribbon = Ribbon { tabs, home: None, homes };
+    let ribbons = [ribbon.clone(), ribbon, solidcraft_drawing_ribbon(&specs)];
     Profile {
         id: SOLIDCRAFT.into(),
         name: "profile.solidcraft".into(),
@@ -529,8 +572,8 @@ pub fn solidcraft() -> Profile {
         browser: BrowserLayout::default(),
         omitted: BTreeMap::new(),
         workflow: crate::profile_workflow::Workflow::default(),
-        ribbons: [ribbon.clone(), ribbon.clone(), ribbon],
-        shared: [0, 0, 0],
+        shared: shared(&ribbons),
+        ribbons,
     }
 }
 
@@ -1096,3 +1139,7 @@ mod shell_tests;
 #[cfg(test)]
 #[path = "profile_drawing_tests.rs"]
 mod drawing_tests;
+
+#[cfg(test)]
+#[path = "profile_solidcraft_drawing_tests.rs"]
+mod solidcraft_drawing_tests;

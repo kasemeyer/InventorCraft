@@ -374,11 +374,15 @@ fn switching_kinds_keeps_the_tab_when_the_ribbon_is_the_same() {
     let mut h = Harness::new();
     h.app.ui.tab = "INSPECT".into();
     h.frame();
-    for kind in [Part, Drawing, Assembly] {
+    for kind in [Part, Assembly] {
         h.app.session.doc_mut().kind = kind;
         h.frame();
-        assert_eq!(h.app.ui.tab, "INSPECT", "{kind:?}: SolidCraft has one ribbon for every kind");
+        assert_eq!(h.app.ui.tab, "INSPECT", "{kind:?}: SolidCraft has one ribbon for a part and an assembly");
     }
+    // Updated by design (Plan D-2 Task 2, R67): SolidCraft's drawing ribbon is another ribbon.
+    h.app.session.doc_mut().kind = Drawing;
+    h.frame();
+    assert_eq!(h.app.ui.tab, "DRAWING", "SolidCraft's drawing ribbon is another ribbon: its home tab");
 
     let mut h = inventor(Part);
     h.app.ui.tab = "INSPECT".into();

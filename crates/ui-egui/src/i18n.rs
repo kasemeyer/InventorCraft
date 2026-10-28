@@ -382,7 +382,7 @@ mod tests {
         let texts = english_texts();
         let mut wanted: Vec<&str> = crate::toolbar::TABS.to_vec();
         wanted.push(crate::toolbar_custom::WORKSPACE);
-        for section in crate::workspace::SECTIONS {
+        for section in crate::workspace::SECTIONS.iter().chain(crate::workspace::DRAWING_SECTIONS) {
             wanted.push(section.tab);
             wanted.push(section.panel);
         }

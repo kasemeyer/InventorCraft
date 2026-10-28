@@ -6,6 +6,10 @@ use solidcraft_engine::doc::FeatureKind;
 
 pub const TABS: &[&str] = &["MODEL", "SURFACE", "ASSEMBLE", "INSERT", "INSPECT", "MANAGE", "VIEW"];
 
+/// SolidCraft's tabs for a drawing document: its own DRAWING tab (`DRAWING_SECTIONS`), then the
+/// usual VIEW tab (spec §5.2, R67).
+pub const DRAWING_TABS: &[&str] = &["DRAWING", "VIEW"];
+
 /// Reading order of the compact, three-column constraint gallery. Icons come from each spec.
 pub const CONSTRAINT_GALLERY: &[&str] = &[
     "sketch.constraint.horizontal_vertical",
@@ -327,6 +331,28 @@ pub const SECTIONS: &[Section] = &[
     },
 ];
 
+/// A drawing's own panels, tab DRAWING (spec §5.2). Read only by `profile::solidcraft()` for its
+/// Drawing ribbon (R67, R90): `destination`, `layout` and `panels` never see these rows, so the
+/// Part and Assembly homes, command search and agent cursor stay as they were.
+pub const DRAWING_SECTIONS: &[Section] = &[
+    Section { tab: "DRAWING", panel: "VIEWS", promoted: 2, ids: &["drawing.view.base", "drawing.view.projected"] },
+    Section {
+        tab: "DRAWING",
+        panel: "ANNOTATE",
+        promoted: 6,
+        ids: &[
+            "drawing.dim.general",
+            "drawing.note.text",
+            "drawing.note.leader",
+            "drawing.centermark",
+            "drawing.centerline.bisector",
+            "drawing.note.hole",
+        ],
+    },
+    Section { tab: "DRAWING", panel: "SHEET", promoted: 2, ids: &["drawing.sheet.add", "drawing.update"] },
+    Section { tab: "DRAWING", panel: "EXPORT", promoted: 2, ids: &["drawing.export.pdf", "drawing.export.dxf"] },
+];
+
 /// Compact source labels for painted big buttons only. Menus, search and tooltips
 /// retain the engine label. Route these through `tr_label`, like other UI labels.
 pub const RIBBON_LABELS: &[(&str, &str)] = &[
@@ -356,6 +382,12 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("contact.enable_sets", "Contact Sets"),
     ("document.inspect", "Inspect"),
     ("document.units", "Units"),
+    ("drawing.centerline.bisector", "Centerline"),
+    ("drawing.dim.general", "Dimension"),
+    ("drawing.export.dxf", "Export DXF"),
+    ("drawing.export.pdf", "Export PDF"),
+    ("drawing.note.hole", "Hole Note"),
+    ("drawing.view.projected", "Projected"),
     ("inspect.accessibility", "Access"),
     ("inspect.center_of_mass", "Mass Center"),
     ("inspect.curvature_comb", "Curv. Comb"),
@@ -460,6 +492,14 @@ pub fn layout<'a>(tab: &str, panel: &str, specs: &[&'a CommandSpec]) -> Option<(
             out.push(*c);
         }
     }
+    Some((out, section.promoted))
+}
+
+/// A `DRAWING_SECTIONS` panel's commands, exactly the ids it lists (no `destination` fallback),
+/// with its promoted count.
+pub fn drawing_layout<'a>(panel: &str, specs: &[&'a CommandSpec]) -> Option<(Vec<&'a CommandSpec>, usize)> {
+    let section = DRAWING_SECTIONS.iter().find(|s| s.panel == panel)?;
+    let out = section.ids.iter().filter_map(|id| specs.iter().find(|c| c.id == *id).copied()).collect();
     Some((out, section.promoted))
 }
 

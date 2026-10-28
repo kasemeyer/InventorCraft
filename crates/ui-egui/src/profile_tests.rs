@@ -34,11 +34,22 @@ fn has(problems: &[String], text: &str) -> bool {
     problems.iter().any(|p| p.contains(text))
 }
 
+/// Updated by design (R70, R67): Part and Assembly from `SECTIONS`, Drawing from its own
+/// `DRAWING_SECTIONS` through `drawing_layout`.
 #[test]
 fn solidcraft_profile_reproduces_the_workspace_table() {
     let p = solidcraft();
     let specs = command_specs();
-    for kind in DocumentKind::ALL {
+    for s in crate::workspace::DRAWING_SECTIONS {
+        let panel = p.ribbon(DocumentKind::Drawing).tab(s.tab).unwrap().panel(s.panel).unwrap();
+        let (cmds, promoted) = crate::workspace::drawing_layout(s.panel, &specs).unwrap();
+        let want: Vec<&str> = cmds.iter().map(|c| c.id).collect();
+        let got: Vec<&str> = panel.commands.iter().map(String::as_str).collect();
+        assert_eq!(got, want, "Drawing {}/{}", s.tab, s.panel);
+        assert_eq!(want, s.ids, "Drawing {}/{}: listed ids only", s.tab, s.panel);
+        assert_eq!((panel.promoted, promoted), (s.promoted, s.promoted), "Drawing {}/{}", s.tab, s.panel);
+    }
+    for kind in [DocumentKind::Part, DocumentKind::Assembly] {
         for s in crate::workspace::SECTIONS {
             let panel = p.ribbon(kind).tab(s.tab).unwrap().panel(s.panel).unwrap();
             let (cmds, _) = crate::workspace::layout(s.tab, s.panel, &specs).unwrap();
