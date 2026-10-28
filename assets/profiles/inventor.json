@@ -63,7 +63,11 @@
       "assembly_empty": {"ring": ["component.insert_design", "", "", "solid.move", "component.create", "", "edit.undo", "inspect.measure"],
                  "overflow": ["joint.create", "-", "ui.previousView", "ui.home", "-", "ui.createDrawingView"],
                  "evidence": "docs/evidence/screenshots/marking-menus/assembly-empty-crop.png",
-                 "unmapped": ["NE: Constraint", "E: Pattern Component", "SW: Free Rotate", "list: Replace from Content Center…", "list: Make Layout", "list: Create Pipe Run…", "list: Create Harness…", "list: Assemble", "list: Show Relationships", "list: Hide All", "list: Create iMate", "list: Dimension Display", "list: Help Topics…"]}
+                 "unmapped": ["NE: Constraint", "E: Pattern Component", "SW: Free Rotate", "list: Replace from Content Center…", "list: Make Layout", "list: Create Pipe Run…", "list: Create Harness…", "list: Assemble", "list: Show Relationships", "list: Hide All", "list: Create iMate", "list: Dimension Display", "list: Help Topics…"]},
+      "drawing_empty": {"ring": ["drawing.view.base", "drawing.note.leader", "drawing.note.hole", "drawing.centermark", "", "drawing.dim.general", "edit.undo", ""],
+                 "overflow": ["ui.repeat", "-", "drawing.sheet.add", "ui.previousSheet", "ui.nextSheet", "-", "ui.previousView"],
+                 "evidence": "docs/evidence/screenshots/drawing/marking-menu.png",
+                 "unmapped": ["S: Retrieve Model Annotations", "NW: Balloon", "list: Copy", "list: Measure", "list: Make All Views Precise", "list: Make All Views Raster", "list: Defer Updates", "list: iLogic", "list: Zoom", "list: Pan", "list: Help Topics…"]}
     }
   },
   "home": {"part": "MODEL", "drawing": "PLACE VIEWS"},

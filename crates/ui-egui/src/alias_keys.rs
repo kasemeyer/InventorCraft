@@ -222,6 +222,9 @@ pub(crate) fn run_ui_action(app: &mut SolveApp, id: &str) -> bool {
             crate::view_history::previous(app);
         }
         "ui.createDrawingView" => crate::documents::create_drawing_view(app),
+        // Only a drawing has sheets to switch.
+        "ui.previousSheet" => crate::drawing_menu::step_sheet(app, -1),
+        "ui.nextSheet" => crate::drawing_menu::step_sheet(app, 1),
         _ => return false,
     }
     true

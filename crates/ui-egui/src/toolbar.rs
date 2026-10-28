@@ -2378,6 +2378,9 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 // Copy, Cut and Paste (`edit_clipboard::handle`).
                 Key::C | Key::X | Key::V if !mods.shift && !mods.alt => {}
                 Key::S => save(app),
+                // Previous and Next Sheet, in every profile, on a drawing only.
+                Key::PageUp if crate::sheet_canvas::shows(app) => drop(crate::alias_keys::run_ui_action(app, "ui.previousSheet")),
+                Key::PageDown if crate::sheet_canvas::shows(app) => drop(crate::alias_keys::run_ui_action(app, "ui.nextSheet")),
                 _ => crate::keymap::press(app, &crate::keymap::key_name(k, mods), repeat),
             }
             continue;

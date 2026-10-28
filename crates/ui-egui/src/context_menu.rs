@@ -1174,6 +1174,19 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.drawing.moveDim" | "ui.drawing.precision" | "ui.drawing.editDim" | "ui.drawing.hideExt" | "ui.drawing.showExt" => {
             crate::drawing_dim_tool::run_menu(app, &item.id, &p);
         }
+        // A note's list (Task 10).
+        "ui.drawing.editNote" => {
+            if let Some(handle) = id_of(&p, "handle") {
+                crate::drawing_notes_tool::open_edit(app, handle);
+            }
+        }
+        "ui.drawing.moveNote" => {
+            if let Some(handle) = id_of(&p, "handle") {
+                crate::drawing_notes_tool::start_move(app, handle);
+            }
+        }
+        "ui.previousSheet" => crate::drawing_menu::step_sheet(app, -1),
+        "ui.nextSheet" => crate::drawing_menu::step_sheet(app, 1),
         // Leader Text's list (Task 9).
         "ui.drawing.back" | "ui.drawing.singleSegment" => crate::drawing_notes_tool::run_menu(app, &item.id),
         "ui.drawing.openModel" => {

@@ -42,6 +42,14 @@ pub(crate) struct SceneCache {
     scene: Arc<SheetScene>,
 }
 
+#[cfg(test)]
+impl SceneCache {
+    /// The sheet the scene was drawn for.
+    pub(crate) fn sheet(&self) -> usize {
+        self.sheet
+    }
+}
+
 /// The theme colours a scene uses.
 fn colors(t: &Tokens) -> [egui::Color32; 6] {
     [t.sheet_paper, t.sheet_border, t.warning, t.accent, t.sel_edge, t.sheet_surround]
@@ -324,11 +332,15 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         && !crate::mouse_gesture::took_press(app)
         && let Some(p) = input.hover
     {
-        // A right-click on a dimension selects it, so its list opens (Task 8).
-        if app.drawing.tool.is_none()
-            && let Some(dim) = crate::drawing_dim_tool::dimension_at(app, rect, p)
-        {
-            app.drawing.selection = vec![PaperPick::Dimension { handle: dim }];
+        // A right-click on a dimension (Task 8) or a note selects it, so its list opens (Task 10).
+        if app.drawing.tool.is_none() {
+            if let Some(dim) = crate::drawing_dim_tool::dimension_at(app, rect, p) {
+                app.drawing.selection = vec![PaperPick::Dimension { handle: dim }];
+            } else if let Some(hit) = crate::drawing_notes_tool::annotation_under(app, rect, p)
+                && !app.drawing.selection.contains(&hit)
+            {
+                app.drawing.selection = vec![hit];
+            }
         }
         crate::context_menu::open_for(app, p, crate::context_menu::Target::Viewport);
     }

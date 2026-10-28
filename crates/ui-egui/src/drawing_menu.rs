@@ -1,6 +1,7 @@
 //! The list a right-click on a drawing sheet opens (R15): the empty-sheet list (Task 3), a
 //! running tool's rows (Tasks 6, 9), the view list (Tasks 5, 7), the dimension list (Task 8) and
-//! the note list (Task 10). Every row is built by `marking_menu::item` (R72), so a drawing's
+//! the note list (Task 10). Under a profile with a `drawing_empty` layout the empty sheet's
+//! right-click is that ring and its list instead (Task 10); sheet switching lives here too. Every row is built by `marking_menu::item` (R72), so a drawing's
 //! Done, Cancel, OK and Delete answer to the drawing's own tool, panel and selection.
 
 use serde_json::json;
@@ -25,10 +26,13 @@ const DIMENSION: [&str; 7] =
 
 /// The sheet's right-click list now.
 pub(crate) fn items(app: &SolveApp) -> Vec<Item> {
-    if app.drawing.tool.is_none()
-        && let [PaperPick::Dimension { handle }] = app.drawing.selection.as_slice()
-    {
-        return dimension_items(app, *handle);
+    if app.drawing.tool.is_none() {
+        match app.drawing.selection.as_slice() {
+            [PaperPick::Dimension { handle }] => return dimension_items(app, *handle),
+            [PaperPick::View { view } | PaperPick::ViewEdge { view, .. }] => return view_items(app, *view),
+            [PaperPick::Annotation { handle }] => return note_items(app, *handle),
+            _ => {}
+        }
     }
     let (ctx, ids): (MenuContext, &[&str]) = if crate::drawing_notes_tool::leader_running(app) {
         (MenuContext::Tool, &LEADER)
@@ -60,6 +64,32 @@ fn dimension_items(app: &SolveApp, dim: u64) -> Vec<Item> {
             }
         })
         .collect()
+}
+
+/// A note's, leader's or mark's list: Edit Note (only where the pick has text, R75), Move Note
+/// and Delete.
+fn note_items(app: &SolveApp, handle: u64) -> Vec<Item> {
+    let params = json!({ "handle": handle });
+    let has_text = app.session.doc.drawing.as_deref().and_then(|m| solidcraft_engine::drawing::note_at(m, handle)).is_some();
+    let edit = crate::marking_menu::item(app, "ui.drawing.editNote", MenuContext::Empty).with(params.clone());
+    let edit = if has_text { edit } else { edit.on(false) };
+    let delete = crate::marking_menu::item(app, "ui.delete", MenuContext::Empty);
+    vec![edit, crate::marking_menu::item(app, "ui.drawing.moveNote", MenuContext::Empty).with(params), delete]
+}
+
+/// The sheet `delta` sheets from the active one, if there is one (no wrap).
+pub(crate) fn sheet_step(app: &SolveApp, delta: isize) -> Option<usize> {
+    let m = app.session.doc.drawing.as_deref()?;
+    let at = app.session.drawing_sheet.min(m.sheets.len().saturating_sub(1));
+    at.checked_add_signed(delta).filter(|i| *i < m.sheets.len())
+}
+
+/// Previous or Next Sheet (Ctrl+PageUp / Ctrl+PageDown, the ring's list): the sheet before or
+/// after the active one becomes active; nothing at either end.
+pub(crate) fn step_sheet(app: &mut SolveApp, delta: isize) {
+    if let Some(index) = sheet_step(app, delta) {
+        crate::browser::drawing::activate_sheet(app, index);
+    }
 }
 
 /// A view's list (R40), in the browser (Task 7) and for a view selected on the sheet (Task 10):

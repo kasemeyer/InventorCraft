@@ -61,6 +61,8 @@ pub(crate) enum NoteTool {
     Bisector { first: Option<(u64, [f64; 2])> },
     /// Hole and Thread Note: the hole's edge (its view and the click).
     HoleNote { edge: Option<(u64, [f64; 2])> },
+    /// The list's Move Note: the next click puts annotation `handle` there, then the tool ends.
+    Move { handle: u64 },
 }
 
 /// Text justification, sent as `left`, `center` or `right`.
@@ -213,6 +215,11 @@ pub(crate) fn start_bisector(app: &mut SolveApp) {
     begin(app, NoteTool::Bisector { first: None });
 }
 
+/// The list's Move Note: the next click puts note `handle`'s text (a mark's centre) there.
+pub(crate) fn start_move(app: &mut SolveApp, handle: u64) {
+    begin(app, NoteTool::Move { handle });
+}
+
 /// End the tool (Esc, Done, Cancel): what it placed stays; its picks, rubber band and an open
 /// text panel for a note not yet placed go.
 pub(crate) fn finish(app: &mut SolveApp) {
@@ -239,6 +246,7 @@ pub(crate) fn prompt(app: &SolveApp) -> Option<&'static str> {
         NoteTool::CenterMark { .. } => "ui.drawing.prompt_centermark",
         NoteTool::Bisector { .. } => "ui.drawing.prompt_bisector",
         NoteTool::HoleNote { .. } => "ui.drawing.prompt_hole",
+        NoteTool::Move { .. } => "ui.drawing.prompt_move_note",
     })
 }
 
@@ -264,6 +272,14 @@ fn tolerance(app: &SolveApp, rect: Rect) -> f64 {
 fn edge_at(app: &SolveApp, rect: Rect, at: [f64; 2]) -> Option<(u64, CurveKind, PaperPick)> {
     match pick(&app.session, at, tolerance(app, rect)) {
         Some(p @ PaperPick::ViewEdge { view, curve, .. }) => Some((view, curve, p)),
+        _ => None,
+    }
+}
+
+/// The annotation (note, leader, centre mark, centreline) under screen point `p`, if any.
+pub(crate) fn annotation_under(app: &SolveApp, rect: Rect, p: Pos2) -> Option<PaperPick> {
+    match pick(&app.session, paper_at(app, rect, p), tolerance(app, rect)) {
+        Some(hit @ PaperPick::Annotation { .. }) => Some(hit),
         _ => None,
     }
 }
@@ -303,6 +319,13 @@ pub(crate) fn input(app: &mut SolveApp, rect: Rect, resp: &Response, input: &Cam
     }
     let Some(p) = hover else { return true };
     let at = paper_at(app, rect, p);
+    if let Some(NoteTool::Move { handle }) = tool(app).cloned() {
+        if clicked {
+            send(app, "drawing.annotation.move", json!({ "handle": handle, "placement": at }));
+            finish(app);
+        }
+        return true;
+    }
     if clicked {
         click(app, rect, at);
     }
@@ -417,6 +440,8 @@ fn click(app: &mut SolveApp, rect: Rect, at: [f64; 2]) {
                 *edge = None;
             }
         }
+        // Move Note takes its click in `input`.
+        NoteTool::Move { .. } => {}
         NoteTool::HoleNote { edge: None } => {
             let Some((view, _, hit)) = edge else { return };
             // Only a hole's edge is taken: the note tried on a scratch copy says so first.

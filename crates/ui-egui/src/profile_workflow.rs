@@ -97,11 +97,14 @@ pub enum MenuContext {
     AssemblyComponent,
     /// An assembly with nothing selected.
     AssemblyEmpty,
+    /// A drawing's sheet with no drawing tool running, no drawing panel open and nothing
+    /// selected (spec §2.11). Every other drawing right-click is a list (R72).
+    DrawingEmpty,
 }
 
 impl MenuContext {
     /// Every context a marking menu must lay out.
-    pub const ALL: [MenuContext; 11] = [
+    pub const ALL: [MenuContext; 12] = [
         MenuContext::Face,
         MenuContext::Edge,
         MenuContext::Body,
@@ -113,6 +116,7 @@ impl MenuContext {
         MenuContext::Panel,
         MenuContext::AssemblyComponent,
         MenuContext::AssemblyEmpty,
+        MenuContext::DrawingEmpty,
     ];
 
     fn name(self) -> &'static str {
@@ -128,6 +132,7 @@ impl MenuContext {
             MenuContext::Panel => "panel",
             MenuContext::AssemblyComponent => "assembly_component",
             MenuContext::AssemblyEmpty => "assembly_empty",
+            MenuContext::DrawingEmpty => "drawing_empty",
         }
     }
 }
@@ -175,6 +180,8 @@ pub const MARKING_ACTIONS: &[&str] = &[
     "ui.showAll",
     "ui.findBrowser",
     "ui.createDrawingView",
+    "ui.previousSheet",
+    "ui.nextSheet",
 ];
 
 /// The ring has this many slots, clockwise from north.

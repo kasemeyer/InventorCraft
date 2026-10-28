@@ -279,7 +279,7 @@ fn a_rowless_drawing_command_runs_directly() {
 
 #[test]
 fn a_sheet_never_shows_a_part_menu() {
-    for h in [inventor(DocumentKind::Drawing), Harness::new()] {
+    for (inventor_profile, h) in [(true, inventor(DocumentKind::Drawing)), (false, Harness::new())] {
         let mut h = new_drawing(h);
         let rect = canvas();
         let empty = screen_of(&h.app, rect, [25.0, 15.0]);
@@ -290,8 +290,15 @@ fn a_sheet_never_shows_a_part_menu() {
         let ids = |k: &str| menu[k].as_array().unwrap().iter().map(|i| i["id"].as_str().unwrap().to_string()).collect::<Vec<_>>();
         let (ring, list) = (ids("radial"), ids("items"));
         assert!(ring.iter().chain(&list).all(|id| !id.starts_with("solid.") && !id.starts_with("sketch.")), "{ring:?} {list:?}");
-        assert_eq!(list, ["drawing.view.base", "drawing.sheet.add", "drawing.update", "-", "edit.undo"]);
-        assert!(ring.is_empty(), "no ring on an empty sheet until Task 10's: {ring:?}");
+        // Task 10 (changed by design): Inventor's empty sheet has its own ring from the capture;
+        // SolidCraft keeps the list.
+        if inventor_profile {
+            assert_eq!(ring[0], "drawing.view.base", "{ring:?}");
+            assert_eq!(list, ["ui.repeat", "-", "drawing.sheet.add", "ui.previousSheet", "ui.nextSheet", "-", "ui.previousView"]);
+        } else {
+            assert_eq!(list, ["drawing.view.base", "drawing.sheet.add", "drawing.update", "-", "edit.undo"]);
+            assert!(ring.is_empty(), "no ring without a drawing_empty layout: {ring:?}");
+        }
     }
 }
 

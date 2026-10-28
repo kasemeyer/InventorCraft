@@ -46,6 +46,16 @@ pub(crate) fn context(app: &SolveApp) -> MenuContext {
     if app.session.doc.kind == DocumentKind::Drawing && app.drawing.panel.is_some() {
         return MenuContext::Panel;
     }
+    // A drawing's empty sheet has its ring (Task 10); a running tool or a selection gets a list.
+    if app.session.doc.kind == DocumentKind::Drawing {
+        return if app.drawing.tool.is_some() {
+            MenuContext::Tool
+        } else if app.drawing.selection.is_empty() {
+            MenuContext::DrawingEmpty
+        } else {
+            MenuContext::Empty
+        };
+    }
     if app.tool.is_some() {
         return MenuContext::Tool;
     }
@@ -83,8 +93,8 @@ pub(crate) fn holds_keys(app: &SolveApp) -> bool {
 
 fn current(app: &SolveApp) -> Option<(MenuContext, &'static MenuLayout)> {
     let ctx = context(app);
-    // A drawing's sheet has no part or sketch ring: only a panel's (R15; Task 10 adds its own).
-    if app.session.doc.kind == DocumentKind::Drawing && ctx != MenuContext::Panel {
+    // A drawing's sheet has no part or sketch ring: only a panel's and its empty sheet's (R15).
+    if app.session.doc.kind == DocumentKind::Drawing && !matches!(ctx, MenuContext::Panel | MenuContext::DrawingEmpty) {
         return None;
     }
     layout(app)?.get(&ctx).map(|l| (ctx, l))
@@ -223,6 +233,14 @@ pub(crate) fn item(app: &SolveApp, id: &str, ctx: MenuContext) -> Item {
         "ui.drawing.editDim" => act("ui.drawing.editDim", "Edit Dimension", "edit").on(app.drawing.tool.is_none()),
         "ui.drawing.hideExt" => act("ui.drawing.hideExt", "Hide Extension Lines", "dimension"),
         "ui.drawing.showExt" => act("ui.drawing.showExt", "Show Extension Lines", "dimension"),
+        // Sheet switching (Ctrl+PageUp / Ctrl+PageDown in every profile; no wrap).
+        "ui.previousSheet" => {
+            act("ui.previousSheet", "Previous Sheet", "activate").key("Ctrl+PageUp").on(crate::drawing_menu::sheet_step(app, -1).is_some())
+        }
+        "ui.nextSheet" => act("ui.nextSheet", "Next Sheet", "activate").key("Ctrl+PageDown").on(crate::drawing_menu::sheet_step(app, 1).is_some()),
+        // A note's list (Task 10): Edit Note only where the pick has text (R75).
+        "ui.drawing.editNote" => act("ui.drawing.editNote", "Edit Note", "text").on(app.drawing.tool.is_none()),
+        "ui.drawing.moveNote" => act("ui.drawing.moveNote", "Move Note", "move").on(app.drawing.tool.is_none()),
         "ui.drawing.properties" => act("ui.drawing.properties", "Drawing Properties…", "settings").on(app.drawing.tool.is_none()),
         // A drawing of the open part or assembly (spec §2.1 path 2c).
         "ui.createDrawingView" => {

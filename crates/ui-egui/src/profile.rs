@@ -20,7 +20,16 @@ pub const INVENTOR: &str = "inventor";
 pub const SHIPPED: &str = INVENTOR;
 /// Alias and function-key targets that are UI actions rather than registry commands
 /// (`alias_keys::run_ui_action` runs them).
-pub const UI_ACTIONS: &[&str] = &["ui.preferences", "ui.view_cube", "ui.view_home", "ui.view_fit", "ui.view_previous", "ui.createDrawingView"];
+pub const UI_ACTIONS: &[&str] = &[
+    "ui.preferences",
+    "ui.view_cube",
+    "ui.view_home",
+    "ui.view_fit",
+    "ui.view_previous",
+    "ui.createDrawingView",
+    "ui.previousSheet",
+    "ui.nextSheet",
+];
 /// The one-key alias wait when a profile names none (Ruling 4).
 pub const DEFAULT_ALIAS_WAIT_MS: u32 = 750;
 
