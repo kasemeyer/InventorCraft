@@ -219,7 +219,10 @@ pub(crate) fn start_projected(app: &mut SolveApp) {
     if app.session.doc.kind != DocumentKind::Drawing {
         return;
     }
-    let selected: Vec<u64> = app.drawing.selection.iter().filter_map(view_of).collect();
+    // Two edges of one view are that view.
+    let mut selected: Vec<u64> = app.drawing.selection.iter().filter_map(view_of).collect();
+    selected.sort_unstable();
+    selected.dedup();
     let stage = match selected.as_slice() {
         [parent] => Stage::Project { parent: *parent },
         _ => {

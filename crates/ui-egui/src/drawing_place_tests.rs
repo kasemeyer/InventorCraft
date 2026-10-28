@@ -469,3 +469,20 @@ fn a_double_click_projects_one_view() {
     click_paper(&mut h, [20.0, 8.0]);
     assert_eq!(views(&h).len(), 3);
 }
+
+#[test]
+fn two_edges_of_one_view_project_from_it() {
+    // Final wave item 17.
+    let (mut h, block) = block_drawing(inventor(Drawing));
+    let v1 = h.app.run("drawing.view.base", json!({"model": block, "orientation": "front", "position": [10, 8]})).unwrap()["view"].as_u64().unwrap();
+    h.frames(2);
+    let edge = |n: u64| solidcraft_engine::drawing::PaperPick::ViewEdge {
+        view: v1,
+        edge: format!("e{n}"),
+        curve: solidcraft_engine::drawing::CurveKind::Line,
+        handle: n,
+    };
+    h.app.drawing.selection = vec![edge(1), edge(2)];
+    start_projected(&mut h.app);
+    assert!(matches!(place_tool(&h).stage, Stage::Project { parent } if parent == v1));
+}
