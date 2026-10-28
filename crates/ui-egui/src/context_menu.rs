@@ -1170,6 +1170,10 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 crate::drawing_view_panel::open(app, None, crate::drawing_view_panel::Origin::Edit(view));
             }
         }
+        // A dimension's list (Task 8).
+        "ui.drawing.moveDim" | "ui.drawing.precision" | "ui.drawing.editDim" | "ui.drawing.hideExt" | "ui.drawing.showExt" => {
+            crate::drawing_dim_tool::run_menu(app, &item.id, &p);
+        }
         "ui.drawing.openModel" => {
             if let Some(view) = id_of(&p, "view") {
                 crate::browser::drawing::open_model(app, view);

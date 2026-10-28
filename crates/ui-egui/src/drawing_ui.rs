@@ -25,21 +25,26 @@ pub(crate) struct DrawingUi {
     pub(crate) missing: Option<(usize, Vec<solidcraft_engine::doc::drawing::ViewId>)>,
     /// A placed view being dragged on the sheet (Task 6).
     pub(crate) drag: Option<crate::drawing_place::Drag>,
+    /// Edit Dimension's "edit dimension when created": each dimension placed opens the panel.
+    pub(crate) dim_edit_when_created: bool,
 }
 
-/// The running drawing tool. Task 8 adds `Dimension(drawing_dim_tool::DimTool)`, Task 9
-/// `Note(drawing_notes_tool::NoteTool)`.
+/// The running drawing tool. Task 9 adds `Note(drawing_notes_tool::NoteTool)`.
 pub(crate) enum DrawingTool {
     /// Placing base and projected views (Task 6).
     Place(crate::drawing_place::Place),
+    /// General Dimension, and the list's Move Dimension (Task 8).
+    Dimension(crate::drawing_dim_tool::DimTool),
 }
 
-/// Task 8 adds `Dimension(drawing_dim_tool::DimPanel)`, Task 9 `Text(drawing_notes_tool::TextPanel)`.
+/// Task 9 adds `Text(drawing_notes_tool::TextPanel)`.
 pub(crate) enum DrawingPanel {
     /// Base View and Edit View (Task 5).
     View(crate::drawing_view_panel::ViewPanel),
     /// Drawing Properties: the title block's fields (Task 7).
     Properties(crate::browser::drawing::PropertiesPanel),
+    /// Edit Dimension (Task 8).
+    Dimension(crate::drawing_dim_tool::DimPanel),
 }
 
 /// Whether the open panel would accept OK now (R72; each panel variant answers for itself).
@@ -48,6 +53,8 @@ pub(crate) fn panel_can_ok(app: &SolveApp) -> bool {
         // OK with nothing changed closes the panel and sends nothing (R87).
         Some(DrawingPanel::Properties(_)) => true,
         Some(DrawingPanel::View(p)) => p.can_ok(),
+        // OK with nothing changed closes the panel and sends nothing.
+        Some(DrawingPanel::Dimension(_)) => true,
         None => false,
     }
 }
@@ -66,6 +73,11 @@ pub(crate) fn panel_ok(app: &mut SolveApp) {
                 app.drawing.panel = Some(DrawingPanel::View(p));
             }
         }
+        Some(DrawingPanel::Dimension(mut p)) => {
+            if !crate::drawing_dim_tool::apply(app, &mut p) {
+                app.drawing.panel = Some(DrawingPanel::Dimension(p));
+            }
+        }
         None => {}
     }
 }
@@ -75,8 +87,14 @@ pub(crate) fn panel_ok(app: &mut SolveApp) {
 pub(crate) fn end_tool(app: &mut SolveApp) {
     match &app.drawing.tool {
         Some(DrawingTool::Place(_)) => crate::drawing_place::finish(app),
+        Some(DrawingTool::Dimension(_)) => crate::drawing_dim_tool::finish(app),
         None => {}
     }
+}
+
+/// What the status line asks for while a drawing tool runs (a catalog key).
+pub(crate) fn prompt(app: &SolveApp) -> Option<&'static str> {
+    crate::drawing_dim_tool::prompt(app)
 }
 
 /// Cancel on the open panel: it closes and sends nothing.
@@ -89,6 +107,7 @@ pub(crate) fn show_panel(app: &mut SolveApp, ctx: &egui::Context) {
     match app.drawing.panel.take() {
         Some(DrawingPanel::Properties(p)) => crate::browser::drawing::properties_panel(app, ctx, p),
         Some(DrawingPanel::View(p)) => crate::drawing_view_panel::show(app, ctx, p),
+        Some(DrawingPanel::Dimension(p)) => crate::drawing_dim_tool::show(app, ctx, p),
         None => {}
     }
 }
@@ -100,8 +119,11 @@ pub(crate) fn show_panel(app: &mut SolveApp, ctx: &egui::Context) {
 /// `drawing.note.hole`, `drawing.centermark`, `drawing.centerline.bisector`), Task 11
 /// (`drawing.export.pdf`, `drawing.export.dxf`). `drawing.sheet.add` and `drawing.update` take no
 /// parameters and run directly, as any command without a tool does.
-pub(crate) const DRAWING_STARTS: &[(&str, fn(&mut SolveApp))] =
-    &[("drawing.view.base", crate::drawing_place::start_base), ("drawing.view.projected", crate::drawing_place::start_projected)];
+pub(crate) const DRAWING_STARTS: &[(&str, fn(&mut SolveApp))] = &[
+    ("drawing.view.base", crate::drawing_place::start_base),
+    ("drawing.view.projected", crate::drawing_place::start_projected),
+    ("drawing.dim.general", crate::drawing_dim_tool::start),
+];
 
 /// The start `DRAWING_STARTS` gives command `id`, if any.
 pub(crate) fn start_for(id: &str) -> Option<fn(&mut SolveApp)> {

@@ -16,10 +16,41 @@ const EMPTY_SHEET: [&str; 5] = ["drawing.view.base", "drawing.sheet.add", "drawi
 /// A running drawing tool's rows (spec §2.4: Done is the action that ends it).
 const TOOL: [&str; 2] = ["ui.done", "ui.cancel"];
 
+/// A dimension's rows (spec §2.7; a list, never a ring).
+const DIMENSION: [&str; 7] =
+    ["ui.repeat", "ui.delete", "ui.drawing.moveDim", "ui.drawing.precision", "ui.drawing.editDim", "ui.drawing.hideExt", "ui.drawing.showExt"];
+
 /// The sheet's right-click list now.
 pub(crate) fn items(app: &SolveApp) -> Vec<Item> {
+    if app.drawing.tool.is_none()
+        && let [PaperPick::Dimension { handle }] = app.drawing.selection.as_slice()
+    {
+        return dimension_items(app, *handle);
+    }
     let (ctx, ids): (MenuContext, &[&str]) = if app.drawing.tool.is_some() { (MenuContext::Tool, &TOOL) } else { (MenuContext::Empty, &EMPTY_SHEET) };
     ids.iter().map(|id| crate::marking_menu::item(app, id, ctx)).collect()
+}
+
+/// A selected dimension's list: Repeat, Delete, Move, Precision ▸ 0-6, Edit Dimension, Hide and
+/// Show Extension Lines.
+fn dimension_items(app: &SolveApp, dim: u64) -> Vec<Item> {
+    let params = json!({ "dim": dim });
+    DIMENSION
+        .iter()
+        .map(|id| {
+            let item = crate::marking_menu::item(app, id, MenuContext::Empty);
+            match *id {
+                "ui.repeat" | "ui.delete" => item,
+                "ui.drawing.precision" => {
+                    let mut item = item.with(params.clone());
+                    item.children =
+                        (0..=6u8).map(|n| crate::context_menu::act(id, &n.to_string(), "").with(json!({ "dim": dim, "precision": n }))).collect();
+                    item
+                }
+                _ => item.with(params.clone()),
+            }
+        })
+        .collect()
 }
 
 /// A view's list (R40), in the browser (Task 7) and for a view selected on the sheet (Task 10):

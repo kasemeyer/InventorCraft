@@ -303,7 +303,9 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let input = crate::navigation::handle(app, ui, rect, &resp, NavCaps { orbit: false, pick: true });
     let navigating = input.mode.is_some() || (input.primary_nav.is_some() && input.primary_down);
     // Placing views, dragging a placed one, a double-click's Edit View (Task 6).
-    let used = crate::drawing_place::input(app, ui, rect, &resp, &input, navigating);
+    // General Dimension, and a double-click's Edit Dimension (Task 8), before placing views.
+    let used =
+        crate::drawing_dim_tool::input(app, rect, &resp, &input, navigating) || crate::drawing_place::input(app, ui, rect, &resp, &input, navigating);
     if resp.clicked()
         && !navigating
         && !used
@@ -319,6 +321,12 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         && !crate::mouse_gesture::took_press(app)
         && let Some(p) = input.hover
     {
+        // A right-click on a dimension selects it, so its list opens (Task 8).
+        if app.drawing.tool.is_none()
+            && let Some(dim) = crate::drawing_dim_tool::dimension_at(app, rect, p)
+        {
+            app.drawing.selection = vec![PaperPick::Dimension { handle: dim }];
+        }
         crate::context_menu::open_for(app, p, crate::context_menu::Target::Viewport);
     }
     let painter = ui.painter_at(rect);

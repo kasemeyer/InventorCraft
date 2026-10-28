@@ -217,6 +217,12 @@ pub(crate) fn item(app: &SolveApp, id: &str, ctx: MenuContext) -> Item {
         "ui.drawing.openModel" => act("ui.drawing.openModel", "Open Model", "open"),
         // Edit View (R93): the Base View panel on a placed view.
         "ui.drawing.editView" => act("ui.drawing.editView", "Edit View", "edit").on(app.drawing.tool.is_none()),
+        // A dimension's list (Task 8; icons R91).
+        "ui.drawing.moveDim" => act("ui.drawing.moveDim", "Move Dimension", "move").on(app.drawing.tool.is_none()),
+        "ui.drawing.precision" => act("ui.drawing.precision", "Precision", "dimension"),
+        "ui.drawing.editDim" => act("ui.drawing.editDim", "Edit Dimension", "edit").on(app.drawing.tool.is_none()),
+        "ui.drawing.hideExt" => act("ui.drawing.hideExt", "Hide Extension Lines", "dimension"),
+        "ui.drawing.showExt" => act("ui.drawing.showExt", "Show Extension Lines", "dimension"),
         "ui.drawing.properties" => act("ui.drawing.properties", "Drawing Properties…", "settings").on(app.drawing.tool.is_none()),
         // A drawing of the open part or assembly (spec §2.1 path 2c).
         "ui.createDrawingView" => {
