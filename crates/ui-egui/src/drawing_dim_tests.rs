@@ -462,3 +462,20 @@ fn the_live_dimension_is_fast_enough_for_hover() {
     // The real document is untouched.
     assert_eq!(h.app.session.undo.len(), 1);
 }
+
+#[test]
+fn the_lists_cancel_closes_a_panel_over_the_tool() {
+    // R72: Cancel and OK act on the open panel first, as Esc does; the tool under it goes on.
+    let (mut h, _) = front_view(inventor(Drawing));
+    h.app.drawing.dim_edit_when_created = true;
+    alias(&mut h, "D");
+    let hole = dimension(&mut h, &[[10.375, 8.0]], [11.5, 9.5]);
+    assert_eq!(panel(&h).dim, hole);
+    let undo = h.app.session.undo.len();
+    right_click_paper(&mut h, [25.0, 15.0]);
+    crate::context_menu::pick(&mut h.app, "ui.cancel").unwrap();
+    h.frames(2);
+    assert!(h.app.drawing.panel.is_none(), "Cancel closes the panel");
+    assert!(matches!(h.app.drawing.tool, Some(DrawingTool::Dimension(_))), "the tool goes on");
+    assert_eq!(h.app.session.undo.len(), undo);
+}
