@@ -421,15 +421,24 @@ fn preview_view_is_fast_enough_for_hover() {
     let (h, block) = placing();
     let params = json!({"model": block, "orientation": "iso_top_right", "lines": "hidden", "position": [12, 10]});
     solidcraft_engine::drawing::preview_view(&h.app.session, "drawing.view.base", &params).unwrap();
-    let t = std::time::Instant::now();
-    for _ in 0..5 {
-        solidcraft_engine::drawing::preview_view(&h.app.session, "drawing.view.base", &params).unwrap();
+    // The best of three rounds (final wave item 23): under a parallel test load one round can be
+    // starved of the CPU; the speed of the code is the fastest round.
+    let mut rounds = Vec::new();
+    for _ in 0..3 {
+        let t = std::time::Instant::now();
+        for _ in 0..5 {
+            solidcraft_engine::drawing::preview_view(&h.app.session, "drawing.view.base", &params).unwrap();
+        }
+        rounds.push(t.elapsed().as_secs_f64() * 1000.0 / 5.0);
+        if rounds.last().is_some_and(|ms| *ms < 250.0) {
+            break;
+        }
     }
-    let ms = t.elapsed().as_secs_f64() * 1000.0 / 5.0;
-    println!("preview_view: {ms:.2} ms per call");
+    let ms = rounds.iter().copied().fold(f64::INFINITY, f64::min);
+    println!("preview_view: {ms:.2} ms per call (rounds {rounds:.1?})");
     // It runs once per 0.05 in cell (R89), not per frame: well under a quarter second even in a
     // debug build (measured about 27 ms).
-    assert!(ms < 250.0, "preview_view took {ms:.1} ms");
+    assert!(ms < 250.0, "preview_view took {ms:.1} ms at best ({rounds:.1?})");
 }
 
 #[test]
