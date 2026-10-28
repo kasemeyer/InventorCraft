@@ -54,6 +54,9 @@ pub(crate) struct ViewPanel {
     pub scale_from_base: bool,
     /// The placed view as it was when the panel opened (edit mode).
     original: Option<Original>,
+    /// The model the Scale was last fitted for (wave 3, R100), and the scale text that fit set:
+    /// a new view's Scale follows its model until one is typed.
+    fitted: Option<(Option<String>, String)>,
 }
 
 /// What an edited view held when the panel opened: OK compares against it (R87).
@@ -94,6 +97,7 @@ impl ViewPanel {
             style_from_base: false,
             scale_from_base: false,
             original: None,
+            fitted: None,
         };
         match origin {
             Origin::Ribbon => {}
@@ -127,7 +131,28 @@ impl ViewPanel {
                 p.original = Some(original);
             }
         }
+        p.refit(&app.session);
         Some(p)
+    }
+
+    /// A new view's Scale is the default fit of its model on the active sheet (wave 3, R100:
+    /// the largest preset up to 1:1 at which front, top and right fit inside the border;
+    /// `drawing::default_scale`) (owner default; §8.8): when the panel opens and whenever the
+    /// model changes, unless a scale was typed since. Edit View keeps the view's own scale.
+    fn refit(&mut self, session: &solidcraft_engine::Session) {
+        if matches!(self.origin, Origin::Edit(_)) || self.fitted.as_ref().is_some_and(|(model, _)| *model == self.model) {
+            return;
+        }
+        // Untouched: the Scale is still what the last fit (or the panel's 1:1) set.
+        let untouched = self.fitted.as_ref().is_none_or(|(_, text)| self.scale_text == *text);
+        if untouched && let Some(scale) = self.model.as_deref().and_then(|m| solidcraft_engine::drawing::default_scale(session, m)) {
+            self.scale_text = format_scale(scale);
+        }
+        match self.fitted.as_mut() {
+            // A typed scale stays, whatever model comes next.
+            Some(f) if !untouched => f.0.clone_from(&self.model),
+            _ => self.fitted = Some((self.model.clone(), self.scale_text.clone())),
+        }
     }
 
     fn set_lines(&mut self, lines: LineStyle) {
@@ -397,6 +422,7 @@ fn glyph_shaded(r: egui::Rect, ink: egui::Color32) -> Vec<egui::Shape> {
 
 /// The panel's card, drawn over the sheet; Enter or OK applies, Esc or Cancel closes.
 pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context, mut p: ViewPanel) {
+    p.refit(&app.session);
     p.validate();
     // Enter with the marking menu open over the panel is the menu's (as for feature panels).
     let menu_enter = crate::marking_menu::holds_keys(app) && ctx.input(|i| i.key_pressed(egui::Key::Enter));

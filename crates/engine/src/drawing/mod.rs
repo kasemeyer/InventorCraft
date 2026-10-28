@@ -8,6 +8,7 @@ pub(crate) mod centermark;
 pub mod dims;
 pub(crate) mod edges;
 pub(crate) mod export;
+pub mod fit;
 pub(crate) mod mapper;
 pub(crate) mod model_ref;
 pub(crate) mod notes;
@@ -24,6 +25,7 @@ use solidcraft_doc::{DocumentKind, DrawingModel, DrawingProps};
 
 pub use centermark::MARK_OVERSHOOT_IN;
 pub use dims::{VALUE_TOKEN, dimension_kind, dimension_text, sick_dimensions};
+pub use fit::{FIT_GAP_IN, default_scale, fit_scale, model_extents_mm, printable_in};
 pub(crate) use model_ref::rebased_models;
 pub use model_ref::{ModelProvider, missing_views, model_path, stale_views};
 pub use notes::{LEADER_ARROW, NOTE_HEIGHT_IN, NoteInfo, note_at};

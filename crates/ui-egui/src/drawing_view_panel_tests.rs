@@ -443,3 +443,76 @@ fn an_open_panel_is_not_replaced() {
     h.frames(2);
     assert_eq!((panel(&h).origin, panel(&h).identifier.as_str()), (Origin::Edit(v1), "TYPED"));
 }
+
+/// A 40 × 20 × 10 in box (x, depth y, height z) saved in `dir`; its absolute path.
+fn big_box(dir: &std::path::Path) -> String {
+    let path = dir.join("big.tcipart").to_string_lossy().into_owned();
+    let mut s = solidcraft_engine::Session::default();
+    for (id, p) in [
+        ("document.new_part", json!({})),
+        ("document.units", json!({"units": "in"})),
+        ("solid.box", json!({"length": "40 in", "width": "20 in", "height": "10 in", "corner": [0, 0, 0], "name": "Big"})),
+        ("file.save", json!({"path": path})),
+    ] {
+        s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+    }
+    absolute(&path)
+}
+
+/// Wave 3 item 3 (R100, owner default §8.8): a new base view's Scale is the largest preset up to
+/// 1:1 at which front, top and right fit the sheet inside its border. On the D sheet (printable
+/// 33 × 21 in): the 4 × 1 × 3 block fits at 1:1 ((4 + 1) + 1 = 6 across); the 40 × 20 × 10 box
+/// does not ((40 + 20) + 1 = 61 > 33) but does at 1:2 (60·0.5 + 1 = 31 ≤ 33, 30·0.5 + 1 = 16 ≤
+/// 21). Both the ribbon path and Create Drawing View's; Edit View keeps the view's own scale.
+fn the_scale_defaults_to_the_fit(mut h: Harness) {
+    h.app.home.open = false;
+    let block = absolute(&block_part(&h.dir));
+    h.app.run("drawing.new", json!({"model": block})).unwrap();
+    h.frames(2);
+    open(&mut h.app, Some(block.clone()), Origin::Ribbon);
+    h.frames(2);
+    assert_eq!(panel(&h).scale_text, "1:1");
+    h.app.drawing.panel = None;
+    crate::drawing_place::finish(&mut h.app);
+    h.frames(2);
+    let big = big_box(&h.dir);
+    for origin in [Origin::Ribbon, Origin::FromModel] {
+        open(&mut h.app, Some(big.clone()), origin);
+        h.frames(2);
+        assert_eq!(panel(&h).scale_text, "1:2", "{origin:?}");
+        h.app.drawing.panel = None;
+        crate::drawing_place::finish(&mut h.app);
+        h.frames(2);
+    }
+    // A model picked after the panel opened is fitted too, unless a scale was typed.
+    open(&mut h.app, Some(block.clone()), Origin::Ribbon);
+    h.frames(2);
+    panel_mut(&mut h).model = Some(big.clone());
+    h.frames(2);
+    assert_eq!(panel(&h).scale_text, "1:2");
+    panel_mut(&mut h).scale_text = "3:1".into();
+    panel_mut(&mut h).model = Some(block.clone());
+    h.frames(2);
+    assert_eq!(panel(&h).scale_text, "3:1", "a typed scale stays");
+    h.app.drawing.panel = None;
+    crate::drawing_place::finish(&mut h.app);
+    h.frames(2);
+    // Edit View keeps the view's scale: the big box placed at 1:1 stays 1:1.
+    let v = h.app.run("drawing.view.base", json!({"model": big, "orientation": "front", "scale": 1, "position": [17, 11]})).unwrap()["view"]
+        .as_u64()
+        .unwrap();
+    h.frames(2);
+    open(&mut h.app, None, Origin::Edit(v));
+    h.frames(2);
+    assert_eq!(panel(&h).scale_text, "1:1");
+}
+
+#[test]
+fn the_scale_defaults_to_the_fit_under_inventor() {
+    the_scale_defaults_to_the_fit(inventor(Drawing));
+}
+
+#[test]
+fn the_scale_defaults_to_the_fit_under_solidcraft() {
+    the_scale_defaults_to_the_fit(Harness::new());
+}
