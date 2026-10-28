@@ -27,17 +27,21 @@ pub(crate) struct DrawingUi {
     pub(crate) drag: Option<crate::drawing_place::Drag>,
     /// Edit Dimension's "edit dimension when created": each dimension placed opens the panel.
     pub(crate) dim_edit_when_created: bool,
+    /// The last annotation command the note tools sent, and its parameters (Task 9).
+    pub(crate) notes_last_sent: Option<(&'static str, serde_json::Value)>,
 }
 
-/// The running drawing tool. Task 9 adds `Note(drawing_notes_tool::NoteTool)`.
+/// The running drawing tool.
 pub(crate) enum DrawingTool {
     /// Placing base and projected views (Task 6).
     Place(crate::drawing_place::Place),
     /// General Dimension, and the list's Move Dimension (Task 8).
     Dimension(crate::drawing_dim_tool::DimTool),
+    /// Text, Leader Text, Center Mark, Centerline Bisector, Hole and Thread Note (Task 9).
+    Note(crate::drawing_notes_tool::NoteTool),
 }
 
-/// Task 9 adds `Text(drawing_notes_tool::TextPanel)`.
+/// The open drawing panel.
 pub(crate) enum DrawingPanel {
     /// Base View and Edit View (Task 5).
     View(crate::drawing_view_panel::ViewPanel),
@@ -45,6 +49,8 @@ pub(crate) enum DrawingPanel {
     Properties(crate::browser::drawing::PropertiesPanel),
     /// Edit Dimension (Task 8).
     Dimension(crate::drawing_dim_tool::DimPanel),
+    /// A note's text, new or edited (Task 9).
+    Text(crate::drawing_notes_tool::TextPanel),
 }
 
 /// Whether the open panel would accept OK now (R72; each panel variant answers for itself).
@@ -55,6 +61,7 @@ pub(crate) fn panel_can_ok(app: &SolveApp) -> bool {
         Some(DrawingPanel::View(p)) => p.can_ok(),
         // OK with nothing changed closes the panel and sends nothing.
         Some(DrawingPanel::Dimension(_)) => true,
+        Some(DrawingPanel::Text(p)) => p.can_ok(),
         None => false,
     }
 }
@@ -78,6 +85,11 @@ pub(crate) fn panel_ok(app: &mut SolveApp) {
                 app.drawing.panel = Some(DrawingPanel::Dimension(p));
             }
         }
+        Some(DrawingPanel::Text(mut p)) => {
+            if !crate::drawing_notes_tool::apply(app, &mut p) {
+                app.drawing.panel = Some(DrawingPanel::Text(p));
+            }
+        }
         None => {}
     }
 }
@@ -88,18 +100,24 @@ pub(crate) fn end_tool(app: &mut SolveApp) {
     match &app.drawing.tool {
         Some(DrawingTool::Place(_)) => crate::drawing_place::finish(app),
         Some(DrawingTool::Dimension(_)) => crate::drawing_dim_tool::finish(app),
+        Some(DrawingTool::Note(_)) => crate::drawing_notes_tool::finish(app),
         None => {}
     }
 }
 
 /// What the status line asks for while a drawing tool runs (a catalog key).
 pub(crate) fn prompt(app: &SolveApp) -> Option<&'static str> {
-    crate::drawing_dim_tool::prompt(app)
+    crate::drawing_dim_tool::prompt(app).or_else(|| crate::drawing_notes_tool::prompt(app))
 }
 
-/// Cancel on the open panel: it closes and sends nothing.
+/// Cancel on the open panel: it closes and sends nothing (a note's text panel also drops the
+/// note its tool was placing; the tool goes on).
 pub(crate) fn panel_cancel(app: &mut SolveApp) {
-    app.drawing.panel = None;
+    if let Some(DrawingPanel::Text(p)) = app.drawing.panel.take()
+        && p.edit.is_none()
+    {
+        crate::drawing_notes_tool::reset(app);
+    }
 }
 
 /// The open panel's card, drawn over the sheet.
@@ -108,6 +126,7 @@ pub(crate) fn show_panel(app: &mut SolveApp, ctx: &egui::Context) {
         Some(DrawingPanel::Properties(p)) => crate::browser::drawing::properties_panel(app, ctx, p),
         Some(DrawingPanel::View(p)) => crate::drawing_view_panel::show(app, ctx, p),
         Some(DrawingPanel::Dimension(p)) => crate::drawing_dim_tool::show(app, ctx, p),
+        Some(DrawingPanel::Text(p)) => crate::drawing_notes_tool::show(app, ctx, p),
         None => {}
     }
 }
@@ -123,6 +142,11 @@ pub(crate) const DRAWING_STARTS: &[(&str, fn(&mut SolveApp))] = &[
     ("drawing.view.base", crate::drawing_place::start_base),
     ("drawing.view.projected", crate::drawing_place::start_projected),
     ("drawing.dim.general", crate::drawing_dim_tool::start),
+    ("drawing.note.text", crate::drawing_notes_tool::start_text),
+    ("drawing.note.leader", crate::drawing_notes_tool::start_leader),
+    ("drawing.note.hole", crate::drawing_notes_tool::start_hole_note),
+    ("drawing.centermark", crate::drawing_notes_tool::start_center_mark),
+    ("drawing.centerline.bisector", crate::drawing_notes_tool::start_bisector),
 ];
 
 /// The start `DRAWING_STARTS` gives command `id`, if any.

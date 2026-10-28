@@ -304,8 +304,11 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let navigating = input.mode.is_some() || (input.primary_nav.is_some() && input.primary_down);
     // Placing views, dragging a placed one, a double-click's Edit View (Task 6).
     // General Dimension, and a double-click's Edit Dimension (Task 8), before placing views.
-    let used =
-        crate::drawing_dim_tool::input(app, rect, &resp, &input, navigating) || crate::drawing_place::input(app, ui, rect, &resp, &input, navigating);
+    // Text, leader, centre mark, centreline and hole note tools, and a double-click's Edit Note
+    // (Task 9).
+    let used = crate::drawing_notes_tool::input(app, rect, &resp, &input, navigating)
+        || crate::drawing_dim_tool::input(app, rect, &resp, &input, navigating)
+        || crate::drawing_place::input(app, ui, rect, &resp, &input, navigating);
     if resp.clicked()
         && !navigating
         && !used

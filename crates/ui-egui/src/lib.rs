@@ -57,6 +57,7 @@ pub mod drag_extrude;
 pub mod drag_snap;
 pub(crate) mod drawing_dim_tool;
 pub(crate) mod drawing_menu;
+pub(crate) mod drawing_notes_tool;
 pub(crate) mod drawing_place;
 pub(crate) mod drawing_ui;
 pub(crate) mod drawing_view_panel;

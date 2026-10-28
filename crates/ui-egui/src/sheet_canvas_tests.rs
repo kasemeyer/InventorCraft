@@ -346,9 +346,21 @@ fn suppressed_curves_are_not_drawn() {
 #[test]
 fn drawing_starts_are_exactly_the_tool_rows() {
     // R91 (D1): the table holds only drawing tools; Task 6 gives it its first two rows, Task 8
-    // General Dimension.
+    // General Dimension, Task 9 the five annotation tools.
     let ids: Vec<&str> = crate::drawing_ui::DRAWING_STARTS.iter().map(|(id, _)| *id).collect();
-    assert_eq!(ids, ["drawing.view.base", "drawing.view.projected", "drawing.dim.general"]);
+    assert_eq!(
+        ids,
+        [
+            "drawing.view.base",
+            "drawing.view.projected",
+            "drawing.dim.general",
+            "drawing.note.text",
+            "drawing.note.leader",
+            "drawing.note.hole",
+            "drawing.centermark",
+            "drawing.centerline.bisector"
+        ]
+    );
     for (i, id) in ids.iter().enumerate() {
         assert!(id.starts_with("drawing."), "{id}");
         assert_eq!(solidcraft_engine::find_command(id).map(|c| c.id), Some(*id), "{id} is a registry command");

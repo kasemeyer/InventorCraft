@@ -16,6 +16,9 @@ const EMPTY_SHEET: [&str; 5] = ["drawing.view.base", "drawing.sheet.add", "drawi
 /// A running drawing tool's rows (spec §2.4: Done is the action that ends it).
 const TOOL: [&str; 2] = ["ui.done", "ui.cancel"];
 
+/// Leader Text's rows (spec §2.8): Continue, Back, Single-Segment Leader, Cancel.
+const LEADER: [&str; 4] = ["ui.done", "ui.drawing.back", "ui.drawing.singleSegment", "ui.cancel"];
+
 /// A dimension's rows (spec §2.7; a list, never a ring).
 const DIMENSION: [&str; 7] =
     ["ui.repeat", "ui.delete", "ui.drawing.moveDim", "ui.drawing.precision", "ui.drawing.editDim", "ui.drawing.hideExt", "ui.drawing.showExt"];
@@ -27,7 +30,13 @@ pub(crate) fn items(app: &SolveApp) -> Vec<Item> {
     {
         return dimension_items(app, *handle);
     }
-    let (ctx, ids): (MenuContext, &[&str]) = if app.drawing.tool.is_some() { (MenuContext::Tool, &TOOL) } else { (MenuContext::Empty, &EMPTY_SHEET) };
+    let (ctx, ids): (MenuContext, &[&str]) = if crate::drawing_notes_tool::leader_running(app) {
+        (MenuContext::Tool, &LEADER)
+    } else if app.drawing.tool.is_some() {
+        (MenuContext::Tool, &TOOL)
+    } else {
+        (MenuContext::Empty, &EMPTY_SHEET)
+    };
     ids.iter().map(|id| crate::marking_menu::item(app, id, ctx)).collect()
 }
 

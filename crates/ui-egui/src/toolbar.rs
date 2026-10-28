@@ -2447,8 +2447,9 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                     crate::tools::finish(app);
                 } else if app.dialog.is_some() {
                     crate::dialogs::cancel(app);
-                } else if matches!(app.drawing.panel, Some(crate::drawing_ui::DrawingPanel::Dimension(_))) {
-                    // Edit Dimension's Esc, before the tool under it (edit dimension when created).
+                } else if matches!(app.drawing.panel, Some(crate::drawing_ui::DrawingPanel::Dimension(_) | crate::drawing_ui::DrawingPanel::Text(_)))
+                {
+                    // Edit Dimension's or a note's text panel's Esc, before the tool under it.
                     crate::drawing_ui::panel_cancel(app);
                 } else if app.drawing.tool.is_some() {
                     // A drawing tool's Esc: it ends, what it placed stays (Tasks 6, 8).

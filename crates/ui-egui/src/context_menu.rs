@@ -1174,6 +1174,8 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.drawing.moveDim" | "ui.drawing.precision" | "ui.drawing.editDim" | "ui.drawing.hideExt" | "ui.drawing.showExt" => {
             crate::drawing_dim_tool::run_menu(app, &item.id, &p);
         }
+        // Leader Text's list (Task 9).
+        "ui.drawing.back" | "ui.drawing.singleSegment" => crate::drawing_notes_tool::run_menu(app, &item.id),
         "ui.drawing.openModel" => {
             if let Some(view) = id_of(&p, "view") {
                 crate::browser::drawing::open_model(app, view);
@@ -1198,6 +1200,10 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         // a note's text) closes and the tool goes on, as Esc does.
         "ui.ok" if crate::sheet_canvas::shows(app) && app.drawing.panel.is_some() => crate::drawing_ui::panel_ok(app),
         "ui.cancel" if crate::sheet_canvas::shows(app) && app.drawing.panel.is_some() => crate::drawing_ui::panel_cancel(app),
+        // Leader Text's Done is Continue (Task 9).
+        "ui.done" if crate::sheet_canvas::shows(app) && crate::drawing_notes_tool::leader_running(app) => {
+            crate::drawing_notes_tool::continue_leader(app)
+        }
         "ui.done" | "ui.cancel" if crate::sheet_canvas::shows(app) && app.drawing.tool.is_some() => crate::drawing_ui::end_tool(app),
         "ui.done" => {
             crate::tools::finish(app);
