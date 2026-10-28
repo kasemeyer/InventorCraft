@@ -301,3 +301,17 @@ fn resource_rows_use_catalog_names() {
     assert_eq!(drawing::block_display("TCI_BORDER_Q"), "TCI_BORDER_Q");
     assert_eq!(drawing::block_display("MY_FRAME"), "MY_FRAME");
 }
+
+#[test]
+fn the_missing_cache_is_keyed_by_tab_and_document() {
+    // Final wave item 8: the same document address in another tab is a different key.
+    let (mut h, ..) = three_views();
+    assert_eq!(drawing::missing(&mut h.app), Vec::<u64>::new());
+    let doc = std::sync::Arc::as_ptr(&h.app.session.doc) as usize;
+    let active = h.app.docs.active;
+    assert_eq!(h.app.drawing.missing.as_ref().map(|(key, _)| *key), Some((active, doc)));
+    h.app.drawing.missing = Some(((active, doc), vec![999]));
+    assert_eq!(drawing::missing(&mut h.app), [999], "same tab and document: cached");
+    h.app.drawing.missing = Some(((active + 1, doc), vec![999]));
+    assert_eq!(drawing::missing(&mut h.app), Vec::<u64>::new(), "another tab's answer is not read");
+}

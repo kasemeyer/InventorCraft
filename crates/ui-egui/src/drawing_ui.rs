@@ -20,9 +20,9 @@ pub(crate) struct DrawingUi {
     pub fit_pending: bool,
     /// The scene the canvas drew last, and what it was built from.
     pub(crate) scene: Option<crate::sheet_canvas::SceneCache>,
-    /// The views whose model is found nowhere, and the document they were computed for (its
-    /// `Arc` address, R77): the browser's suffix and Open Model read it.
-    pub(crate) missing: Option<(usize, Vec<solidcraft_engine::doc::drawing::ViewId>)>,
+    /// The views whose model is found nowhere, and the document they were computed for (its tab
+    /// and `Arc` address, R77): the browser's suffix and Open Model read it.
+    pub(crate) missing: Option<((usize, usize), Vec<solidcraft_engine::doc::drawing::ViewId>)>,
     /// A placed view being dragged on the sheet (Task 6).
     pub(crate) drag: Option<crate::drawing_place::Drag>,
     /// Edit Dimension's "edit dimension when created": each dimension placed opens the panel.

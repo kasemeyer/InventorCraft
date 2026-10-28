@@ -231,7 +231,9 @@ fn view(app: &mut SolveApp, ui: &mut egui::Ui, m: &DrawingModel, v: &DrawingView
 /// The views whose model is found nowhere (R77): recomputed when the document changes (each edit,
 /// open and tab switch), never per frame.
 pub(crate) fn missing(app: &mut SolveApp) -> Vec<ViewId> {
-    let doc = std::sync::Arc::as_ptr(&app.session.doc) as usize;
+    // The tab and the document's address: an address freed in one tab and reused in another
+    // never reads the other's answer.
+    let doc = (app.docs.active, std::sync::Arc::as_ptr(&app.session.doc) as usize);
     match &app.drawing.missing {
         Some((at, views)) if *at == doc => views.clone(),
         _ => {
