@@ -597,7 +597,7 @@ fn the_leader_attaches_within_the_engines_at_tolerance() {
     alias(&mut h, "LE");
     click_paper(&mut h, [10.0, 6.45]);
     assert!(matches!(tool(&h), NoteTool::Leader { attach: Some(_), .. }), "0.05 in off: attached");
-    assert!(solidcraft_engine::drawing::AT_TOLERANCE_IN > 0.05 && solidcraft_engine::drawing::AT_TOLERANCE_IN < 0.15);
+    const { assert!(solidcraft_engine::drawing::AT_TOLERANCE_IN > 0.05 && solidcraft_engine::drawing::AT_TOLERANCE_IN < 0.15) };
 }
 
 #[test]
