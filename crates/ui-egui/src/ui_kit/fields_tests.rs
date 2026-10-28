@@ -278,3 +278,38 @@ fn count_steps_stay_within_limits_and_keep_expressions() {
     assert_eq!(super::step_count("5", i64::MAX, &wide).as_deref(), Some("9223372036854775807"), "steps saturate rather than overflow");
     assert_eq!(super::step_count("5", i64::MIN, &wide).as_deref(), Some("-9223372036854775803"));
 }
+
+#[test]
+fn a_narrow_segmented_row_with_nothing_on_can_pick_its_first_choice() {
+    // Final wave item 28: the dropdown fallback, the value unset (no state on, index 0).
+    let ctx = crate::fonts::test_context();
+    let selected = std::cell::Cell::new(0usize);
+    let picked = std::cell::Cell::new(false);
+    let mut draw = |ui: &mut Ui| {
+        ui.set_width(120.0);
+        row(ui, "Justify", |ui| {
+            let mut index = selected.get();
+            let states = [false, false, false];
+            if segmented(
+                ui,
+                &mut index,
+                &["Left aligned text", "Centred text", "Right aligned text"],
+                Segments { states: &states, ..Default::default() },
+            ) {
+                picked.set(true);
+                selected.set(index);
+            }
+        });
+    };
+    frame(&ctx, vec![], &mut draw);
+    frame(&ctx, vec![], &mut draw);
+    let at = scenario::handle_at("dialog:Justify").expect("the fallback dropdown");
+    frame(&ctx, pointer(at, true), &mut draw);
+    frame(&ctx, pointer(at, false), &mut draw);
+    frame(&ctx, vec![], &mut draw);
+    let first = scenario::handle_at("dialog:Justify:Left aligned text").expect("the list is open");
+    frame(&ctx, pointer(first, true), &mut draw);
+    frame(&ctx, pointer(first, false), &mut draw);
+    assert!(picked.get(), "picking the first row is a pick");
+    assert_eq!(selected.get(), 0);
+}

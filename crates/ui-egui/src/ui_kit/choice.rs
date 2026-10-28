@@ -35,10 +35,18 @@ pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], con
         && !compact
         && !super::fits_steadily(ui, label(ui), (widest + 2.0 * t.space_8) * options.len() as f32, segment_width * options.len() as f32)
     {
-        let before = *selected;
+        // With no segment on (a value not set yet, or mixed), the list shows none picked, so even
+        // the first row is a pick.
+        let none_on = !states.is_empty() && !states.iter().any(|on| *on);
+        let before = if none_on { usize::MAX } else { *selected };
+        let mut shown = before;
         let id = format!("segments_fallback_{}", label(ui));
-        dropdown(ui, &id, selected, options);
-        return *selected != before;
+        dropdown(ui, &id, &mut shown, options);
+        if shown != before && shown < options.len() {
+            *selected = shown;
+            return true;
+        }
+        return false;
     }
     let natural: Vec<_> = options
         .iter()
