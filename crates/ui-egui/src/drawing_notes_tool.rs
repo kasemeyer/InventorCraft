@@ -295,6 +295,29 @@ pub(crate) fn note_under(app: &SolveApp, rect: Rect, p: Pos2) -> Option<u64> {
     app.session.doc.drawing.as_deref().and_then(|m| note_at(m, handle)).map(|_| handle)
 }
 
+/// The curve a click at paper point `at` would pick now, pre-highlighted under the cursor (fix
+/// wave 2): the leader's attachment (its first point, at the engine's tolerance), a centre mark's
+/// circle or arc, a bisector's straight edge (the second on the first's view), a hole note's
+/// edge. None for Text, Move Note and a tool past its picks.
+pub(crate) fn hover_pick(app: &SolveApp, rect: Rect, at: [f64; 2]) -> Option<PaperPick> {
+    match tool(app)? {
+        NoteTool::Leader { points, .. } if points.is_empty() => match pick(&app.session, at, AT_TOLERANCE_IN) {
+            Some(p @ PaperPick::ViewEdge { .. }) => Some(p),
+            _ => None,
+        },
+        NoteTool::CenterMark { .. } => match edge_at(app, rect, at) {
+            Some((_, CurveKind::Circle | CurveKind::Arc, hit)) => Some(hit),
+            _ => None,
+        },
+        NoteTool::Bisector { first } => match edge_at(app, rect, at) {
+            Some((view, CurveKind::Line, hit)) if first.is_none_or(|(v, _)| v == view) => Some(hit),
+            _ => None,
+        },
+        NoteTool::HoleNote { edge: None } => edge_at(app, rect, at).map(|(.., hit)| hit),
+        _ => None,
+    }
+}
+
 /// The sheet's pointer input while an annotation tool runs, and a double-click on a note with
 /// no tool running (Edit Note). True when it used the frame's pointer input.
 pub(crate) fn input(app: &mut SolveApp, rect: Rect, resp: &Response, input: &CameraInput, navigating: bool) -> bool {

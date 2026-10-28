@@ -16,6 +16,8 @@ pub(crate) struct DrawingUi {
     pub panel: Option<DrawingPanel>,
     /// Preview curves on paper (inches), drawn over the sheet, never saved (Task 6). `true`: hidden.
     pub preview: Vec<(PaperCurve, bool)>,
+    /// The running picking tool's candidate under the cursor, pre-highlighted (fix wave 2).
+    pub hover: Option<PaperPick>,
     /// Fit the sheet in the canvas on its next frame (`ui.view_fit`, `ui.home`, Home).
     pub fit_pending: bool,
     /// The scene the canvas drew last, and what it was built from.
@@ -128,6 +130,15 @@ pub(crate) fn end_tool(app: &mut SolveApp) {
 /// What the status line asks for while a drawing tool runs (a catalog key).
 pub(crate) fn prompt(app: &SolveApp) -> Option<&'static str> {
     crate::drawing_dim_tool::prompt(app).or_else(|| crate::drawing_notes_tool::prompt(app))
+}
+
+/// The running tool's pick candidate at paper point `at` (fix wave 2), or None: no picking tool,
+/// or a panel over it has the user's attention.
+pub(crate) fn hover_pick(app: &SolveApp, rect: egui::Rect, at: [f64; 2]) -> Option<PaperPick> {
+    if app.drawing.panel.is_some() {
+        return None;
+    }
+    crate::drawing_dim_tool::hover_pick(app, rect, at).or_else(|| crate::drawing_notes_tool::hover_pick(app, rect, at))
 }
 
 /// Cancel on the open panel: it closes and sends nothing (a note's text panel also drops the

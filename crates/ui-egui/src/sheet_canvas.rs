@@ -28,17 +28,20 @@ use crate::theme::Tokens;
 const FIT_MARGIN: f64 = 1.01;
 /// A click picks within this many points of the cursor.
 const PICK_PX: f64 = 4.0;
+/// The hover candidate's core width, pixels (the part viewport's hovered edge, `viewport.rs`).
+const HOVER_PX: f32 = 2.0;
 /// Chord tolerance of curves and text on the sheet, inches (a quarter pixel at 8× a fitted D sheet).
 const TOLERANCE_IN: f64 = 0.001;
 
 /// What the cached scene was built from: the drawing (by identity: an edit installs a new model),
-/// the sheet, the theme's colours, the preview and the selection.
+/// the sheet, the theme's colours, the preview, the selection and the hover candidate.
 pub(crate) struct SceneCache {
     model: Option<Weak<DrawingModel>>,
     sheet: usize,
-    colors: [egui::Color32; 6],
+    colors: [egui::Color32; 8],
     preview: Vec<(PaperCurve, bool)>,
     selection: Vec<PaperPick>,
+    hover: Option<PaperPick>,
     scene: Arc<SheetScene>,
 }
 
@@ -51,8 +54,8 @@ impl SceneCache {
 }
 
 /// The theme colours a scene uses.
-fn colors(t: &Tokens) -> [egui::Color32; 6] {
-    [t.sheet_paper, t.sheet_border, t.warning, t.accent, t.sel_edge, t.sheet_surround]
+fn colors(t: &Tokens) -> [egui::Color32; 8] {
+    [t.sheet_paper, t.sheet_border, t.warning, t.accent, t.sel_edge, t.sheet_surround, t.hover_edge, t.hover_edge_halo]
 }
 
 fn rgba(c: egui::Color32) -> [u8; 4] {
@@ -124,7 +127,9 @@ fn picture(raster: &solidcraft_engine::doc::RasterRef) -> Option<(Arc<Vec<u8>>, 
 /// The active sheet as the GPU pass draws it (pure: tests read it headless). R88: `paper` is
 /// `[0, 0, w, h]` from the sheet's size; border and title block in `sheet_border`; sick
 /// dimensions in `warning`; other entities in their layer colours on the paper; fresh pictures at
-/// their `raster_rect` (R76); the preview last, in `accent`. A Drawing with no model shows the
+/// their `raster_rect` (R76); the preview, in `accent`; last, the running tool's hover candidate
+/// again over everything as the part viewport draws a hovered edge: `hover_edge` on a
+/// `hover_edge_halo` 3 px wider (fix wave 2). A Drawing with no model shows the
 /// surround only (an empty scene).
 pub(crate) fn scene(app: &SolveApp) -> SheetScene {
     let t = Tokens::get();
@@ -137,6 +142,8 @@ pub(crate) fn scene(app: &SolveApp) -> SheetScene {
     let list = cadcraft_render::build(&m.paper, &cadcraft_doc::Space::Paper(sheet.layout.clone()), &opts);
     let sick = solidcraft_engine::drawing::sick_dimensions(m);
     let selected: Vec<u64> = app.drawing.selection.iter().filter_map(pick_handle).collect();
+    let hovered = app.drawing.hover.as_ref().and_then(pick_handle);
+    let mut hover_strokes = Vec::new();
     let [pr, pg, pb, _] = out.paper_color;
     let paper_rgb = cadcraft_doc::color::Rgb(pr, pg, pb);
     let border = [sheet.border, sheet.title_block];
@@ -154,7 +161,13 @@ pub(crate) fn scene(app: &SolveApp) -> SheetScene {
         let pts = list.points(p);
         match p.kind {
             Kind::Polyline if pts.len() >= 2 => {
-                out.strokes.push(SheetStroke { points: pts.iter().map(|v| [v.x as f32, v.y as f32]).collect(), color, width_px: width_px(p.lw) });
+                let points: Vec<[f32; 2]> = pts.iter().map(|v| [v.x as f32, v.y as f32]).collect();
+                if hovered == Some(p.handle.0) {
+                    let w = width_px(p.lw).max(HOVER_PX);
+                    hover_strokes.push(SheetStroke { points: points.clone(), color: rgba(t.hover_edge_halo), width_px: w + 3.0 });
+                    hover_strokes.push(SheetStroke { points: points.clone(), color: rgba(t.hover_edge), width_px: w });
+                }
+                out.strokes.push(SheetStroke { points, color, width_px: width_px(p.lw) });
             }
             Kind::Tris | Kind::Mask => {
                 let color = if p.kind == Kind::Mask { out.paper_color } else { color };
@@ -183,6 +196,7 @@ pub(crate) fn scene(app: &SolveApp) -> SheetScene {
             out.strokes.push(SheetStroke { points, color, width_px: 1.0 });
         }
     }
+    out.strokes.extend(hover_strokes);
     out
 }
 
@@ -198,7 +212,13 @@ fn cached_scene(app: &mut SolveApp) -> Arc<SheetScene> {
             (None, None) => true,
             _ => false,
         };
-        if same_model && c.sheet == sheet && c.colors == colors && c.preview == app.drawing.preview && c.selection == app.drawing.selection {
+        if same_model
+            && c.sheet == sheet
+            && c.colors == colors
+            && c.preview == app.drawing.preview
+            && c.selection == app.drawing.selection
+            && c.hover == app.drawing.hover
+        {
             return c.scene.clone();
         }
     }
@@ -209,6 +229,7 @@ fn cached_scene(app: &mut SolveApp) -> Arc<SheetScene> {
         colors,
         preview: app.drawing.preview.clone(),
         selection: app.drawing.selection.clone(),
+        hover: app.drawing.hover.clone(),
         scene: scene.clone(),
     });
     scene
@@ -320,6 +341,15 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let used = crate::drawing_notes_tool::input(app, rect, &resp, &input, navigating)
         || crate::drawing_dim_tool::input(app, rect, &resp, &input, navigating)
         || crate::drawing_place::input(app, ui, rect, &resp, &input, navigating);
+    // The running picking tool's candidate under the cursor (fix wave 2): one pick per frame the
+    // canvas draws, nothing sent.
+    let hover = match input.hover.filter(|_| input.inside && !navigating && app.drawing.tool.is_some()) {
+        Some(p) => crate::drawing_ui::hover_pick(app, rect, paper_at(app, rect, p)),
+        None => None,
+    };
+    if app.drawing.hover != hover {
+        app.drawing.hover = hover;
+    }
     if resp.clicked()
         && !navigating
         && !used
@@ -367,3 +397,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
 #[cfg(test)]
 #[path = "sheet_canvas_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "sheet_canvas_hover_tests.rs"]
+mod hover_tests;

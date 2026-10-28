@@ -154,6 +154,21 @@ pub(crate) fn dimension_at(app: &SolveApp, rect: Rect, p: Pos2) -> Option<u64> {
     }
 }
 
+/// The curve a click at paper point `at` would pick now, pre-highlighted under the cursor (fix
+/// wave 2): an edge, circle or arc first; then, after a straight edge or a vertex, another curve
+/// of the same view. None while the next click places the dimension, or moves one.
+pub(crate) fn hover_pick(app: &SolveApp, rect: Rect, at: [f64; 2]) -> Option<PaperPick> {
+    let t = tool(app).filter(|t| t.moving.is_none())?;
+    let hit = pick(&app.session, at, tolerance(app, rect))?;
+    let PaperPick::ViewEdge { view, .. } = &hit else { return None };
+    let takes = match t.picks.as_slice() {
+        [] => true,
+        [(_, CurveKind::Line | CurveKind::Poly)] => t.view == Some(*view),
+        _ => false,
+    };
+    takes.then_some(hit)
+}
+
 /// The sheet's pointer input while the tool runs, and a double-click on a dimension with no tool
 /// running (Edit Dimension). True when it used the frame's click.
 pub(crate) fn input(app: &mut SolveApp, rect: Rect, resp: &Response, input: &CameraInput, navigating: bool) -> bool {
