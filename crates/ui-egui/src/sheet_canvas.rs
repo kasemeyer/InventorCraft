@@ -17,7 +17,7 @@ use egui::{Pos2, Rect, Sense};
 use solidcraft_engine::doc::{DocumentKind, DrawingModel};
 use solidcraft_engine::drawing::{PaperCurve, PaperPick};
 use solidcraft_engine::geom::Vec3;
-use solidcraft_engine::render::UpAxis;
+use solidcraft_engine::render::{Camera, UpAxis};
 use solidcraft_gpu::sheet::{SheetFill, SheetImage, SheetScene, SheetStroke, SheetView};
 
 use crate::SolveApp;
@@ -279,7 +279,10 @@ pub(crate) fn fit(app: &mut SolveApp, rect: Rect) {
     cam.roll = 0.0;
     cam.fov = 0.0;
     cam.up = UpAxis::Z;
-    cam.distance = f64::from(rect.height()) / (2.0 * scale) / 0.4;
+    // The half height the paper scale asks for, over the camera's half height per unit of
+    // distance (its orthographic factor, `Camera::half_height`).
+    let per_unit = Camera { distance: 1.0, ..*cam }.half_height();
+    cam.distance = f64::from(rect.height()) / (2.0 * scale) / per_unit;
     app.cam_anim = None;
     app.viewport.orbit_free = None;
 }
