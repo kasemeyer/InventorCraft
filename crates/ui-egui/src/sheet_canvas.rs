@@ -251,16 +251,21 @@ fn on_sheet(cam: &solidcraft_engine::render::Camera) -> bool {
         && cam.target.z.abs() < 1e-6
 }
 
-/// Fit the active sheet in the canvas (first show of a drawing, `ui.view_fit`, `ui.home`, Home).
+/// Fit the active sheet in the canvas (first show of a drawing, `ui.view_fit`, `ui.home`, Home):
+/// in the part of `rect` the browser and the floating cards leave (`shell::content_rect`), as
+/// the flat pattern's fit does.
 pub(crate) fn fit(app: &mut SolveApp, rect: Rect) {
     app.drawing.fit_pending = false;
     if !(rect.width() >= 1.0 && rect.height() >= 1.0) {
         return;
     }
+    let content = crate::shell::content_rect(app, rect);
+    let area = if content.width() >= 50.0 && content.height() >= 50.0 { content } else { rect };
     let (w, h) = paper_size(app);
-    let scale = (f64::from(rect.width()) / (w * FIT_MARGIN)).min(f64::from(rect.height()) / (h * FIT_MARGIN));
+    let scale = (f64::from(area.width()) / (w * FIT_MARGIN)).min(f64::from(area.height()) / (h * FIT_MARGIN));
     let cam = &mut app.cam;
-    cam.target = Vec3::new(w / 2.0, h / 2.0, 0.0);
+    let (dx, dy) = (f64::from(area.center().x - rect.center().x), f64::from(area.center().y - rect.center().y));
+    cam.target = Vec3::new(w / 2.0 - dx / scale, h / 2.0 + dy / scale, 0.0);
     cam.yaw = 0.0;
     cam.pitch = std::f64::consts::FRAC_PI_2;
     cam.roll = 0.0;

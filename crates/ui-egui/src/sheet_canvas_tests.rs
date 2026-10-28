@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use egui::{Event, Rect, vec2};
+use egui::{Event, Rect, pos2, vec2};
 use serde_json::{Value, json};
 use solidcraft_engine::Session;
 use solidcraft_engine::doc::DocumentKind;
@@ -108,11 +108,16 @@ fn the_canvas_starts_fitted() {
     // The first frame fitted it; fitting again after a pan puts it back.
     h.app.cam.target.x += 5.0;
     fit(&mut h.app, rect);
+    // It fits the part of the canvas the browser and the cards leave free.
+    let area = crate::shell::content_rect(&h.app, rect);
     let (a, b) = (screen_of(&h.app, rect, [0.0, 0.0]), screen_of(&h.app, rect, [34.0, 22.0]));
-    assert!(rect.contains(a) && rect.contains(b), "{a:?} {b:?} in {rect:?}");
+    assert!(area.expand(0.01).contains(a) && area.expand(0.01).contains(b), "{a:?} {b:?} in {area:?} of {rect:?}");
     let (w, ht) = (b.x - a.x, a.y - b.y);
-    let fills = (w / rect.width() - 1.0).abs() < 0.02 || (ht / rect.height() - 1.0).abs() < 0.02;
-    assert!(fills, "{w} x {ht} in {rect:?}");
+    let fills = (w / area.width() - 1.0).abs() < 0.02 || (ht / area.height() - 1.0).abs() < 0.02;
+    assert!(fills, "{w} x {ht} in {area:?}");
+    // Centred in it.
+    let mid = pos2((a.x + b.x) / 2.0, (a.y + b.y) / 2.0);
+    assert!((mid - area.center()).length() < 0.5, "{mid:?} {area:?}");
     // Paper x right, y up.
     assert!(w > 0.0 && ht > 0.0);
     h.frames(2);
