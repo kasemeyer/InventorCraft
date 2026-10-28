@@ -486,3 +486,22 @@ fn two_edges_of_one_view_project_from_it() {
     start_projected(&mut h.app);
     assert!(matches!(place_tool(&h).stage, Stage::Project { parent } if parent == v1));
 }
+
+#[test]
+fn esc_cancels_a_view_drag() {
+    // Final wave item 18: Esc mid-drag; the release then moves nothing and adds no step.
+    let (mut h, block) = block_drawing(inventor(Drawing));
+    let v1 = h.app.run("drawing.view.base", json!({"model": block, "orientation": "front", "position": [10, 8]})).unwrap()["view"].as_u64().unwrap();
+    h.frames(2);
+    let undo = h.app.session.undo.len();
+    let (from, to) = (screen(&h, [10.5, 8.5]), screen(&h, [14.5, 10.5]));
+    press_and_move(&mut h, from, to);
+    assert!(h.app.drawing.drag.is_some() && !h.app.drawing.preview.is_empty());
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.frames(2);
+    assert!(h.app.drawing.drag.is_none() && h.app.drawing.preview.is_empty());
+    release(&mut h, to);
+    let v = view(&h, v1);
+    assert!(near([v.position.x, v.position.y], [10.0, 8.0], 1e-9), "{:?}", v.position);
+    assert_eq!(h.app.session.undo.len(), undo);
+}
