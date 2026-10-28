@@ -63,10 +63,10 @@ fn resources(app: &mut SolveApp, ui: &mut egui::Ui, m: &DrawingModel, depth: usi
     if !open {
         return;
     }
-    let mut borders: Vec<String> = m.sheets.iter().filter_map(|s| block_name(m, s.border)).collect();
+    let mut borders: Vec<String> = m.sheets.iter().filter_map(|s| block_name(m, s.border)).map(|b| block_display(&b)).collect();
     borders.sort();
     borders.dedup();
-    let mut titles: Vec<String> = m.sheets.iter().filter_map(|s| block_name(m, s.title_block)).collect();
+    let mut titles: Vec<String> = m.sheets.iter().filter_map(|s| block_name(m, s.title_block)).map(|b| block_display(&b)).collect();
     titles.sort();
     titles.dedup();
     for (key, node, names, icon) in [("d:borders", "borders", borders, "rect"), ("d:title_blocks", "title_blocks", titles, "text")] {
@@ -75,6 +75,23 @@ fn resources(app: &mut SolveApp, ui: &mut egui::Ui, m: &DrawingModel, depth: usi
                 draw_row(ui, ui.id().with((key, &name)), &Row { depth: depth + 2, icon, label: &name, name: true, ..Default::default() });
             }
         }
+    }
+}
+
+/// A border or title block's name as the browser shows it: the template's blocks by their
+/// catalog names ("ANSI D Border", "ANSI Title Block"), any other block by its own name.
+pub(crate) fn block_display(block: &str) -> String {
+    if block == solidcraft_engine::drawing::TITLE_BLOCK {
+        return crate::i18n::tr("ui.drawing.title_block_ansi").to_string();
+    }
+    let Some(rest) = block.strip_prefix("TCI_BORDER_") else { return block.to_string() };
+    let (letter, key) = match rest.strip_suffix("_PORTRAIT") {
+        Some(letter) => (letter, "ui.drawing.border_block_portrait"),
+        None => (rest, "ui.drawing.border_block"),
+    };
+    match solidcraft_engine::doc::drawing::AnsiSize::parse(letter) {
+        Some(size) => crate::i18n::format(key, &[("size", size.letter())]),
+        None => block.to_string(),
     }
 }
 

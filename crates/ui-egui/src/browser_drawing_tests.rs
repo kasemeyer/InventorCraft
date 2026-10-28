@@ -81,7 +81,9 @@ fn projected_views_nest_under_their_base() {
     let labels: Vec<String> = tree().into_iter().take(7).map(|(l, _)| l).collect();
     assert_eq!(labels[..3], ["block", "Drawing Resources", "Borders"]);
     assert_eq!(labels[4], "Title Blocks");
-    assert_eq!(labels[5], "TCI_TITLE_ANSI");
+    // Catalog names, not block ids (final wave item 7).
+    assert_eq!(labels[3], "ANSI D Border");
+    assert_eq!(labels[5], "ANSI Title Block");
     assert_eq!(labels[6], "Sheet:1");
 }
 
@@ -288,4 +290,14 @@ fn same_label_rows_have_handles_per_sheet() {
     assert!(two > one, "{one} {two}");
     let handle = |name: &str| crate::scenario::handle_at(name);
     assert!(handle("row:Border@sheet2").is_some() && handle("row:Border").is_some(), "the label's handle stays");
+}
+
+#[test]
+fn resource_rows_use_catalog_names() {
+    // Final wave item 7.
+    assert_eq!(drawing::block_display("TCI_BORDER_D"), "ANSI D Border");
+    assert_eq!(drawing::block_display("TCI_BORDER_A_PORTRAIT"), "ANSI A Border, Portrait");
+    assert_eq!(drawing::block_display("TCI_TITLE_ANSI"), "ANSI Title Block");
+    assert_eq!(drawing::block_display("TCI_BORDER_Q"), "TCI_BORDER_Q");
+    assert_eq!(drawing::block_display("MY_FRAME"), "MY_FRAME");
 }
