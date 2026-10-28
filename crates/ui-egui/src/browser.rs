@@ -18,8 +18,13 @@ mod occurrence_gizmo_tests;
 #[path = "browser_model.rs"]
 mod model;
 
+pub(crate) mod drawing;
 mod features;
 pub(crate) mod history;
+
+#[cfg(test)]
+#[path = "browser_drawing_tests.rs"]
+mod browser_drawing_tests;
 
 pub(crate) fn reveal_feature(app: &mut SolveApp, id: u64, body: &str) {
     features::reveal(app, id, body);
@@ -1031,7 +1036,12 @@ fn rows_scrolling(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions, shr
         .scroll_source(egui::scroll_area::ScrollSource { scroll_bar: true, mouse_wheel: true, ..egui::scroll_area::ScrollSource::NONE })
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
-            component_rows(app, ui, 0, 0, acts);
+            // A drawing has its own tree (every profile): sheets and views, not a design's.
+            if app.session.doc.kind == solidcraft_engine::doc::DocumentKind::Drawing {
+                drawing::rows(app, ui, 0);
+            } else {
+                component_rows(app, ui, 0, 0, acts);
+            }
         });
     // The row was reached and scrolled to, or isn't in the tree (a body a later feature removes):
     // either way the reveal is done.
@@ -1199,6 +1209,7 @@ pub(crate) fn root_order(app: &SolveApp) -> &'static [crate::profile::RootNode] 
     let browser = &crate::profile::active(app).browser;
     match app.session.doc.kind {
         solidcraft_engine::doc::DocumentKind::Assembly => &browser.assembly_root,
+        solidcraft_engine::doc::DocumentKind::Drawing => &browser.drawing_root,
         _ => &browser.part_root,
     }
 }
@@ -1946,6 +1957,13 @@ pub(crate) fn folder_label(app: &SolveApp, folder: &str) -> String {
         "sketches" => "Sketches",
         "joints" => "Joints",
         "named_views" => "Named Views",
+        // A drawing's nodes (the Inventor profile names its own).
+        "drawing_resources" => "Drawing Resources",
+        "borders" => "Borders",
+        "title_blocks" => "Title Blocks",
+        "sheet" => "Sheet",
+        "border" => "Border",
+        "title_block" => "Title Block",
         _ => "Construction",
     }
     .to_string()

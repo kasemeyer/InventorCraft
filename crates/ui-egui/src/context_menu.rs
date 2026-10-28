@@ -93,6 +93,16 @@ pub enum Target {
         folder: String,
         scope: String,
     },
+    /// A drawing's root row in the browser.
+    DrawingRoot,
+    /// A drawing's sheet row (`index`, 0-based).
+    Sheet {
+        index: usize,
+    },
+    /// A drawing view's row.
+    DrawingView {
+        view: u64,
+    },
 }
 
 /// One menu entry: a command id (run with `params` when given, else started like a toolbar
@@ -372,6 +382,12 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::Group { id, scope } => crate::browser::group_items(app, *id, scope),
         Target::Folder { component, folder, scope } => crate::browser::folder_items(app, *component, folder, scope),
         Target::Canvas { id } => crate::browser::canvas_items(app, *id),
+        Target::DrawingRoot => drawing_root_items(app),
+        Target::Sheet { index } => {
+            let active = app.session.drawing_sheet == *index;
+            vec![cmd(app, "drawing.sheet.activate", "Activate Sheet").with(json!({ "sheet": index })).on(!active)]
+        }
+        Target::DrawingView { view } => crate::drawing_menu::view_items(app, *view),
         Target::Origin => crate::browser::origin_items(app),
         Target::NamedViews => vec![act("ui.newView", "New Named View", "perspective")],
         Target::Section => crate::browser::section_items(app),
@@ -844,6 +860,17 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
     entries
 }
 
+/// A drawing's root: Drawing Properties…, then the profile's Create Drawing View (R23).
+fn drawing_root_items(app: &SolveApp) -> Vec<Item> {
+    let ctx = crate::profile_workflow::MenuContext::Empty;
+    let mut v = vec![crate::marking_menu::item(app, "ui.drawing.properties", ctx)];
+    if crate::profile::active(app).workflow.create_drawing_in_root_menu {
+        v.push(Item::sep());
+        v.push(crate::marking_menu::item(app, "ui.createDrawingView", ctx));
+    }
+    v
+}
+
 /// "Turn Up Axis": a quarter turn about X of a component's occurrence for a file saved with the
 /// other axis up, one `occurrence.move` (one undo step).
 fn turn_up_axis(occurrence: u64, enabled: bool) -> Item {
@@ -1137,6 +1164,14 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             crate::select_other::open(app, at);
         }
         "ui.createDrawingView" => crate::documents::create_drawing_view(app),
+        "ui.drawing.properties" => crate::browser::drawing::open_properties(app),
+        "ui.drawing.openModel" => {
+            if let Some(view) = id_of(&p, "view") {
+                crate::browser::drawing::open_model(app, view);
+            }
+        }
+        // A drawing's Delete acts on the sheet's selection, never the part's delete (R72).
+        "ui.delete" if crate::sheet_canvas::shows(app) => crate::drawing_menu::delete_selection(app),
         "ui.delete" if item.params.is_some() => crate::delete::request(app, p),
         "ui.delete" => delete(app),
         "ui.horizontalConstraint" | "ui.verticalConstraint" => {
@@ -1151,7 +1186,8 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         // The marking menu inside a tool or a panel.
         // A drawing's Done, OK and Cancel end its own tool and panel (R72).
         "ui.done" | "ui.cancel" if crate::sheet_canvas::shows(app) && app.drawing.tool.is_some() => app.drawing.tool = None,
-        "ui.ok" | "ui.cancel" if crate::sheet_canvas::shows(app) && app.drawing.panel.is_some() => app.drawing.panel = None,
+        "ui.ok" if crate::sheet_canvas::shows(app) && app.drawing.panel.is_some() => crate::drawing_ui::panel_ok(app),
+        "ui.cancel" if crate::sheet_canvas::shows(app) && app.drawing.panel.is_some() => crate::drawing_ui::panel_cancel(app),
         "ui.done" => {
             crate::tools::finish(app);
             app.tool = None;

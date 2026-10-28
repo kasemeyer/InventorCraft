@@ -210,6 +210,8 @@ pub(crate) fn item(app: &SolveApp, id: &str, ctx: MenuContext) -> Item {
             let hidden = !v.hidden_bodies.is_empty() || !v.hidden_sketches.is_empty() || !v.hidden_folders.is_empty();
             act("ui.showAll", "Show All", "eye").on(hidden)
         }
+        "ui.drawing.openModel" => act("ui.drawing.openModel", "Open Model", "open"),
+        "ui.drawing.properties" => act("ui.drawing.properties", "Drawing Properties…", "settings").on(app.drawing.tool.is_none()),
         // A drawing of the open part or assembly (spec §2.1 path 2c).
         "ui.createDrawingView" => {
             act("ui.createDrawingView", "Create Drawing View", "camera").on(app.session.doc.kind != DocumentKind::Drawing && !app.file_picker_busy())

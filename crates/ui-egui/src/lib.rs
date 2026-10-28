@@ -1983,6 +1983,7 @@ impl SolveApp {
         } else if sheet_canvas::shows(self) {
             // A drawing shows its sheet, in every profile (SolidCraft's drawings too).
             sheet_canvas::show(self, ui);
+            drawing_ui::show_panel(self, ui.ctx());
         } else {
             viewport::show(self, ui);
         }

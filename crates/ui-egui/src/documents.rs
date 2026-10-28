@@ -531,7 +531,7 @@ pub fn tabs_info(app: &SolveApp) -> Vec<(String, bool)> {
 }
 
 /// Where each tab's design is saved, in `tabs_info`'s order (`None`: not saved yet).
-fn tab_paths(app: &SolveApp) -> Vec<Option<String>> {
+pub(crate) fn tab_paths(app: &SolveApp) -> Vec<Option<String>> {
     if app.docs.slots.is_empty() {
         return vec![app.session.path.clone()];
     }

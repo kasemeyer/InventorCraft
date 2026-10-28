@@ -58,6 +58,11 @@ fn shared_occurrences(app: &SolveApp, params: &Value) -> bool {
 /// Delete what is selected (the Delete key). A selected sketch dimension or constraint glyph
 /// goes first, as before.
 pub fn delete_selection(app: &mut SolveApp) {
+    // A drawing deletes what its sheet's selection holds (R72).
+    if crate::sheet_canvas::shows(app) {
+        crate::drawing_menu::delete_selection(app);
+        return;
+    }
     if crate::sketch3d::delete_selected(app) || crate::sketch_tools::delete_glyph(app) {
         return;
     }

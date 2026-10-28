@@ -20,21 +20,52 @@ pub(crate) struct DrawingUi {
     pub fit_pending: bool,
     /// The scene the canvas drew last, and what it was built from.
     pub(crate) scene: Option<crate::sheet_canvas::SceneCache>,
+    /// The views whose model is found nowhere, and the document they were computed for (its
+    /// `Arc` address, R77): the browser's suffix and Open Model read it.
+    pub(crate) missing: Option<(usize, Vec<solidcraft_engine::doc::drawing::ViewId>)>,
 }
 
 /// Declared with no variants in Task 3 (R12). Task 6 adds `Place(drawing_place::Place)`, Task 8
 /// `Dimension(drawing_dim_tool::DimTool)`, Task 9 `Note(drawing_notes_tool::NoteTool)`.
 pub(crate) enum DrawingTool {}
 
-/// Task 5 adds `View(drawing_view_panel::ViewPanel)`, Task 7 `Properties(browser::drawing::PropertiesPanel)`,
-/// Task 8 `Dimension(drawing_dim_tool::DimPanel)`, Task 9 `Text(drawing_notes_tool::TextPanel)`.
-pub(crate) enum DrawingPanel {}
+/// Task 5 adds `View(drawing_view_panel::ViewPanel)`, Task 8 `Dimension(drawing_dim_tool::DimPanel)`,
+/// Task 9 `Text(drawing_notes_tool::TextPanel)`.
+pub(crate) enum DrawingPanel {
+    /// Drawing Properties: the title block's fields (Task 7).
+    Properties(crate::browser::drawing::PropertiesPanel),
+}
 
 /// Whether the open panel would accept OK now (R72; each panel variant answers for itself).
 pub(crate) fn panel_can_ok(app: &SolveApp) -> bool {
     match &app.drawing.panel {
-        Some(panel) => match *panel {},
+        // OK with nothing changed closes the panel and sends nothing (R87).
+        Some(DrawingPanel::Properties(_)) => true,
         None => false,
+    }
+}
+
+/// OK on the open panel (the footer, Enter, the marking menu's OK): it applies and closes, or
+/// stays open when its command refused.
+pub(crate) fn panel_ok(app: &mut SolveApp) {
+    match app.drawing.panel.take() {
+        Some(DrawingPanel::Properties(p)) if !crate::browser::drawing::apply_properties(app, &p) => {
+            app.drawing.panel = Some(DrawingPanel::Properties(p));
+        }
+        _ => {}
+    }
+}
+
+/// Cancel on the open panel: it closes and sends nothing.
+pub(crate) fn panel_cancel(app: &mut SolveApp) {
+    app.drawing.panel = None;
+}
+
+/// The open panel's card, drawn over the sheet.
+pub(crate) fn show_panel(app: &mut SolveApp, ctx: &egui::Context) {
+    match app.drawing.panel.take() {
+        Some(DrawingPanel::Properties(p)) => crate::browser::drawing::properties_panel(app, ctx, p),
+        None => {}
     }
 }
 

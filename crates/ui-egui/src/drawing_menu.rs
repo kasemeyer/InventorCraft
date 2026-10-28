@@ -3,6 +3,9 @@
 //! the note list (Task 10). Every row is built by `marking_menu::item` (R72), so a drawing's
 //! Done, Cancel, OK and Delete answer to the drawing's own tool, panel and selection.
 
+use serde_json::json;
+use solidcraft_engine::drawing::PaperPick;
+
 use crate::SolveApp;
 use crate::context_menu::Item;
 use crate::profile_workflow::MenuContext;
@@ -17,6 +20,53 @@ const TOOL: [&str; 2] = ["ui.done", "ui.cancel"];
 pub(crate) fn items(app: &SolveApp) -> Vec<Item> {
     let (ctx, ids): (MenuContext, &[&str]) = if app.drawing.tool.is_some() { (MenuContext::Tool, &TOOL) } else { (MenuContext::Empty, &EMPTY_SHEET) };
     ids.iter().map(|id| crate::marking_menu::item(app, id, ctx)).collect()
+}
+
+/// A view's list (R40), in the browser (Task 7) and for a view selected on the sheet (Task 10):
+/// Delete (the sheet's selection, R72) and Open Model (where the view's model is now, R77;
+/// disabled when it is found nowhere). Task 5 puts Edit View first.
+pub(crate) fn view_items(app: &SolveApp, view: u64) -> Vec<Item> {
+    let open = crate::marking_menu::item(app, "ui.drawing.openModel", MenuContext::Empty)
+        .with(json!({ "view": view }))
+        .on(crate::browser::drawing::model_path_of(app, view).is_some());
+    vec![crate::marking_menu::item(app, "ui.delete", MenuContext::Empty), open]
+}
+
+/// Delete on a drawing (the Delete key, a menu's Delete): what the sheet's selection holds goes,
+/// never the part's delete. Annotations go in one `drawing.annotation.delete`, then each selected
+/// view not under another selected view in one `drawing.view.delete` (its projected views and
+/// attached annotations with it); a single pick is one undo step. Picked view edges stay.
+pub(crate) fn delete_selection(app: &mut SolveApp) {
+    let picks = std::mem::take(&mut app.drawing.selection);
+    let Some(m) = app.session.doc.drawing.clone() else { return };
+    let mut handles: Vec<u64> = Vec::new();
+    let mut views: Vec<u64> = Vec::new();
+    for p in &picks {
+        match p {
+            PaperPick::Dimension { handle } | PaperPick::Annotation { handle } if !handles.contains(handle) => handles.push(*handle),
+            PaperPick::View { view } if !views.contains(view) => views.push(*view),
+            _ => {}
+        }
+    }
+    // A view whose parent (or its parent's parent) is selected goes with it.
+    let under_selected = |mut v: u64| {
+        while let Some(parent) = m.views.get(&v).and_then(|x| x.parent) {
+            if views.contains(&parent) {
+                return true;
+            }
+            v = parent;
+        }
+        false
+    };
+    let views: Vec<u64> = views.iter().copied().filter(|v| m.views.contains_key(v) && !under_selected(*v)).collect();
+    if !handles.is_empty() {
+        let _ = app.run("drawing.annotation.delete", json!({ "handles": handles }));
+    }
+    for view in views {
+        if app.session.doc.drawing.as_deref().is_some_and(|m| m.views.contains_key(&view)) {
+            let _ = app.run("drawing.view.delete", json!({ "view": view }));
+        }
+    }
 }
 
 #[cfg(test)]
