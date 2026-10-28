@@ -294,23 +294,27 @@ fn editing_a_view_runs_set_commands() {
     assert_eq!(last_undo(&h), (undo + 2, Some("View Style".into())));
     assert!(view(&h, v1).tangent_edges);
 
-    // Scale and the identifier: one step each.
+    // Scale and the identifier together: one "Edit View" step (final wave item 11).
     edit_view(&mut h, v1);
     panel_mut(&mut h).scale_text = "1:2".into();
     panel_mut(&mut h).identifier = "FRONT".into();
     panel_mut(&mut h).label_visible = true;
     crate::drawing_ui::panel_ok(&mut h.app);
     h.frames(2);
-    assert_eq!(h.app.session.undo.len(), undo + 4);
-    let labels: Vec<&str> = h.app.session.undo.iter().rev().take(2).map(|u| u.label.as_str()).collect();
-    assert_eq!(labels, ["View Label", "View Scale"]);
+    assert_eq!(last_undo(&h), (undo + 3, Some("Edit View".into())));
     let v = view(&h, v1);
     assert_eq!((v.scale, v.identifier.as_str(), v.label_visible), (0.5, "FRONT", true));
+    // One undo takes the whole edit back.
+    h.app.run("edit.undo", json!({})).unwrap();
+    let v = view(&h, v1);
+    assert_eq!((v.scale, v.identifier.as_str(), v.label_visible), (1.0, "VIEW1", false));
+    h.app.run("edit.redo", json!({})).unwrap();
+    assert_eq!(view(&h, v1).scale, 0.5);
 
     // Nothing changed: OK runs nothing.
     edit_view(&mut h, v1);
     crate::drawing_ui::panel_ok(&mut h.app);
-    assert_eq!(h.app.session.undo.len(), undo + 4);
+    assert_eq!(h.app.session.undo.len(), undo + 3);
 
     // A projected view: the cube is off, the model read-only, the base flags on and shown.
     edit_view(&mut h, v2);
@@ -403,4 +407,23 @@ fn the_panel_ring_is_ok_and_cancel() {
     run_item(&mut h.app, &cancel, egui::Pos2::ZERO);
     assert!(h.app.drawing.panel.is_none());
     assert_eq!(h.app.session.undo.len(), 1);
+}
+
+#[test]
+fn a_failed_edit_view_leaves_the_view_as_it_was() {
+    // Final wave item 11: the scale applies, the identifier is refused (VIEW2 is taken): the
+    // scale is rolled back, no step is left, the panel stays open with the error.
+    let (mut h, block) = block_drawing();
+    let [v1, ..] = three_views(&mut h, &block);
+    let (undo, redo) = (h.app.session.undo.len(), h.app.session.redo.len());
+    edit_view(&mut h, v1);
+    panel_mut(&mut h).scale_text = "1:2".into();
+    panel_mut(&mut h).identifier = "VIEW2".into();
+    crate::drawing_ui::panel_ok(&mut h.app);
+    h.frames(2);
+    assert!(h.app.drawing.panel.is_some(), "the panel stays open");
+    assert!(panel(&h).error.is_some(), "{:?}", panel(&h).error);
+    let v = view(&h, v1);
+    assert_eq!((v.scale, v.identifier.as_str()), (1.0, "VIEW1"));
+    assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), (undo, redo));
 }

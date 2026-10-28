@@ -265,19 +265,41 @@ pub(crate) fn apply(app: &mut SolveApp, p: &mut ViewPanel) -> bool {
         };
     };
     let Some(o) = p.original.clone() else { return true };
+    // The edit is one undo step; a command that fails undoes the ones before it.
+    let depth = app.session.undo.len();
+    let mut status = None;
     for (cmd, params) in edits(p, &o, view) {
         match app.run(cmd, Value::Object(params)) {
             Ok(r) => {
                 let n = r.get("suppressed").and_then(Value::as_u64).unwrap_or(0);
                 if cmd == "drawing.view.set_style" && n > 0 {
-                    app.set_status(crate::i18n::format("ui.drawing.suppressed", &[("n", &n.to_string())]), false);
+                    status = Some(crate::i18n::format("ui.drawing.suppressed", &[("n", &n.to_string())]));
                 }
             }
             Err(e) => {
+                let made = app.session.undo.len().saturating_sub(depth);
+                for _ in 0..made {
+                    if app.run("edit.undo", json!({})).is_err() {
+                        break;
+                    }
+                }
+                // What those undos put on the redo stack is not a step anyone made.
+                let redo = app.session.redo.len();
+                app.session.redo.truncate(redo.saturating_sub(made));
                 p.error = Some(e);
                 return false;
             }
         }
+    }
+    // Several commands merge into one "Edit View" step; a single one keeps its own label.
+    if app.session.undo.len() > depth + 1 {
+        app.session.undo.truncate(depth + 1);
+        if let Some(step) = app.session.undo.last_mut() {
+            step.label = crate::i18n::tr("ui.drawing.edit_view").to_string();
+        }
+    }
+    if let Some(text) = status {
+        app.set_status(text, false);
     }
     true
 }
