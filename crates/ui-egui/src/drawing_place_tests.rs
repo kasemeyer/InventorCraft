@@ -19,7 +19,12 @@ use crate::test_support::{block_part, inventor};
 /// An Inventor drawing of the block with the Base View panel open on the ribbon path (its model
 /// set to the block, as picking it in the Model row does). The harness and the block's path.
 fn placing() -> (Harness, String) {
-    let (mut h, block) = block_drawing(inventor(Drawing));
+    placing_in(inventor(Drawing))
+}
+
+/// `placing` under harness `h`'s profile.
+fn placing_in(h: Harness) -> (Harness, String) {
+    let (mut h, block) = block_drawing(h);
     h.app.start("drawing.view.base");
     h.frames(3);
     panel_mut(&mut h).model = Some(block.clone());
@@ -122,12 +127,8 @@ fn each_cube_face_sets_its_orientation() {
     let undo = h.app.session.undo.len();
     assert_eq!(panel(&h).orientation.name(), "front");
     assert_eq!(crate::scenario::count_of("drawing_place:cube"), Some(1.0));
-    // The cube sits beside the preview's top-right corner, 60 points out.
-    let centre = cube_centre(&h.app, canvas());
-    let b = preview_box(&h);
-    let corner = screen(&h, [b[2], b[3]]);
-    assert!((centre.distance(corner) - CUBE_OUT).abs() < 0.5, "{centre:?} {corner:?}");
-    assert!(centre.x > corner.x && centre.y < corner.y);
+    // The cube is pinned at the canvas's top-right corner (wave 3, R98).
+    let pinned = crate::scenario::rect_of("drawing_place:cube").unwrap();
     // From the front only the front face, its edges and corners face the viewer: walk around the
     // cube through edges and corners to every face.
     for (name, kind) in [
@@ -151,6 +152,7 @@ fn each_cube_face_sets_its_orientation() {
         assert!(views(&h).is_empty(), "a cube click places nothing");
         assert_eq!(h.app.session.undo.len(), undo);
         assert!(matches!(place_tool(&h).stage, Stage::Base));
+        assert_eq!(crate::scenario::rect_of("drawing_place:cube"), Some(pinned), "the cube turns in place: {name}");
     }
     // The preview shows the picked orientation (front_top: the block seen from the front edge).
     let key = place_tool(&h).preview_key.unwrap();
@@ -447,20 +449,53 @@ fn preview_view_is_fast_enough_for_hover() {
     assert!(ms < GROSS_MS, "preview_view took {ms:.1} ms at best ({rounds:.1?})");
 }
 
+/// The pinned cube's screen rect: centred `CUBE_INSET` (56) points in from the top-right corner
+/// of the canvas's content area (below the floating ribbon) on both axes, the part ViewCube's
+/// box centre; `2 * CUBE_HALF` square: 54 points.
+fn pinned_cube(h: &Harness) -> Rect {
+    let content = crate::shell::content_rect(&h.app, canvas());
+    Rect::from_center_size(egui::pos2(content.right() - 56.0, content.top() + 56.0), egui::vec2(54.0, 54.0))
+}
+
+/// Wave 3 item 1 (R98): while a base view is placed the cube stays where it is pinned, at the
+/// canvas's top-right corner with the part ViewCube's inset; only the preview follows the cursor
+/// (also where the cursor heads for the cube); an orientation click turns the cube in place and
+/// places nothing.
+fn the_cube_is_pinned_while_placing(h: Harness) {
+    let (mut h, _) = placing_in(h);
+    assert_eq!(CUBE_INSET, 56.0);
+    let rect = canvas();
+    let pinned = pinned_cube(&h);
+    assert!(!crate::shell::covered(&h.app, pinned.center()), "the pinned cube is under the shell");
+    assert_eq!(crate::scenario::rect_of("drawing_place:cube"), Some(pinned));
+    assert_eq!(cube_centre(&h.app, rect), pinned.center());
+    let toward_cube = paper_at(&h.app, rect, pinned.center() + egui::vec2(-70.0, 70.0));
+    let toward_cube = [toward_cube[0], toward_cube[1]];
+    for at in [[6.0, 6.0], [12.0, 10.0], [24.0, 16.0], toward_cube] {
+        hover(&mut h, at);
+        assert_eq!(crate::scenario::rect_of("drawing_place:cube"), Some(pinned), "the cube moved with the cursor at {at:?}");
+        assert_eq!(cube_centre(&h.app, rect), pinned.center());
+        // Only the preview follows, all the way up to the cube.
+        let anchor = place_tool(&h).anchor.unwrap();
+        assert!(near(anchor, at, 0.01), "the preview at {anchor:?}, the cursor at {at:?}");
+        assert!(near(box_centre(preview_box(&h)), at, 0.01), "{:?}", preview_box(&h));
+    }
+    for name in ["iso_top_right", "right", "front_right", "front"] {
+        cube_click(&mut h, name);
+        assert_eq!(panel(&h).orientation, CubeTarget::from_name(name).unwrap());
+        assert_eq!(crate::scenario::rect_of("drawing_place:cube"), Some(pinned), "the cube turns in place: {name}");
+        assert!(views(&h).is_empty(), "a click on the cube places no view");
+    }
+}
+
 #[test]
-fn the_cube_steps_out_of_a_larger_preview() {
-    // Final wave item 15: after a turn to a larger preview the cube still sits beyond its
-    // top-right corner, never on it.
-    let (mut h, _) = placing();
-    hover(&mut h, [10.0, 8.0]);
-    let front = preview_box(&h);
-    cube_click(&mut h, "iso_top_right");
-    let iso = preview_box(&h);
-    assert!(iso[3] > front[3] + 0.5, "the iso preview is taller: {front:?} {iso:?}");
-    let centre = cube_centre(&h.app, canvas());
-    let corner = screen(&h, [iso[2], iso[3]]);
-    let out = CUBE_OUT * std::f32::consts::FRAC_1_SQRT_2 - 0.5;
-    assert!(centre.x - corner.x >= out && corner.y - centre.y >= out, "{centre:?} beyond {corner:?}");
+fn the_cube_is_pinned_while_placing_inventor() {
+    the_cube_is_pinned_while_placing(inventor(Drawing));
+}
+
+#[test]
+fn the_cube_is_pinned_while_placing_solidcraft() {
+    the_cube_is_pinned_while_placing(Harness::new());
 }
 
 #[test]

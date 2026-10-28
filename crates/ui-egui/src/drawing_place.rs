@@ -2,10 +2,11 @@
 //! (SolidCraft's drawings run this same code).
 //!
 //! - **Base view.** With the Base View panel open on a new view, a live preview of the view
-//!   follows the cursor on the sheet. A small cube beside the preview picks the orientation: a
-//!   click on a face, edge or corner sets the panel's orientation and the preview turns. The cube
-//!   is a picker drawn with the navigation cube's facets (`navigation_cube::target_at`); it never
-//!   moves the sheet camera. A click on the sheet (or Enter, OK) places the base view where its
+//!   follows the cursor on the sheet. A small cube pinned at the canvas's top-right corner (where
+//!   the part's ViewCube sits, wave 3 R98) picks the orientation: a click on a face, edge or
+//!   corner sets the panel's orientation, the cube turns in place and the preview turns. The cube
+//!   never follows the cursor or the preview. It is a picker drawn with the navigation cube's
+//!   facets (`navigation_cube::target_at`); it never moves the sheet camera. A click on the sheet (or Enter, OK) places the base view where its
 //!   preview is: one `drawing.view.base`, one undo step.
 //! - **Projected views.** The command goes on: moving away from the base view previews the view
 //!   its direction gives (top, bottom, left, right; iso on a diagonal), aligned with it, and each
@@ -30,19 +31,18 @@ use crate::drawing_ui::{DrawingPanel, DrawingTool};
 use crate::drawing_view_panel::{Origin, ViewPanel};
 use crate::navigation::CameraInput;
 use crate::scenario;
-use crate::sheet_canvas::{paper_at, screen_of};
+use crate::sheet_canvas::paper_at;
 
 /// The on-sheet cube's half-width, points (the 3D view's cube is 40 design points of 164 in 112).
 pub(crate) const CUBE_HALF: f32 = 27.0;
-/// How far the cube's centre sits out from the preview's top-right corner, points (diagonally).
-pub(crate) const CUBE_OUT: f32 = 60.0;
+/// How far the cube's centre sits in from the top-right corner of the canvas's content area on
+/// each axis, points: the centre of the part ViewCube's box (`navigation_cube::SIZE` square at
+/// the top-right of the viewport's content), so the cube is where the 3D view's cube is (R98).
+pub(crate) const CUBE_INSET: f32 = crate::viewport::navigation_cube::SIZE / 2.0;
 /// The navigation cube's design half-width the cube's labels are scaled from.
 const CUBE_DESIGN_HALF: f32 = 40.0;
 /// The preview is computed again only when the cursor leaves its cell (R89), inches.
 const CELL_IN: f64 = 0.05;
-/// Half-width of the path from the preview to the cube along which the preview waits, points (at
-/// the preview's end; it widens to the cube).
-const PATH_NEAR: f32 = 10.0;
 /// A click picks a view within this many points.
 const PICK_PX: f64 = 4.0;
 
@@ -73,9 +73,6 @@ pub(crate) struct Place {
     pub anchor: Option<[f64; 2]>,
     /// The last cursor point on the sheet (inches), for projected views.
     pub cursor: Option<[f64; 2]>,
-    /// The preview's paper box the cube stands beside; kept while only the orientation changes,
-    /// so the cube stays under the pointer that clicked it.
-    cube_box: Option<[f64; 4]>,
     /// The panel's fields (position aside) the preview was computed for.
     params_seen: Option<Value>,
     /// Enter ends projection only from the frame after it began (the Enter that placed the base
@@ -92,7 +89,6 @@ impl Place {
             preview_key: None,
             anchor: None,
             cursor: None,
-            cube_box: None,
             params_seen: None,
             armed: false,
         }
@@ -172,22 +168,12 @@ pub(crate) fn base_position(app: &SolveApp) -> [f64; 2] {
     })
 }
 
-/// The paper box [x0, y0, x1, y1] of `curves`.
-fn paper_box(curves: &[(PaperCurve, bool)]) -> Option<[f64; 4]> {
-    let mut b = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
-    for (c, _) in curves {
-        for [x, y] in crate::sheet_canvas::curve_points(c) {
-            let (x, y) = (f64::from(x), f64::from(y));
-            b = [b[0].min(x), b[1].min(y), b[2].max(x), b[3].max(y)];
-        }
-    }
-    (b[0] <= b[2] && b[1] <= b[3]).then_some(b)
-}
-
-/// The on-sheet cube's centre: beside the preview's top-right corner, 60 points out.
+/// The on-sheet cube's centre on canvas `rect`: pinned `CUBE_INSET` in from the top-right corner
+/// of the canvas's content area (below a floating ribbon, as the part's ViewCube box is), whatever
+/// the cursor, the preview or the orientation do (R98).
 pub(crate) fn cube_centre(app: &SolveApp, rect: Rect) -> Pos2 {
-    let corner = place(app).and_then(|p| p.cube_box).map_or_else(|| base_position(app), |b| [b[2], b[3]]);
-    screen_of(app, rect, corner) + vec2(1.0, -1.0) * (CUBE_OUT * std::f32::consts::FRAC_1_SQRT_2)
+    let content = crate::shell::content_rect(app, rect);
+    Pos2::new(content.right() - CUBE_INSET, content.top() + CUBE_INSET)
 }
 
 /// The cube's orientation while it is up: a base view is being placed and its orientation may
@@ -205,16 +191,6 @@ fn cube_target_at(app: &SolveApp, rect: Rect, p: Pos2) -> Option<CubeTarget> {
     }
     let t = cube_shown(app)?;
     crate::viewport::navigation_cube::target_at(&cube_camera(t), cube_centre(app, rect), f64::from(CUBE_HALF), p).and_then(target_of)
-}
-
-/// Whether `p` is on the way from the preview at `from` to the cube at `cube`: a path that
-/// widens from `PATH_NEAR` at the preview to the cube's reach.
-fn toward_cube(p: Pos2, from: Pos2, cube: Pos2) -> bool {
-    let ab = cube - from;
-    let len = ab.length_sq();
-    let t = if len > 0.0 { ((p - from).dot(ab) / len).clamp(0.0, 1.0) } else { 0.0 };
-    let reach = PATH_NEAR + t * (CUBE_HALF * 1.6 - PATH_NEAR);
-    p.distance(from + ab * t) <= reach
 }
 
 /// The ribbon's Base and BV (`DRAWING_STARTS`): the Base View panel on the ribbon path, its
@@ -268,7 +244,7 @@ pub(crate) fn base_placed(app: &mut SolveApp, view: u64) {
     let Some(p) = place_mut(app) else { return };
     p.stage = Stage::Project { parent: view };
     p.placed.push(view);
-    (p.preview_key, p.params_seen, p.cube_box, p.armed) = (None, None, None, false);
+    (p.preview_key, p.params_seen, p.armed) = (None, None, false);
     app.drawing.preview.clear();
 }
 
@@ -312,7 +288,10 @@ pub(crate) fn input(app: &mut SolveApp, ui: &egui::Ui, rect: Rect, resp: &Respon
             }
             let cube = hover.and_then(|p| cube_target_at(app, rect, p));
             if let Some(p) = hover.filter(|_| cube.is_none()) {
-                follow(app, rect, p);
+                let at = paper_at(app, rect, p);
+                if let Some(pl) = place_mut(app) {
+                    pl.anchor = Some(at);
+                }
             }
             if clicked {
                 match cube {
@@ -369,17 +348,6 @@ pub(crate) fn input(app: &mut SolveApp, ui: &egui::Ui, rect: Rect, resp: &Respon
     true
 }
 
-/// The base view's preview follows the cursor, except on the way to the cube (so the cube can be
-/// reached): there it waits.
-fn follow(app: &mut SolveApp, rect: Rect, p: Pos2) {
-    let at = paper_at(app, rect, p);
-    let anchor = place(app).and_then(|pl| pl.anchor);
-    let wait = anchor.is_some_and(|a| cube_shown(app).is_some() && toward_cube(p, screen_of(app, rect, a), cube_centre(app, rect)));
-    if !wait && let Some(pl) = place_mut(app) {
-        pl.anchor = Some(at);
-    }
-}
-
 /// Place the base view the panel describes where its preview is (the panel's own OK path).
 fn place_base(app: &mut SolveApp) {
     let Some(DrawingPanel::View(mut p)) = app.drawing.panel.take() else { return };
@@ -404,19 +372,10 @@ fn refresh_preview(app: &mut SolveApp) {
             if pl.preview_key == Some(key) && pl.params_seen.as_ref() == Some(&seen) {
                 return;
             }
-            let moved = pl.preview_key.map(|k| k.0) != Some(key.0) || pl.cube_box.is_none();
             let curves = preview_view(&app.session, "drawing.view.base", &crate::drawing_view_panel::base_params(p, at)).unwrap_or_default();
-            let bounds = paper_box(&curves).unwrap_or([at[0], at[1], at[0], at[1]]);
             app.drawing.preview = curves;
             if let Some(pl) = place_mut(app) {
                 (pl.preview_key, pl.params_seen) = (Some(key), Some(seen));
-                if moved {
-                    pl.cube_box = Some(bounds);
-                } else if let Some(b) = pl.cube_box.as_mut() {
-                    // A turn in place: the cube stays put unless the new preview reaches past
-                    // its corner, then it steps out so it never sits on the preview.
-                    (b[2], b[3]) = (b[2].max(bounds[2]), b[3].max(bounds[3]));
-                }
             }
         }
         Stage::Project { parent } => {

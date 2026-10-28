@@ -4,7 +4,7 @@ use crate::icons::navigation::{Facet, arrow, curved_arrow, paint_cube};
 use crate::profile::ViewCubeStyle;
 use solidcraft_engine::geom::Ring;
 
-pub(super) const SIZE: f32 = 112.0;
+pub(crate) const SIZE: f32 = 112.0;
 // Paint and picking use the same original coordinate space, scaled as a group.
 pub(super) const DESIGN_SIZE: f32 = 164.0;
 const HALF: f64 = 40.0;
