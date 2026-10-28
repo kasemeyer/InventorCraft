@@ -431,3 +431,19 @@ fn preview_view_is_fast_enough_for_hover() {
     // debug build (measured about 27 ms).
     assert!(ms < 250.0, "preview_view took {ms:.1} ms");
 }
+
+#[test]
+fn the_cube_steps_out_of_a_larger_preview() {
+    // Final wave item 15: after a turn to a larger preview the cube still sits beyond its
+    // top-right corner, never on it.
+    let (mut h, _) = placing();
+    hover(&mut h, [10.0, 8.0]);
+    let front = preview_box(&h);
+    cube_click(&mut h, "iso_top_right");
+    let iso = preview_box(&h);
+    assert!(iso[3] > front[3] + 0.5, "the iso preview is taller: {front:?} {iso:?}");
+    let centre = cube_centre(&h.app, canvas());
+    let corner = screen(&h, [iso[2], iso[3]]);
+    let out = CUBE_OUT * std::f32::consts::FRAC_1_SQRT_2 - 0.5;
+    assert!(centre.x - corner.x >= out && corner.y - centre.y >= out, "{centre:?} beyond {corner:?}");
+}

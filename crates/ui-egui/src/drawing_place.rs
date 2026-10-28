@@ -391,6 +391,10 @@ fn refresh_preview(app: &mut SolveApp) {
                 (pl.preview_key, pl.params_seen) = (Some(key), Some(seen));
                 if moved {
                     pl.cube_box = Some(bounds);
+                } else if let Some(b) = pl.cube_box.as_mut() {
+                    // A turn in place: the cube stays put unless the new preview reaches past
+                    // its corner, then it steps out so it never sits on the preview.
+                    (b[2], b[3]) = (b[2].max(bounds[2]), b[3].max(bounds[3]));
                 }
             }
         }
