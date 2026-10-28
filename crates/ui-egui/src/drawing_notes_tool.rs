@@ -621,6 +621,9 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context, mut p: TextPanel) {
     let tr = crate::i18n::tr;
     let title = if p.edit.is_some() { tr("ui.drawing.edit_note") } else { tr("ui.drawing.tab_text") };
     let valid = p.can_ok();
+    // Ctrl+Enter is OK (Enter adds a line to the text); taken before the text box sees it, and
+    // not while the marking menu holds the keys.
+    let ctrl_enter = !crate::marking_menu::holds_keys(app) && ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Enter));
     let (closed, action) = crate::ui_kit::Window::new(egui::Id::new("sc_drawing_text"), "text", title)
         .placed(egui::Align2::LEFT_TOP, crate::browser::panel_pos(app))
         .actions(crate::i18n::tr_label("OK"), tr("ui.cancel"), None)
@@ -633,7 +636,7 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context, mut p: TextPanel) {
         crate::drawing_ui::panel_cancel(app);
         return;
     }
-    if action == crate::ui_kit::Action::Ok && apply(app, &mut p) {
+    if (action == crate::ui_kit::Action::Ok || (ctrl_enter && valid)) && apply(app, &mut p) {
         app.drawing.panel = None;
         return;
     }

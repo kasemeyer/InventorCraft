@@ -599,3 +599,31 @@ fn the_leader_attaches_within_the_engines_at_tolerance() {
     assert!(matches!(tool(&h), NoteTool::Leader { attach: Some(_), .. }), "0.05 in off: attached");
     assert!(solidcraft_engine::drawing::AT_TOLERANCE_IN > 0.05 && solidcraft_engine::drawing::AT_TOLERANCE_IN < 0.15);
 }
+
+#[test]
+fn ctrl_enter_is_ok_and_enter_adds_a_line() {
+    // Final wave item 26.
+    let (mut h, ..) = sheet(inventor(Drawing));
+    alias(&mut h, "T");
+    click_paper(&mut h, [25.0, 15.0]);
+    type_text(&mut h, "drawing_text:text", "A");
+    key(&mut h, "Enter");
+    h.step(&json!({"text": "B"})).unwrap();
+    h.frames(2);
+    assert_eq!(
+        panel(&h).text,
+        "A
+B",
+        "Enter adds a line"
+    );
+    let undo = h.app.session.undo.len();
+    h.step(&json!({"key": "Enter", "ctrl": true, "cmd": true})).unwrap();
+    h.frames(2);
+    assert!(h.app.drawing.panel.is_none(), "Ctrl+Enter is OK");
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(
+        sent(&h).1["text"],
+        "A
+B"
+    );
+}
