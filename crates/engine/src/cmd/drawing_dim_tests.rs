@@ -241,6 +241,16 @@ fn edit_sets_precision_and_text() {
     assert_eq!(bad_message(s.execute("drawing.dim.edit", &json!({"dim": h, "precision": 7}))), "precision must be 0 to 6");
     assert_eq!(s.undo.len(), undo);
     assert_eq!(dimension_text(model(&s), h).as_deref(), Some("3.00 TYP"));
+    // Final wave item 22: `precision: null` takes the style's precision again (one step).
+    let style_decimals = model(&s).paper.dim_style(&dim(&s, h).1.style).unwrap().decimals;
+    let r = run(&mut s, "drawing.dim.edit", json!({"dim": h, "precision": 4}));
+    assert_eq!(r["text"].as_str(), Some("3.0000 TYP"));
+    let undo = s.undo.len();
+    let r = run(&mut s, "drawing.dim.edit", json!({"dim": h, "precision": null}));
+    assert_eq!(s.undo.len(), undo + 1);
+    assert!(!dim(&s, h).1.overrides.contains_key("decimals"));
+    assert_eq!(style(&s, h).decimals, style_decimals);
+    assert_eq!(r["text"].as_str(), Some("3.00 TYP"));
     // A view curve is not a dimension.
     let edge = handle_of_edge(&s, v, &bottom).0;
     assert_eq!(bad_message(s.execute("drawing.dim.edit", &json!({"dim": edge, "precision": 2}))), format!("{edge} is not a dimension"));

@@ -369,10 +369,9 @@ pub(crate) fn edits(p: &DimPanel) -> Option<Value> {
     if p.hide_value != *hide_value {
         out.insert("hide_value".into(), json!(p.hide_value));
     }
-    if p.precision != *precision
-        && let Some(n) = p.precision
-    {
-        out.insert("precision".into(), json!(n));
+    if p.precision != *precision {
+        // None: the style's precision again (`precision: null` clears the dimension's own).
+        out.insert("precision".into(), json!(p.precision));
     }
     if p.justify != *justify {
         let name = |names: &[&'static str; 3], i: usize| names.get(i).copied().unwrap_or(names[0]);

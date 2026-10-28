@@ -278,6 +278,19 @@ fn edit_sets_precision_and_text() {
     click(&mut h, "dialog:ok");
     assert!(h.app.drawing.panel.is_none());
     assert_eq!(h.app.session.undo.len(), undo + 2);
+
+    // Final wave item 22: Precision › the style's row clears the dimension's own precision.
+    double_click_paper(&mut h, [10.0, 5.8]);
+    click(&mut h, "drawing_dim:hide_value");
+    click(&mut h, "drawing_dim:tab:precision");
+    click(&mut h, "drawing_dim:precision:style");
+    assert_eq!(panel(&h).precision, None);
+    click(&mut h, "dialog:ok");
+    assert!(h.app.drawing.panel.is_none());
+    assert_eq!(h.app.session.undo.len(), undo + 3);
+    assert_eq!(text(&h, dim), "3.00 TYP", "the style's two decimals again");
+    double_click_paper(&mut h, [10.0, 5.8]);
+    assert_eq!(panel(&h).precision, None);
 }
 
 #[test]
@@ -294,6 +307,11 @@ fn edit_sends_only_the_changed_fields() {
     assert_eq!(edits(&p), Some(json!({"dim": dim, "precision": 1, "text": "<<>> TYP"})));
     p.justify = [1, 2];
     assert_eq!(edits(&p), Some(json!({"dim": dim, "precision": 1, "text": "<<>> TYP", "justify": {"horizontal": "first", "vertical": "below"}})));
+    // Back to the style's precision from one of its own: `precision: null` (final wave item 22).
+    let mut q = panel(&h).clone();
+    q.original.2 = Some(3);
+    q.precision = None;
+    assert_eq!(edits(&q), Some(json!({"dim": dim, "precision": null})));
 }
 
 #[test]

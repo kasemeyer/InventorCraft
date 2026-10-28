@@ -41,7 +41,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("drawing.dim.edit", "Edit Dimension", edit).icon("edit").params(
         "dim: a dimension's handle; text?: what it says, where <<>> stands for the measured value (\"\" = the value alone); hide_value?: bool (true drops <<>>, false puts it back); \
-         precision?: 0 to 6 decimals; justify?: {horizontal?: center|first|second, vertical?: centered|above|below}; \
+         precision?: 0 to 6 decimals, or null for the style's; justify?: {horizontal?: center|first|second, vertical?: centered|above|below}; \
          ext_lines?: {first?: bool, second?: bool} (false hides that extension line) → handle, kind, text",
     ),
 ];
@@ -385,6 +385,8 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
         }
         None => {}
     }
+    // `precision: null` clears the dimension's own precision: it takes the style's again.
+    let clear_precision = matches!(p.get("precision"), Some(Value::Null));
     if let Some(n) = p.get("precision").filter(|n| !n.is_null()) {
         let n = n.as_u64().filter(|n| *n <= 6).ok_or_else(|| bad(cmd, "precision must be 0 to 6"))?;
         overrides.insert("decimals".into(), json!(n));
@@ -423,10 +425,13 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
             overrides.insert("suppressExt2".into(), json!(!second));
         }
     }
-    if !named && overrides.is_empty() {
+    if !named && overrides.is_empty() && !clear_precision {
         return Err(bad(cmd, "name text, hide_value, precision, justify or ext_lines"));
     }
     d.overrides.extend(overrides);
+    if clear_precision {
+        d.overrides.remove("decimals");
+    }
     d.block = None;
     let kind = dims::kind_name(&d);
     drawing::edit(s, cmd, |m, _| {
