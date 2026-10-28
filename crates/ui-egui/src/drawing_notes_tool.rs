@@ -255,6 +255,11 @@ pub(crate) fn leader_running(app: &SolveApp) -> bool {
     matches!(tool(app), Some(NoteTool::Leader { .. }))
 }
 
+/// Single-Segment Leader is on (its list row shows the check mark).
+pub(crate) fn single_segment(app: &SolveApp) -> bool {
+    matches!(tool(app), Some(NoteTool::Leader { single: true, .. }))
+}
+
 /// The leader's points so far (the list's Back).
 fn leader_points(app: &SolveApp) -> usize {
     match tool(app) {

@@ -285,7 +285,10 @@ fn drawing_item(app: &SolveApp, id: &str) -> Option<Item> {
         // Leader Text's list (icons R91).
         "ui.drawing.back" => act("ui.drawing.back", "Back", "rollback").on(d.panel.is_none() && crate::drawing_notes_tool::can_go_back(app)),
         "ui.drawing.singleSegment" => {
-            act("ui.drawing.singleSegment", "Single-Segment Leader", "line").on(d.panel.is_none() && crate::drawing_notes_tool::leader_running(app))
+            // A toggle: checked while on ("current" is the list's check mark).
+            act("ui.drawing.singleSegment", "Single-Segment Leader", "line")
+                .key(if crate::drawing_notes_tool::single_segment(app) { "current" } else { "" })
+                .on(d.panel.is_none() && crate::drawing_notes_tool::leader_running(app))
         }
         "ui.ok" => act("ui.ok", "OK", "finish").key("Enter").on(d.panel.is_some() && crate::drawing_ui::panel_can_ok(app)),
         "ui.cancel" => act("ui.cancel", "Cancel", "sketch_cancel").key("Esc").on(d.tool.is_some() || d.panel.is_some()),

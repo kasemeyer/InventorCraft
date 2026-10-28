@@ -276,6 +276,7 @@ fn leader_back_and_single_segment() {
     assert!(menu["radial"].as_array().is_none_or(|r| r.is_empty()), "a list, never a ring: {menu}");
     let icons: Vec<&str> = menu["items"].as_array().unwrap()[1..3].iter().map(|i| i["icon"].as_str().unwrap()).collect();
     assert_eq!(icons, ["rollback", "line"]);
+    assert_eq!(menu["items"][2]["shortcut"], "", "Single-Segment starts unchecked");
     crate::context_menu::pick(&mut h.app, "ui.drawing.back").unwrap();
     h.frames(2);
     assert!(matches!(tool(&h), NoteTool::Leader { points, .. } if points.len() == 2), "Back drops the last point");
@@ -289,6 +290,13 @@ fn leader_back_and_single_segment() {
     h.frames(2);
     assert!(matches!(tool(&h), NoteTool::Leader { single: true, .. }));
     assert!(h.app.drawing.panel.is_none());
+    // Final wave item 24: the row shows its check mark while on ("current" → `checked`).
+    right_click_paper(&mut h, [25.0, 15.0]);
+    let menu = crate::context_menu::describe(&h.app);
+    assert_eq!(menu["items"][2]["id"], "ui.drawing.singleSegment");
+    assert_eq!(menu["items"][2]["shortcut"], "current");
+    h.app.viewport.context_menu = None;
+    h.frames(2);
     click_paper(&mut h, [11.5, 5.5]);
     assert!(matches!(tool(&h), NoteTool::Leader { points, .. } if points.len() == 2));
     assert_eq!(panel(&h).justify, None);
