@@ -42,6 +42,16 @@ impl DrawingModel {
         paper.layouts.clear();
         DrawingModel { paper, sheets: Vec::new(), views: BTreeMap::new(), properties: DrawingProps::default(), template, next_view_number: 1 }
     }
+
+    /// The identifier the next automatically named view takes, and its number: `VIEW<n>` from
+    /// `next_view_number`, past any identifier already in use. The one numbering rule.
+    pub fn next_view_identifier(&self) -> (u32, String) {
+        let mut n = self.next_view_number.max(1);
+        while self.views.values().any(|v| v.identifier == format!("VIEW{n}")) {
+            n += 1;
+        }
+        (n, format!("VIEW{n}"))
+    }
 }
 
 /// One sheet: a CADCraft layout with our border and title block placed on it.

@@ -326,3 +326,37 @@ fn a_raster_saves_what_it_was_drawn_of() {
     let old = serde_json::json!({"width": 2, "height": 1, "png": "iVBORw=="});
     assert_eq!(serde_json::from_value::<RasterRef>(old).unwrap().drawn_for, None);
 }
+
+/// D-2 final wave item 14: the one numbering rule, which the engine and the Base View panel share.
+#[test]
+fn the_next_view_identifier_skips_identifiers_in_use() {
+    let mut m = DrawingModel::new(TemplateId::AnsiInch);
+    assert_eq!(m.next_view_identifier(), (1, "VIEW1".to_string()));
+    let view = |id: u64, identifier: &str| DrawingView {
+        id,
+        identifier: identifier.into(),
+        sheet: 0,
+        parent: None,
+        projection: None,
+        model: ModelRef { path: "block.tcipart".into(), project_path: None, kind: ModelKind::Part },
+        model_state: None,
+        orientation: CubeTarget::from_name("front").unwrap().orientation(),
+        scale: 1.0,
+        scale_from_base: false,
+        lines: LineStyle::Hidden,
+        shaded: false,
+        style_from_base: false,
+        tangent_edges: false,
+        position: solidcraft_geom::Vec2::new(10.0, 8.0),
+        label_visible: false,
+        group: cadcraft_doc::Handle(0x2a),
+        revision: ModelRevision("ab".into()),
+        raster: None,
+    };
+    m.views.insert(1, view(1, "VIEW2"));
+    m.views.insert(2, view(2, "VIEW3"));
+    m.next_view_number = 2;
+    assert_eq!(m.next_view_identifier(), (4, "VIEW4".to_string()));
+    m.next_view_number = 0;
+    assert_eq!(m.next_view_identifier(), (1, "VIEW1".to_string()), "never below 1");
+}

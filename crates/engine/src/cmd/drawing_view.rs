@@ -304,12 +304,9 @@ fn place(s: &mut Session, cmd: &str, mut planned: Planned) -> Result<Value> {
         view.identifier = match identifier {
             Some(text) => text,
             None => {
-                let mut n = m.next_view_number.max(1);
-                while m.views.values().any(|v| v.identifier == format!("VIEW{n}")) {
-                    n += 1;
-                }
+                let (n, identifier) = m.next_view_identifier();
                 m.next_view_number = n + 1;
-                format!("VIEW{n}")
+                identifier
             }
         };
         mapper::place(m, &view, &geometry);

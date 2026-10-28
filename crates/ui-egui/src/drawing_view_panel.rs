@@ -181,13 +181,9 @@ fn orientation_of(v: &DrawingView) -> CubeTarget {
     v.orientation.preset.or_else(|| CubeTarget::matching(&v.orientation)).unwrap_or_else(|| CubeTarget::nearest(v.orientation.dir))
 }
 
-/// The identifier `drawing.view.base` would give the next view (`VIEW<n>`).
+/// The identifier `drawing.view.base` would give the next view (`VIEW<n>`): the model's own rule.
 fn next_identifier(m: &DrawingModel) -> String {
-    let mut n = m.next_view_number.max(1);
-    while m.views.values().any(|v| v.identifier == format!("VIEW{n}")) {
-        n += 1;
-    }
-    format!("VIEW{n}")
+    m.next_view_identifier().1
 }
 
 /// Open the panel (a drawing only; never while a drawing tool runs).
