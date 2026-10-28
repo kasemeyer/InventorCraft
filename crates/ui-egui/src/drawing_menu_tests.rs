@@ -175,7 +175,13 @@ fn a_selection_gets_a_list_not_a_ring() {
     assert_eq!(undo(&h), start + 1);
     assert!(h.app.drawing.tool.is_none());
     let m = h.app.session.doc.drawing.as_deref().unwrap();
-    assert_eq!(solidcraft_engine::drawing::note_at(m, note).unwrap().text, "NOTES:");
+    let info = solidcraft_engine::drawing::note_at(m, note).unwrap();
+    assert_eq!(info.text, "NOTES:");
+    // Where it went (final wave item 35): its text sits at [4, 3].
+    let Some(cadcraft_doc::EntityKind::MText(t)) = m.paper.entity(cadcraft_doc::Handle(info.text_handle)).map(|e| &e.kind) else {
+        panic!("the note's text")
+    };
+    assert!((t.insert.x - 4.0).abs() < 1e-3 && (t.insert.y - 3.0).abs() < 1e-3, "{:?}", t.insert);
 }
 
 fn text_panel(h: &Harness) -> &TextPanel {
