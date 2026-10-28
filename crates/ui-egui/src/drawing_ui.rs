@@ -70,6 +70,15 @@ pub(crate) fn panel_ok(app: &mut SolveApp) {
     }
 }
 
+/// End the running drawing tool, whichever it is (Esc, Done, Cancel): each tool cleans up after
+/// itself (what it placed stays); any other tool is simply dropped with the preview.
+pub(crate) fn end_tool(app: &mut SolveApp) {
+    match &app.drawing.tool {
+        Some(DrawingTool::Place(_)) => crate::drawing_place::finish(app),
+        None => {}
+    }
+}
+
 /// Cancel on the open panel: it closes and sends nothing.
 pub(crate) fn panel_cancel(app: &mut SolveApp) {
     app.drawing.panel = None;

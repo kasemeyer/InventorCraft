@@ -276,6 +276,11 @@ pub(crate) fn input(app: &mut SolveApp, ui: &egui::Ui, rect: Rect, resp: &Respon
     let hover = input.hover.filter(|_| input.inside);
     let clicked = resp.clicked() && !navigating;
     let Some(stage) = place(app).map(|p| p.stage) else {
+        // Placed views drag and open for edit only with no tool running: another tool (a
+        // dimension's picks) owns the sheet's clicks and drags.
+        if app.drawing.tool.is_some() {
+            return false;
+        }
         return placed_views(app, ui, rect, resp, hover, navigating);
     };
     match stage {

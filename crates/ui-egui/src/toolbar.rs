@@ -2448,8 +2448,8 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 } else if app.dialog.is_some() {
                     crate::dialogs::cancel(app);
                 } else if app.drawing.tool.is_some() {
-                    // A drawing tool's Esc: placing ends, the views it placed stay (Task 6).
-                    crate::drawing_place::finish(app);
+                    // A drawing tool's Esc: it ends, what it placed stays (Tasks 6, 8).
+                    crate::drawing_ui::end_tool(app);
                 } else if matches!(app.drawing.panel, Some(crate::drawing_ui::DrawingPanel::View(_))) {
                     // The Base View panel's Esc (after the marking menu's, above).
                     crate::drawing_ui::panel_cancel(app);
