@@ -172,7 +172,10 @@ fn view(app: &mut SolveApp, ui: &mut egui::Ui, m: &DrawingModel, v: &DrawingView
     let key = format!("d:view:{}", v.id);
     let children: Vec<&DrawingView> = m.views.values().filter(|c| c.parent == Some(v.id)).collect();
     let base = v.parent.is_none();
-    let folds = base || !children.is_empty();
+    // A projected view whose base is gone sits at the top: it keeps its projected icon and,
+    // like a base view, shows its model.
+    let top = v.parent.is_none_or(|p| !m.views.contains_key(&p));
+    let folds = top || !children.is_empty();
     let open = is_open(app, &key, true);
     let label = view_label(v, missing.contains(&v.id));
     let pick = PaperPick::View { view: v.id };
@@ -217,7 +220,7 @@ fn view(app: &mut SolveApp, ui: &mut egui::Ui, m: &DrawingModel, v: &DrawingView
     for c in children {
         view(app, ui, m, c, missing, depth + 1);
     }
-    if base {
+    if top {
         let icon = if v.model.kind == ModelKind::Assembly { "component" } else { "body" };
         let file = model_file(v);
         // One model can sit under base views on several sheets: its handle carries the sheet and

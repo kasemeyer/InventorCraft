@@ -315,3 +315,28 @@ fn the_missing_cache_is_keyed_by_tab_and_document() {
     h.app.drawing.missing = Some(((active + 1, doc), vec![999]));
     assert_eq!(drawing::missing(&mut h.app), Vec::<u64>::new(), "another tab's answer is not read");
 }
+
+#[test]
+fn an_orphaned_projected_view_shows_its_model() {
+    // Final wave item 9: VIEW2's base gone, it sits under the sheet with its projected icon
+    // and its model row.
+    let (mut h, _, _, [v1, ..]) = three_views();
+    let mut doc = (*h.app.session.doc).clone();
+    let mut m = doc.drawing.as_deref().unwrap().clone();
+    m.views.remove(&v1);
+    doc.drawing = Some(std::sync::Arc::new(m));
+    h.app.session.doc = std::sync::Arc::new(doc);
+    h.frames(3);
+    let want = [
+        ("block", 0),
+        ("Drawing Resources", 1),
+        ("Sheet:1", 1),
+        ("Border", 2),
+        ("Title Block", 2),
+        ("VIEW2:block.tcipart", 2),
+        ("block.tcipart", 3),
+        ("VIEW3:block.tcipart", 2),
+        ("block.tcipart", 3),
+    ];
+    assert_eq!(tree(), want.map(|(l, d)| (l.to_string(), d)));
+}
