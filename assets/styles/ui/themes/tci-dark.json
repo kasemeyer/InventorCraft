@@ -1,6 +1,6 @@
 {
   "base": "dark",
-  "comment": "Measured: accent #38abdf, ink #f5f5f5, hover #495466 (and the other measured keys). Derived: every neutral ink (icon, dimension, sketch_point, form_ink, app_bar_icon[0], sketch_fixed, icons.highlight/sheet_light/glint) is the measured ink; app_bar_hover* are the ink at their alpha over the app bar, so hover brightens; accent_soft = 25% and selected_bg = 35% of the accent over the measured hover, keeping ink contrast >= 4.5; cube_hover = 35% of the way from the accent to the ink, lighter than cube_face so a hovered face brightens.",
+  "comment": "Measured: accent #38abdf, ink #f5f5f5, hover #495466 (and the other measured keys). Derived: every neutral ink (icon, dimension, sketch_point, form_ink, app_bar_icon[0], sketch_fixed, icons.highlight/sheet_light/glint) is the measured ink; app_bar_hover* are the ink at their alpha over the app bar, so hover brightens; accent_soft = 25% and selected_bg = 35% of the accent over the measured hover, keeping ink contrast >= 4.5; cube_hover = 35% of the way from the accent to the ink, lighter than cube_face so a hovered face brightens. Drawing sheet, measured on docs/evidence/screenshots/drawing-workflow/02-new-drawing-blank-sheet.png (3200 x 1916 px): sheet_paper #ebeadb at pixels (1600, 800) and (1200, 1200); sheet_border #000000 on the frame line at (556-557, 960) and (1600, 330-331); sheet_surround #2d3441 at (400, 960), the middle of the surround's gentle gradient (#252c38 at (510, 300) to #313845 at (450, 1500)).",
   "colors": {
     "accent": "#38abdf",
     "accent_soft": "#456a84",
@@ -161,9 +161,12 @@
     "sel_vertex": "#6699ff",
     "selected_bg": "#437290",
     "selected_ink": "#f5f5f5",
+    "sheet_border": "#000000",
     "sheet_fill": "#76c1c7",
     "sheet_ink": "#6cb7bd",
+    "sheet_paper": "#ebeadb",
     "sheet_soft": "#2e383d",
+    "sheet_surround": "#2d3441",
     "sketch": "#2878a9",
     "sketch_accent": "#0696d7",
     "sketch_centerline": "#dbb879",

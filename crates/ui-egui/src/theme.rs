@@ -667,6 +667,10 @@ pub struct Tokens {
     /// Viewport background (top and bottom of the gradient; equal for a flat fill).
     pub viewport_top: Color32,
     pub viewport_bottom: Color32,
+    /// A drawing sheet (Plan D-2): its paper, its border and title block, and the canvas around it.
+    pub sheet_paper: Color32,
+    pub sheet_border: Color32,
+    pub sheet_surround: Color32,
     pub grid: Color32,
     pub grid_major: Color32,
     /// A whole selected body.

@@ -173,6 +173,11 @@ impl Tokens {
             cube_hover: Color32::from_rgb(190, 220, 252),
             viewport_top: Color32::from_rgb(240, 243, 247),
             viewport_bottom: Color32::from_rgb(203, 210, 221),
+            // White paper and a black border, as printed; the canvas around it a step darker
+            // than the light viewport.
+            sheet_paper: Color32::WHITE,
+            sheet_border: Color32::BLACK,
+            sheet_surround: Color32::from_rgb(190, 197, 208),
             grid: Color32::from_rgb(196, 202, 212),
             grid_major: Color32::from_rgb(170, 178, 190),
             body_selected: Color32::from_rgb(110, 170, 235),
@@ -330,6 +335,8 @@ impl Tokens {
         t.origin_point = Color32::from_rgb(214, 215, 218);
         t.viewport_top = Color32::from_rgb(46, 52, 64);
         t.viewport_bottom = Color32::from_rgb(46, 52, 64);
+        // White paper on the dark viewport's colour.
+        t.sheet_surround = Color32::from_rgb(46, 52, 64);
         t.grid = Color32::from_rgb(59, 65, 76);
         t.grid_major = Color32::from_rgb(73, 79, 90);
         t.body = Color32::from_rgb(152, 156, 162);

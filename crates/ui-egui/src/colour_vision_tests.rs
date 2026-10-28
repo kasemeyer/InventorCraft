@@ -253,6 +253,8 @@ fn groups(t: &Tokens) -> Vec<Group> {
     };
     let a = &t.analysis;
     let mut out = vec![
+        // A drawing sheet's border and title block on its paper (R42).
+        group("sheet border", &[("sheet_border", t.sheet_border)], &[("sheet_paper", t.sheet_paper)]),
         group(
             "sketch lines",
             &[
@@ -379,6 +381,7 @@ const SHADED: [&str; 2] = ["analysis.draft", "analysis.access"];
 /// Tokens no colour vision mode needs to keep apart, and why. A new token fails
 /// `every_token_is_measured_or_carries_no_meaning` until it is in a group above or here.
 const NO_MEANING: &[(&str, &str)] = &[
+    ("sheet_surround", "the canvas around a drawing sheet: nothing is drawn on it"),
     ("borders.primary", "structural chrome: hierarchy uses width, pattern and placement, not hue"),
     ("borders.secondary", "structural chrome: hierarchy uses width, pattern and placement, not hue"),
     ("borders.secondary_dotted", "structural chrome: hierarchy uses width, pattern and placement, not hue"),
