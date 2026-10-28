@@ -654,11 +654,12 @@ fn body(ui: &mut egui::Ui, p: &mut TextPanel) {
             crate::ui_kit::text_emphasis(ui, &mut bold, &mut italic);
             let r = ui.toggle_value(&mut underline, egui::RichText::new("U").underline()).on_disabled_hover_text(tr("ui.drawing.underline"));
             scenario::publish_handle("drawing_text:underline", r.rect.center());
+            // What the scope really is, so a test of it reads the UI, not a constant.
+            for name in ["bold", "italic", "underline"] {
+                scenario::publish_count(&format!("drawing_text:{name}:enabled"), f64::from(u8::from(ui.is_enabled())));
+            }
         });
     });
-    for name in ["bold", "italic", "underline", "parameter"] {
-        scenario::publish_count(&format!("drawing_text:{name}:enabled"), 0.0);
-    }
     crate::ui_kit::row(ui, tr("ui.drawing.text_height"), |ui| {
         scenario::publish_handle("drawing_text:height", ui.available_rect_before_wrap().center());
         crate::ui_kit::text_field(ui, &mut p.height_text, "0.12 in");
@@ -683,6 +684,7 @@ fn body(ui: &mut egui::Ui, p: &mut TextPanel) {
             ui.horizontal(|ui| {
                 let r = ui.button("—");
                 scenario::publish_handle("drawing_text:parameter", r.rect.center());
+                scenario::publish_count("drawing_text:parameter:enabled", f64::from(u8::from(ui.is_enabled())));
                 ui.label(tr("ui.drawing.precision"));
                 ui.label(format!("{:.*}", PARAMETER_PRECISION, 3.123_f64));
             });
