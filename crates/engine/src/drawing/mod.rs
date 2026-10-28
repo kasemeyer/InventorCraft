@@ -28,7 +28,7 @@ pub(crate) use model_ref::rebased_models;
 pub use model_ref::{ModelProvider, missing_views, model_path, stale_views};
 pub use notes::{LEADER_ARROW, NOTE_HEIGHT_IN, NoteInfo, note_at};
 pub use orient::{Projection, aligned_position, projected_orientation, projection_at};
-pub use pick::{CurveKind, PaperPick, pick, preview_view};
+pub use pick::{AT_TOLERANCE_IN, CurveKind, PaperPick, pick, preview_view};
 pub use project::{PaperCurve, camera_for};
 pub use raster::{
     CaptureRasterizer, FLAT_GREY, MAX_RASTER_SIDE, PDF_PX_PER_IN, SCREEN_PX_PER_IN, ViewRasterizer, fresh as raster_fresh, raster_rect,

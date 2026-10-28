@@ -97,6 +97,10 @@ fn curve_kind(e: &Entity) -> Option<CurveKind> {
     }
 }
 
+/// How near a picked paper point must be to a view curve to name it (`{at}` picks, inches): the
+/// commands' `{at}` resolve and the UI's leader attachment use this one value.
+pub const AT_TOLERANCE_IN: f64 = 0.1;
+
 /// The nearest pickable thing on sheet `s.drawing_sheet` within `tol` paper inches of `at`.
 pub fn pick(s: &crate::Session, at: [f64; 2], tol: f64) -> Option<PaperPick> {
     let m = s.doc.drawing.as_deref()?;

@@ -580,3 +580,22 @@ fn the_leader_list_respects_the_open_panel() {
     assert!(h.app.drawing.tool.is_none());
     assert_eq!(crate::status_bar::texts(&h.app).left, crate::i18n::tr("ui.status_ready"));
 }
+
+#[test]
+fn the_leader_attaches_within_the_engines_at_tolerance() {
+    // Final wave item 25: zoomed far out (a screen pick reaches past 0.1 in), a click 0.15 in
+    // off the block's bottom edge does not attach; one 0.05 in off does, and the leader is placed
+    // attached (the engine resolves the same `{at}`).
+    let (mut h, ..) = sheet(inventor(Drawing));
+    h.app.cam.distance *= 8.0;
+    h.frames(2);
+    alias(&mut h, "LE");
+    click_paper(&mut h, [10.0, 6.35]);
+    assert!(matches!(tool(&h), NoteTool::Leader { attach: None, .. }), "0.15 in off: free");
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.frames(2);
+    alias(&mut h, "LE");
+    click_paper(&mut h, [10.0, 6.45]);
+    assert!(matches!(tool(&h), NoteTool::Leader { attach: Some(_), .. }), "0.05 in off: attached");
+    assert!(solidcraft_engine::drawing::AT_TOLERANCE_IN > 0.05 && solidcraft_engine::drawing::AT_TOLERANCE_IN < 0.15);
+}

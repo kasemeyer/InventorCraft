@@ -12,7 +12,7 @@ use solidcraft_doc::{DrawingModel, DrawingView, ViewId};
 use super::CommandSpec;
 use crate::drawing::dims::{self, Anchor, DXF_TOKEN, Direction, VALUE_TOKEN};
 use crate::drawing::mapper::{self, Seg, XKey, xkey_of};
-use crate::drawing::{self, PaperPick, pick};
+use crate::drawing::{self, AT_TOLERANCE_IN, PaperPick, pick};
 use crate::params::{bad, vec2};
 use crate::{Result, Session};
 
@@ -48,8 +48,6 @@ pub static COMMANDS: &[CommandSpec] = &[
 
 /// Most characters of a dimension's text.
 const MAX_TEXT: usize = 1000;
-/// How near a picked paper point must be to a view curve, inches.
-const AT_TOLERANCE_IN: f64 = 0.1;
 
 /// What `drawing.dim.*` is asked to make.
 #[derive(Clone, Copy, PartialEq)]

@@ -30,7 +30,7 @@
 use egui::{Pos2, Rect, Response};
 use serde_json::{Map, Value, json};
 use solidcraft_engine::doc::DocumentKind;
-use solidcraft_engine::drawing::{CurveKind, NOTE_HEIGHT_IN, PaperCurve, PaperPick, note_at, pick};
+use solidcraft_engine::drawing::{AT_TOLERANCE_IN, CurveKind, NOTE_HEIGHT_IN, PaperCurve, PaperPick, note_at, pick};
 use solidcraft_engine::geom::Vec2;
 
 use crate::SolveApp;
@@ -397,6 +397,12 @@ fn click(app: &mut SolveApp, rect: Rect, at: [f64; 2]) {
             open_new(app, Some(Justify::Left));
         }
         NoteTool::Leader { .. } => {
+            // The arrow end attaches to the edge the command's `{at}` will resolve: the same
+            // tolerance as the engine's, so a shown attachment is never refused.
+            let edge = match pick(&app.session, at, AT_TOLERANCE_IN) {
+                Some(p @ PaperPick::ViewEdge { view, curve, .. }) => Some((view, curve, p)),
+                _ => None,
+            };
             let mut done = false;
             if let Some(NoteTool::Leader { points, attach, single }) = tool_mut(app) {
                 if points.is_empty() {
