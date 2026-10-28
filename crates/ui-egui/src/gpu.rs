@@ -27,8 +27,45 @@ pub fn install(rs: &egui_wgpu::RenderState, scene: GpuTarget, window: GpuTarget,
     let window = GpuTarget { tess: tess.is_some(), ..window };
     let res = Renderer::with_window_target(&rs.device, scene, window, tess);
     let stats = res.stats();
-    rs.renderer.write().callback_resources.insert(res);
+    // A drawing's sheet is drawn in the window's pass, like the viewport's picture.
+    let sheet = solidcraft_gpu::sheet::SheetPass::new(&rs.device, window);
+    let mut renderer = rs.renderer.write();
+    renderer.callback_resources.insert(res);
+    renderer.callback_resources.insert(sheet);
     (scene, stats)
+}
+
+/// A frame of a drawing's sheet canvas as an egui paint callback: the scene (re-uploaded only
+/// when it is a new one) and where the canvas looks.
+pub struct SheetCallback {
+    pub scene: std::sync::Arc<solidcraft_gpu::sheet::SheetScene>,
+    pub view: solidcraft_gpu::sheet::SheetView,
+}
+
+impl egui_wgpu::CallbackTrait for SheetCallback {
+    fn prepare(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        _screen: &egui_wgpu::ScreenDescriptor,
+        _encoder: &mut wgpu::CommandEncoder,
+        resources: &mut egui_wgpu::CallbackResources,
+    ) -> Vec<wgpu::CommandBuffer> {
+        if let Some(pass) = resources.get_mut::<solidcraft_gpu::sheet::SheetPass>() {
+            pass.prepare(device, queue, &self.scene, self.view);
+        }
+        Vec::new()
+    }
+
+    fn paint(&self, info: egui::PaintCallbackInfo, pass: &mut wgpu::RenderPass<'static>, resources: &egui_wgpu::CallbackResources) {
+        let Some(sheet) = resources.get::<solidcraft_gpu::sheet::SheetPass>() else { return };
+        let vp = info.viewport_in_pixels();
+        if vp.width_px <= 0 || vp.height_px <= 0 {
+            return;
+        }
+        pass.set_viewport(vp.left_px as f32, vp.top_px as f32, vp.width_px as f32, vp.height_px as f32, 0.0, 1.0);
+        sheet.paint(pass);
+    }
 }
 
 /// Draw this process's headless pictures (`ui.render`, the agent's view image, thumbnails of

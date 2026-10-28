@@ -79,6 +79,10 @@ pub(crate) fn holds_keys(app: &SolveApp) -> bool {
 
 fn current(app: &SolveApp) -> Option<(MenuContext, &'static MenuLayout)> {
     let ctx = context(app);
+    // A drawing's sheet has no part or sketch ring: only a panel's (R15; Task 10 adds its own).
+    if app.session.doc.kind == DocumentKind::Drawing && ctx != MenuContext::Panel {
+        return None;
+    }
     layout(app)?.get(&ctx).map(|l| (ctx, l))
 }
 
@@ -143,8 +147,14 @@ fn selected_dimension(app: &SolveApp) -> Option<String> {
     }
 }
 
-/// One marking-menu entry for a layout id in a context.
-fn item(app: &SolveApp, id: &str, ctx: MenuContext) -> Item {
+/// One marking-menu entry for a layout id in a context. In a drawing, Done, Cancel, OK and
+/// Delete answer to the drawing's own tool, panel and selection (R72; a document-kind test).
+pub(crate) fn item(app: &SolveApp, id: &str, ctx: MenuContext) -> Item {
+    if app.session.doc.kind == DocumentKind::Drawing
+        && let Some(item) = drawing_item(app, id)
+    {
+        return item;
+    }
     let sketching = app.session.active_sketch.is_some();
     let bodies = || crate::context_menu::touched_bodies(app);
     match id {
@@ -223,6 +233,20 @@ fn item(app: &SolveApp, id: &str, ctx: MenuContext) -> Item {
         }
         id => cmd(app, id, solidcraft_engine::find_command(id).map_or(id, |c| c.label)),
     }
+}
+
+/// The drawing arm of [`item`]: `ui.done`/`ui.cancel` against the drawing tool, `ui.ok`/`ui.cancel`
+/// against the drawing panel, `ui.delete` against the sheet's selection. `ui.home` keeps its row:
+/// on a sheet it frames the sheet (`sheet_canvas::fit`, through `animate_view`).
+fn drawing_item(app: &SolveApp, id: &str) -> Option<Item> {
+    let d = &app.drawing;
+    Some(match id {
+        "ui.done" => act("ui.done", "OK", "finish").on(d.tool.is_some()),
+        "ui.ok" => act("ui.ok", "OK", "finish").key("Enter").on(d.panel.is_some() && crate::drawing_ui::panel_can_ok(app)),
+        "ui.cancel" => act("ui.cancel", "Cancel", "sketch_cancel").key("Esc").on(d.tool.is_some() || d.panel.is_some()),
+        "ui.delete" => act("ui.delete", "Delete", "delete").key("Del").on(!d.selection.is_empty()),
+        _ => return None,
+    })
 }
 
 #[cfg(test)]

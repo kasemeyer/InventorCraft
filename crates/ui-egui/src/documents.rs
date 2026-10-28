@@ -105,6 +105,8 @@ fn swap_in(app: &mut SolveApp, slot: DocSlot) -> DocSlot {
     crate::dialogs::cancel(app);
     crate::dim_view::cancel();
     app.tool = None;
+    // The sheet's selection, tool, panel and preview belong to the drawing that leaves.
+    app.drawing = Default::default();
     app.params = None;
     app.design_properties = None;
     app.bom = None;
@@ -217,6 +219,7 @@ pub fn adopt(app: &mut SolveApp, session: Session) {
         let rev = app.session.revision;
         crate::dialogs::cancel(app);
         app.tool = None;
+        app.drawing = Default::default();
         app.menu.props = None;
         crate::sketch_attachment_ui::clear(app);
         crate::alias_keys::cancel(app);

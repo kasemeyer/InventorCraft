@@ -13,6 +13,9 @@ solidcraft-engine = { workspace = true }
 egui = { workspace = true }
 egui-wgpu = { workspace = true }
 solidcraft-gpu = { workspace = true }
+# The vendored CADCraft drawing crates (Plan D-2): a drawing sheet's display list for the canvas.
+cadcraft-doc = { path = "../cadcraft-doc" }
+cadcraft-render = { path = "../cadcraft-render" }
 solidcraft-space-mouse = { workspace = true, features = ["serde"] }
 serde = { workspace = true }
 serde_json = { workspace = true }

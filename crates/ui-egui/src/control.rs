@@ -650,6 +650,17 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
                     };
                 }
             }
+            // A point on a drawing's sheet, in paper inches.
+            if let Some(q) = p.get("paper") {
+                let (Some(x), Some(y)) = (q.get(0).and_then(Value::as_f64), q.get(1).and_then(Value::as_f64)) else {
+                    return err("paper must be [x, y] in inches");
+                };
+                let Some(rect) = crate::scenario::rect_of("sheet_canvas").filter(|_| crate::sheet_canvas::shows(app)) else {
+                    return err("no drawing sheet is shown");
+                };
+                let [sx, sy] = crate::sheet_canvas::screen_of_f64(app, rect, [x, y]);
+                return ok(json!([sx, sy]));
+            }
             if let Some(d) = p.get("dimension").and_then(Value::as_str) {
                 return match crate::dim_view::text_at(d) {
                     Some(q) => ok(json!([q.x, q.y])),

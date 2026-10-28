@@ -55,6 +55,8 @@ mod dimension_create_ui_tests;
 pub mod documents;
 pub mod drag_extrude;
 pub mod drag_snap;
+pub(crate) mod drawing_menu;
+pub(crate) mod drawing_ui;
 pub mod edit_clipboard;
 #[cfg(test)]
 mod font_literals_tests;
@@ -206,6 +208,7 @@ pub mod save_job;
 pub mod scenario;
 pub mod select_other;
 pub mod selection;
+pub(crate) mod sheet_canvas;
 pub mod shell;
 #[cfg(test)]
 mod shell_face_sketch_ui_tests;
@@ -539,6 +542,8 @@ pub struct SolveApp {
     pending_fit: Option<(Camera, solidcraft_engine::geom::Aabb3, bool)>,
     /// The sheet metal flat pattern's own pan and zoom.
     pub flat_view: dialogs_sheet::FlatView,
+    /// A drawing's sheet: its selection, tool, panel and preview (reset when the active tab changes).
+    pub(crate) drawing: drawing_ui::DrawingUi,
     /// The start page.
     pub home: home::HomeState,
     /// The 3D mouse: which device, its reading, and the calibration window.
@@ -655,6 +660,7 @@ impl SolveApp {
             fitted: false,
             pending_fit: None,
             flat_view: Default::default(),
+            drawing: Default::default(),
             home: home::HomeState::default(),
             space_mouse: Default::default(),
             file_load: file_load::FileLoad::default(),
@@ -1164,6 +1170,17 @@ impl SolveApp {
             }
             return;
         }
+        // R2, R11: a drawing command with a UI tool starts it from the table (data rows keyed by
+        // command id, never a profile); Repeat remembers it as it does a tool.
+        if self.session.doc.kind == solidcraft_engine::doc::DocumentKind::Drawing
+            && let Some(start) = drawing_ui::start_for(id)
+        {
+            if let Some(spec) = solidcraft_engine::find_command(id) {
+                self.last_command = Some((spec.id.to_string(), spec.label.to_string()));
+            }
+            start(self);
+            return;
+        }
         if let Some(spec) = solidcraft_engine::find_command(id)
             && (tools::Tool::for_command(id).is_some() || dialogs::Dialog::for_command(self, id).is_some())
             && id != "sketch.create"
@@ -1399,7 +1416,8 @@ impl SolveApp {
     /// Is the view drawn in perspective? The perspective preference, except while a sketch is
     /// open: a sketch is drawn and measured on its plane, so the view is parallel (no foreshortening).
     pub fn perspective_view(&self) -> bool {
-        self.ui.perspective && self.session.active_sketch.is_none()
+        // A drawing's sheet is flat paper: never in perspective.
+        self.ui.perspective && self.session.active_sketch.is_none() && !sheet_canvas::shows(self)
     }
 
     pub fn set_status(&mut self, s: impl Into<String>, error: bool) {
@@ -1468,6 +1486,11 @@ impl SolveApp {
         }
         if dialogs_sheet::flat_active(self) {
             self.flat_view.fitted = false;
+            return;
+        }
+        // A drawing frames its sheet on the canvas's next frame (it knows the canvas's size).
+        if sheet_canvas::shows(self) {
+            self.drawing.fit_pending = true;
             return;
         }
         if render_workspace::active(self) {
@@ -1579,6 +1602,11 @@ impl SolveApp {
         // The flat pattern is a 2D view: Fit and Home frame it, and the Design camera stays put.
         if dialogs_sheet::flat_active(self) && matches!(v, "fit" | "home") {
             self.flat_view.fitted = false;
+            return;
+        }
+        // A sheet is 2D: Fit and Home frame it (`sheet_canvas::fit`); other views do not turn it.
+        if sheet_canvas::shows(self) {
+            self.drawing.fit_pending |= matches!(v, "fit" | "home");
             return;
         }
         if render_workspace::active(self) && matches!(v, "fit" | "home") {
@@ -1952,6 +1980,9 @@ impl SolveApp {
     fn show_workspace(&mut self, ui: &mut egui::Ui) {
         if render_workspace::active(self) {
             render_workspace::show(self, ui);
+        } else if sheet_canvas::shows(self) {
+            // A drawing shows its sheet, in every profile (SolidCraft's drawings too).
+            sheet_canvas::show(self, ui);
         } else {
             viewport::show(self, ui);
         }

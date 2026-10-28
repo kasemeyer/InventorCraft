@@ -4718,6 +4718,8 @@ name = "solidcraft-ui-egui"
 version = "0.22.0"
 dependencies = [
  "arboard",
+ "cadcraft-doc",
+ "cadcraft-render",
  "egui",
  "egui-wgpu",
  "image",

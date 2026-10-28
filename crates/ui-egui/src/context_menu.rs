@@ -321,6 +321,10 @@ pub fn radial_items(app: &SolveApp) -> Vec<Item> {
     if let Some(ring) = crate::marking_menu::ring(app) {
         return ring;
     }
+    // A sheet has a ring only where the profile lays one out for it (R15, R72).
+    if crate::sheet_canvas::shows(app) {
+        return Vec::new();
+    }
     let repeat = match &app.last_command {
         Some((_, label)) => act("ui.repeat", &format!("Repeat {label}"), "redo").key(crate::keymap::REPEAT_KEY),
         None => act("ui.repeat", "Repeat", "redo").key(crate::keymap::REPEAT_KEY).on(false),
@@ -354,7 +358,9 @@ pub fn radial_items(app: &SolveApp) -> Vec<Item> {
 pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
     let mut v = match target {
         // The profile's marking-menu list where it lays one out; browser targets keep their lists.
-        Target::Viewport => crate::marking_menu::overflow(app).unwrap_or_else(|| viewport_items(app)),
+        // A drawing's sheet has its own list (R15): never the part's.
+        Target::Viewport => crate::marking_menu::overflow(app)
+            .unwrap_or_else(|| if crate::sheet_canvas::shows(app) { crate::drawing_menu::items(app) } else { viewport_items(app) }),
         Target::Body { name } => body_items(app, std::slice::from_ref(name), true),
         Target::Sketch { id } => sketch_items(app, *id),
         Target::Feature { id } => feature_items(app, *id),
@@ -1137,6 +1143,9 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.finishSketch" => app.finish_sketch(),
         "ui.cancelSketch" => app.cancel_sketch(),
         // The marking menu inside a tool or a panel.
+        // A drawing's Done, OK and Cancel end its own tool and panel (R72).
+        "ui.done" | "ui.cancel" if crate::sheet_canvas::shows(app) && app.drawing.tool.is_some() => app.drawing.tool = None,
+        "ui.ok" | "ui.cancel" if crate::sheet_canvas::shows(app) && app.drawing.panel.is_some() => app.drawing.panel = None,
         "ui.done" => {
             crate::tools::finish(app);
             app.tool = None;
@@ -1701,7 +1710,13 @@ pub fn open_for(app: &mut SolveApp, at: Pos2, target: Target) {
     app.menu.key_row = None;
     app.menu.submenu = None;
     app.menu.submenu_key = None;
-    app.menu.radial = target == Target::Viewport && (app.preferences.radial_context_menu || crate::marking_menu::layout(app).is_some());
+    app.menu.radial = target == Target::Viewport
+        && if crate::sheet_canvas::shows(app) {
+            // A sheet shows a ring only where the profile lays one out for it (R15).
+            crate::marking_menu::ring(app).is_some()
+        } else {
+            app.preferences.radial_context_menu || crate::marking_menu::layout(app).is_some()
+        };
     app.menu.target = target;
     app.menu.flick = false;
     app.menu.opener = None;
