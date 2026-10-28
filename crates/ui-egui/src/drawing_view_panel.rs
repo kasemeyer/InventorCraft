@@ -197,7 +197,8 @@ pub(crate) fn open(app: &mut SolveApp, model: Option<String>, origin: Origin) {
 
 /// Open the panel with the orientation nearest `look` (the model tab's view direction, path 2c).
 pub(crate) fn open_looking(app: &mut SolveApp, model: Option<String>, origin: Origin, look: Option<Vec3>) {
-    if app.session.doc.kind != DocumentKind::Drawing || app.drawing.tool.is_some() {
+    // An open panel (this one or another) is never replaced: its typed values stay.
+    if app.session.doc.kind != DocumentKind::Drawing || app.drawing.tool.is_some() || app.drawing.panel.is_some() {
         return;
     }
     let model = model.or_else(|| if origin == Origin::Ribbon { open_models(app).into_iter().next() } else { None });

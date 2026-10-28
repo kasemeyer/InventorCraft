@@ -427,3 +427,15 @@ fn a_failed_edit_view_leaves_the_view_as_it_was() {
     assert_eq!((v.scale, v.identifier.as_str()), (1.0, "VIEW1"));
     assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), (undo, redo));
 }
+
+#[test]
+fn an_open_panel_is_not_replaced() {
+    // Final wave item 12: Base View (or Edit View) asked for while a panel is open leaves it.
+    let (mut h, block) = block_drawing();
+    let [v1, ..] = three_views(&mut h, &block);
+    edit_view(&mut h, v1);
+    panel_mut(&mut h).identifier = "TYPED".into();
+    open(&mut h.app, Some(block.clone()), Origin::Ribbon);
+    h.frames(2);
+    assert_eq!((panel(&h).origin, panel(&h).identifier.as_str()), (Origin::Edit(v1), "TYPED"));
+}
