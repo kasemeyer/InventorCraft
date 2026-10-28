@@ -61,6 +61,7 @@ fn applies(scope: AliasScope, ctx: Context) -> bool {
         AliasScope::Assembly => ctx == Context::Assembly,
         AliasScope::Sketch => ctx == Context::Sketch,
         AliasScope::SketchWrapper => matches!(ctx, Context::Sketch | Context::Part | Context::Assembly),
+        AliasScope::Drawing => ctx == Context::Drawing,
     }
 }
 

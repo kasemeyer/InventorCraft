@@ -1164,6 +1164,8 @@ fn component_rows(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, depth: usize, 
                 Joints => crate::dialogs_assembly::browser_joints(app, ui, d, &folder_label(app, "joints"), root_always(app, *node)),
                 Components => component_children(app, ui, id, d, acts),
                 History => history::rows(app, ui, d, acts),
+                // A drawing's nodes: its browser draws them (`drawing_root`), never a design's.
+                DrawingResources | Sheets => {}
             }
         }
         return;

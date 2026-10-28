@@ -322,9 +322,11 @@ fn inventor_keeps_the_shell_conventions() {
     assert!(!panels(Part, "VIEW").contains(&"SELECT"));
 }
 
+/// Updated by design (R70): the drawing ribbon follows the capture's tabs, with no RENDER tab.
 #[test]
-fn a_drawing_shows_the_placeholder_ribbon_data() {
-    assert_eq!(tabs(Drawing), [("TOOLS", Shown::Always), ("VIEW", Shown::Always), ("RENDER", Shown::Render)]);
+fn the_drawing_ribbon_data_follows_the_capture() {
+    use Shown::*;
+    assert_eq!(tabs(Drawing), [("PLACE VIEWS", Always), ("ANNOTATE", Always), ("TOOLS", Always), ("MANAGE", Always), ("VIEW", Always)]);
 }
 
 #[test]
@@ -438,18 +440,20 @@ const ASSEMBLY_FACES: &[(&str, &str, &[(&str, bool)])] = &[
     ("ENVIRONMENTS", "3D PRINT", &[("file.save_mesh", L)]),
 ];
 
-/// Every command the Inventor Part and Assembly ribbons place.
+/// Every command the Inventor Part, Assembly and Drawing ribbons place.
 fn inventor_commands() -> BTreeSet<&'static str> {
     let mut inv = inventor().ribbon(Part).commands();
     inv.extend(inventor().ribbon(Assembly).commands());
+    inv.extend(inventor().ribbon(Drawing).commands());
     inv
 }
 
-/// Registry commands neither Inventor modelling ribbon places, from `docs/features.md` at
+/// Registry commands no Inventor ribbon places, from `docs/features.md` at
 /// 9bb4d408 (466 commands, 305 placed). The count may only fall, except by a plan's new
 /// commands: Plan D-1's 29 drawing commands (161 to 190) and Plan D-2 Task 0's
-/// `drawing.note.edit` (191; R74), which Task 1's DRAWING ribbon does not place.
-const INVENTOR_UNPLACED: usize = 191;
+/// `drawing.note.edit` (191; R74), which the Drawing ribbon does not place. Plan D-2 Task 1's
+/// Drawing ribbon places ten drawing commands (191 - 10 = 181).
+const INVENTOR_UNPLACED: usize = 181;
 
 #[test]
 fn inventor_assembly_ribbon_follows_the_capture() {
@@ -560,11 +564,13 @@ fn only_the_assembly_offers_component_placement() {
     assert!(!inventor().ribbon(Part).commands().contains("component.insert_design"));
 }
 
-/// Carried from Task 4's review: every Inventor ribbon carries SolidCraft's contextual RENDER
-/// tab, so activating Render in any document never finds an empty panel list.
+/// Carried from Task 4's review: every Inventor modelling ribbon carries SolidCraft's contextual
+/// RENDER tab, so activating Render in a part or assembly never finds an empty panel list.
+/// Updated by design (R70): a drawing has no render workspace, so its ribbon has no RENDER tab.
 #[test]
 fn every_inventor_ribbon_carries_the_render_tab() {
-    for kind in [Part, Assembly, Drawing] {
+    assert!(inventor().ribbon(Drawing).tab("RENDER").is_none());
+    for kind in [Part, Assembly] {
         let render = inventor().ribbon(kind).tab("RENDER").unwrap_or_else(|| panic!("{kind:?} has no RENDER tab"));
         assert_eq!(render.shown, Shown::Render, "{kind:?}");
         let upstream = get(SOLIDCRAFT).unwrap().ribbon(kind).tab("RENDER").unwrap();
@@ -573,11 +579,12 @@ fn every_inventor_ribbon_carries_the_render_tab() {
     }
 }
 
-/// Task 6 (D5): the 46 Inventor aliases with a SolidCraft target, as data, with the one-key wait.
+/// Task 6 (D5): the 46 Inventor aliases with a SolidCraft target, as data, with the one-key wait;
+/// updated by design (R70) for Plan D-2 Task 1's eight drawing aliases.
 #[test]
-fn inventor_maps_46_aliases_without_conflicts() {
+fn inventor_maps_54_aliases_without_conflicts() {
     assert_eq!(inventor().letter_keys, LetterKeys::Aliases);
-    assert_eq!(inventor().aliases.len(), 46);
+    assert_eq!(inventor().aliases.len(), 54);
     assert_eq!(inventor().alias_wait_ms, 750);
     assert_eq!(validate(inventor()), Vec::<String>::new());
 }

@@ -471,6 +471,10 @@ pub fn invalidate_scene(app: &mut SolveApp) {
 
 pub fn enter(app: &mut SolveApp, render: bool) -> Result<(), String> {
     if render {
+        // A drawing has no Render workspace (R70): its ribbons carry no RENDER tab.
+        if app.session.doc.kind == solidcraft_engine::doc::DocumentKind::Drawing {
+            return Err("a drawing has no Render workspace: open the part or assembly".into());
+        }
         if app.session.active_sketch.is_some() || app.tool.is_some() || app.dialog.is_some() || app.file_load.busy() {
             return Err("finish the current modelling operation before entering Render".into());
         }

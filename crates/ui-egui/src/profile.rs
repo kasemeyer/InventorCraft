@@ -116,7 +116,7 @@ impl Ribbon {
 
     /// The tab a document of this kind opens on: the profile's `home` for the kind, else the
     /// first `Shown::Always` tab ("MODEL" for SolidCraft and an Inventor part, "ASSEMBLE" for an
-    /// Inventor assembly, "TOOLS" for a drawing).
+    /// Inventor assembly, "PLACE VIEWS" for an Inventor drawing).
     pub fn home(&self) -> &str {
         self.home
             .as_deref()
@@ -320,13 +320,18 @@ pub enum AliasScope {
     Assembly,
     Sketch,
     SketchWrapper,
+    /// A drawing document (not a sketch in it): the drawing's own keys (`D`, `T` and the rest).
+    Drawing,
 }
 
 impl AliasScope {
     /// Whether two scopes can be live at once (a conflict needs both the same keys and this).
+    /// A drawing scope meets only `Everywhere` and itself: no part, assembly or sketch alias
+    /// is live in a drawing.
     pub fn overlaps(self, other: AliasScope) -> bool {
         use AliasScope::*;
         match (self, other) {
+            (Drawing, x) | (x, Drawing) => matches!(x, Drawing | Everywhere),
             (Everywhere | SketchWrapper, _) | (_, Everywhere | SketchWrapper) => true,
             (Model, Part | Assembly) | (Part | Assembly, Model) => true,
             (a, b) => a == b,
@@ -339,6 +344,8 @@ impl AliasScope {
 pub struct BrowserLayout {
     pub part_root: Vec<RootNode>,
     pub assembly_root: Vec<RootNode>,
+    /// A drawing's root nodes, in order (`[DrawingResources, Sheets]` unless a profile says).
+    pub drawing_root: Vec<RootNode>,
     /// The part root's nodes drawn even when empty (`{"node": …, "always": true}` entries).
     pub part_always: Vec<RootNode>,
     /// The assembly root's nodes drawn even when empty.
@@ -349,7 +356,8 @@ pub struct BrowserLayout {
 }
 
 impl Default for BrowserLayout {
-    /// Upstream's browser: every root folder in its order, origin `O, X, Y, Z, XY, XZ, YZ`.
+    /// Upstream's browser: every root folder in its order, origin `O, X, Y, Z, XY, XZ, YZ`; a
+    /// drawing's resources, then its sheets.
     fn default() -> Self {
         use RootNode::*;
         let root = vec![DocSettings, NamedViews, Origin, Canvases, Analyses, Bodies, Sketches, Construction, Features, Joints, Components];
@@ -357,6 +365,7 @@ impl Default for BrowserLayout {
         BrowserLayout {
             part_root: root.clone(),
             assembly_root: root,
+            drawing_root: vec![DrawingResources, Sheets],
             part_always: Vec::new(),
             assembly_always: Vec::new(),
             folder_labels: BTreeMap::new(),
@@ -387,6 +396,7 @@ struct FlaggedRoot {
 struct BrowserLayoutJson {
     part_root: Option<Vec<RootEntry>>,
     assembly_root: Option<Vec<RootEntry>>,
+    drawing_root: Option<Vec<RootNode>>,
     folder_labels: BTreeMap<String, String>,
     origin: Option<Vec<OriginEntry>>,
 }
@@ -419,6 +429,7 @@ impl From<BrowserLayoutJson> for BrowserLayout {
         BrowserLayout {
             part_root,
             assembly_root,
+            drawing_root: json.drawing_root.unwrap_or(base.drawing_root),
             part_always,
             assembly_always,
             folder_labels: json.folder_labels,
@@ -444,6 +455,11 @@ pub enum RootNode {
     /// The design's history: features in order, each consumed sketch and work feature folded
     /// under its consumer, and the End of Part marker (`browser::history`).
     History,
+    /// A drawing's resources (its sheet formats, borders and title blocks), JSON `"resources"`.
+    #[serde(rename = "resources")]
+    DrawingResources,
+    /// A drawing's sheets, each with its border, title block and views.
+    Sheets,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
@@ -853,7 +869,11 @@ pub fn validate(profile: &Profile) -> Vec<String> {
             out.push(format!("function key \"{key}\": {action} is not a UI action"));
         }
     }
-    for (what, root) in [("browser.part_root", &profile.browser.part_root), ("browser.assembly_root", &profile.browser.assembly_root)] {
+    for (what, root) in [
+        ("browser.part_root", &profile.browser.part_root),
+        ("browser.assembly_root", &profile.browser.assembly_root),
+        ("browser.drawing_root", &profile.browser.drawing_root),
+    ] {
         for (i, node) in root.iter().enumerate().filter(|&(i, node)| root[..i].contains(node)) {
             out.push(format!("{what}: {node:?} appears twice (entry {i})"));
         }
@@ -1072,3 +1092,7 @@ mod inventor_tests;
 #[cfg(test)]
 #[path = "profile_shell_tests.rs"]
 mod shell_tests;
+
+#[cfg(test)]
+#[path = "profile_drawing_tests.rs"]
+mod drawing_tests;

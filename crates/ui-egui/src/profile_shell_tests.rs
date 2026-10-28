@@ -153,21 +153,26 @@ fn render_workspace_keeps_its_ribbon_under_inventor() {
     assert_eq!(command_ids(&lists), expected);
 }
 
-/// Carried from Task 4's review: an Inventor assembly or drawing entering Render shows
-/// SolidCraft's Render panels, never an empty ribbon.
+/// Carried from Task 4's review: an Inventor assembly entering Render shows SolidCraft's Render
+/// panels, never an empty ribbon. Updated by design (R70, Plan D-2 Task 1): a drawing has no
+/// Render workspace, so entering it is refused and the drawing keeps its own ribbon.
 #[test]
 fn render_workspace_keeps_its_ribbon_in_an_inventor_assembly_and_drawing() {
-    for kind in [Assembly, Drawing] {
-        let mut h = inventor(kind);
-        crate::render_workspace::enter(&mut h.app, true).unwrap();
-        h.frame();
-        assert_eq!(visible_tabs(&h.app), ["RENDER"], "{kind:?}");
-        let upstream = get(SOLIDCRAFT).unwrap().ribbon(kind).tab("RENDER").unwrap();
-        let expected: Vec<&str> = upstream.panels.iter().filter(|p| !p.commands.is_empty() || p.id == "SELECT").map(|p| p.id.as_str()).collect();
-        let lists = panel_lists(&h.app, "RENDER");
-        assert!(!lists.is_empty(), "{kind:?}");
-        assert_eq!(panel_ids(&lists), expected, "{kind:?}");
-    }
+    let mut h = inventor(Drawing);
+    let err = crate::render_workspace::enter(&mut h.app, true).unwrap_err();
+    assert_eq!(err, "a drawing has no Render workspace: open the part or assembly");
+    h.frame();
+    assert_eq!(h.app.ui.tab, "PLACE VIEWS");
+    assert!(!crate::render_workspace::active(&h.app));
+    let mut h = inventor(Assembly);
+    crate::render_workspace::enter(&mut h.app, true).unwrap();
+    h.frame();
+    assert_eq!(visible_tabs(&h.app), ["RENDER"]);
+    let upstream = get(SOLIDCRAFT).unwrap().ribbon(Assembly).tab("RENDER").unwrap();
+    let expected: Vec<&str> = upstream.panels.iter().filter(|p| !p.commands.is_empty() || p.id == "SELECT").map(|p| p.id.as_str()).collect();
+    let lists = panel_lists(&h.app, "RENDER");
+    assert!(!lists.is_empty());
+    assert_eq!(panel_ids(&lists), expected);
 }
 
 #[test]
@@ -197,11 +202,12 @@ fn a_sheet_body_in_an_assembly_keeps_a_visible_tab() {
     assert_eq!(h.app.ui.tab, "SHEET METAL");
 }
 
+/// Updated by design (R70): a drawing opens on the capture's Place Views tab.
 #[test]
-fn a_drawing_shows_the_placeholder_ribbon() {
+fn a_drawing_shows_the_drawing_ribbon() {
     let h = inventor(Drawing);
-    assert_eq!(visible_tabs(&h.app), ["TOOLS", "VIEW"]);
-    assert_eq!(h.app.ui.tab, "TOOLS");
+    assert_eq!(visible_tabs(&h.app), ["PLACE VIEWS", "ANNOTATE", "TOOLS", "MANAGE", "VIEW"]);
+    assert_eq!(h.app.ui.tab, "PLACE VIEWS");
 }
 
 #[test]

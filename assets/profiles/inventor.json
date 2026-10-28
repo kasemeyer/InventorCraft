@@ -65,7 +65,7 @@
                  "unmapped": ["NE: Constraint", "E: Pattern Component", "SW: Free Rotate", "list: Replace from Content Center…", "list: Make Layout", "list: Create Pipe Run…", "list: Create Harness…", "list: Assemble", "list: Show Relationships", "list: Hide All", "list: Create iMate", "list: Dimension Display", "list: Help Topics…"]}
     }
   },
-  "home": {"part": "MODEL"},
+  "home": {"part": "MODEL", "drawing": "PLACE VIEWS"},
   "quick_access": true,
   "ribbon_overflow": "whole_panels",
   "view_cube": {"edges": true, "compass": true},
@@ -118,17 +118,30 @@
     {"keys": "J", "command": "joint.create", "scope": "assembly"},
     {"keys": "N", "command": "component.create", "scope": "assembly"},
     {"keys": "P", "command": "component.insert_design", "scope": "assembly"},
-    {"keys": "V", "command": "solid.move", "scope": "assembly"}
+    {"keys": "V", "command": "solid.move", "scope": "assembly"},
+    {"keys": "BV", "command": "drawing.view.base", "scope": "drawing"},
+    {"keys": "PV", "command": "drawing.view.projected", "scope": "drawing"},
+    {"keys": "D", "command": "drawing.dim.general", "scope": "drawing"},
+    {"keys": "T", "command": "drawing.note.text", "scope": "drawing"},
+    {"keys": "LE", "command": "drawing.note.leader", "scope": "drawing"},
+    {"keys": "CM", "command": "drawing.centermark", "scope": "drawing"},
+    {"keys": "CB", "command": "drawing.centerline.bisector", "scope": "drawing"},
+    {"keys": "HN", "command": "drawing.note.hole", "scope": "drawing"}
   ],
   "button_labels": {"construct.plane.offset": "Plane", "construct.axis.edge": "Axis", "construct.point.vertex": "Point", "component.insert_design": "Place", "component.create": "Create"},
   "browser": {
     "part_root": ["named_views", "bodies", "origin", "history", "canvases", "analyses", "components", "doc_settings"],
     "assembly_root": ["named_views", {"node": "joints", "always": true}, "origin", "canvases", "analyses", "bodies", "sketches", "construction", "features", "components", "doc_settings"],
+    "drawing_root": ["resources", "sheets"],
     "folder_labels": {
       "named_views": "profile.inventor.browser.representations",
       "bodies": "profile.inventor.browser.solid_bodies",
       "joints": "profile.inventor.browser.relationships",
-      "end_of_part": "profile.inventor.browser.end_of_part"
+      "end_of_part": "profile.inventor.browser.end_of_part",
+      "drawing_resources": "profile.inventor.browser.drawing_resources",
+      "sheet": "profile.inventor.browser.sheet",
+      "border": "profile.inventor.browser.border",
+      "title_block": "profile.inventor.browser.title_block"
     },
     "origin": [
       {"key": "YZ", "label": "profile.inventor.origin.yz"},
@@ -202,7 +215,14 @@
     "frame": {"id": "FRAME", "label": "profile.inventor.panel.frame", "promoted": 1, "commands": ["frame.member"]},
     "modify_assembly": {"id": "MODIFY ASSEMBLY", "label": "profile.inventor.panel.modify_assembly", "promoted": 8, "commands": ["solid.extrude", "solid.revolve", "solid.hole", "solid.fillet", "solid.chamfer", "solid.sweep", "solid.press_pull", "solid.thread"], "small": ["solid.chamfer", "solid.sweep", "solid.press_pull", "solid.thread"]},
     "interference": {"id": "INTERFERENCE", "label": "profile.inventor.panel.interference", "promoted": 2, "commands": ["inspect.interference", "contact.enable_sets", "contact.check", "contact.enable_all", "contact.disable_all", "contact.create", "contact.edit", "contact.list"]},
-    "print_3d": {"id": "3D PRINT", "label": "profile.inventor.panel.print_3d", "promoted": 1, "commands": ["file.save_mesh"]}
+    "print_3d": {"id": "3D PRINT", "label": "profile.inventor.panel.print_3d", "promoted": 1, "commands": ["file.save_mesh"]},
+    "drawing_create": {"id": "CREATE", "label": "profile.inventor.panel.create", "promoted": 2, "commands": ["drawing.view.base", "drawing.view.projected"]},
+    "drawing_sheets": {"id": "SHEETS", "label": "profile.inventor.panel.sheets", "promoted": 1, "commands": ["drawing.sheet.add"]},
+    "drawing_dimension": {"id": "DIMENSION", "label": "profile.inventor.panel.dimension", "promoted": 1, "commands": ["drawing.dim.general"]},
+    "feature_notes": {"id": "FEATURE NOTES", "label": "profile.inventor.panel.feature_notes", "promoted": 1, "commands": ["drawing.note.hole"]},
+    "drawing_text": {"id": "TEXT", "label": "profile.inventor.panel.text", "promoted": 2, "commands": ["drawing.note.text", "drawing.note.leader"]},
+    "drawing_symbols": {"id": "SYMBOLS", "label": "profile.inventor.panel.symbols", "promoted": 2, "commands": ["drawing.centermark", "drawing.centerline.bisector"]},
+    "drawing_update": {"id": "UPDATE", "label": "profile.inventor.panel.update", "promoted": 1, "commands": ["drawing.update"]}
   },
   "tabs": {
     "sheet_metal": {"id": "SHEET METAL", "label": "profile.inventor.tab.sheet_metal", "panels": ["sketch_start", "sheet_create", "sheet_modify", "work_features", "pattern", "sheet_setup", "flat_pattern", {"panel": "parameters", "hidden": true}, {"panel": "measure", "hidden": true}]},
@@ -220,11 +240,16 @@
     "inspect_assembly": {"id": "INSPECT", "label": "profile.inventor.tab.inspect", "panels": ["interference", "analyze", "inspect_measure"]},
     "manage_assembly": {"id": "MANAGE", "label": "profile.inventor.tab.manage", "panels": ["update_assembly", "asm_manage", "styles", "author"]},
     "env_assembly": {"id": "ENVIRONMENTS", "label": "profile.inventor.tab.environments", "panels": ["begin", "print_3d"]},
-    "render": {"id": "RENDER", "shown": "render", "inherit": "solidcraft"}
+    "render": {"id": "RENDER", "shown": "render", "inherit": "solidcraft"},
+    "place_views": {"id": "PLACE VIEWS", "label": "profile.inventor.tab.place_views", "panels": ["drawing_create", "drawing_sheets"]},
+    "annotate": {"id": "ANNOTATE", "label": "profile.inventor.tab.annotate", "panels": ["drawing_dimension", "feature_notes", "drawing_text", "drawing_symbols"]},
+    "tools_drawing": {"id": "TOOLS", "label": "profile.inventor.tab.tools", "panels": [{"panel": "measure", "hidden": true}, "options", {"panel": "clipboard", "hidden": true}]},
+    "manage_drawing": {"id": "MANAGE", "label": "profile.inventor.tab.manage", "panels": ["drawing_update", {"panel": "manage_parameters", "hidden": true}]},
+    "view_drawing": {"id": "VIEW", "label": "profile.inventor.tab.view", "panels": ["windows"]}
   },
   "ribbons": {
     "part": ["sheet_metal", "model_part", "sketch", "inspect_part", "tools", "manage_part", "view", "env_part", "render"],
     "assembly": ["assemble", "design", "model_assembly", "sketch_assembly", "inspect_assembly", "tools", "manage_assembly", "view", "env_assembly", "render"],
-    "drawing": ["tools", "view", "render"]
+    "drawing": ["place_views", "annotate", "tools_drawing", "manage_drawing", "view_drawing"]
   }
 }
