@@ -61,6 +61,9 @@ pub(crate) enum Stage {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Place {
     pub stage: Stage,
+    /// Base View started this run (its base placed, it projects from it): the ribbon keeps Base
+    /// View pressed, not Projected (fix wave 2).
+    pub from_base: bool,
     /// The views this run placed, in order.
     pub placed: Vec<u64>,
     /// The cell (in 0.05 in steps) and orientation the preview was computed for.
@@ -81,8 +84,18 @@ pub(crate) struct Place {
 }
 
 impl Place {
-    fn new(stage: Stage) -> Place {
-        Place { stage, placed: Vec::new(), preview_key: None, anchor: None, cursor: None, cube_box: None, params_seen: None, armed: false }
+    pub(crate) fn new(stage: Stage) -> Place {
+        Place {
+            stage,
+            from_base: stage == Stage::Base,
+            placed: Vec::new(),
+            preview_key: None,
+            anchor: None,
+            cursor: None,
+            cube_box: None,
+            params_seen: None,
+            armed: false,
+        }
     }
 }
 

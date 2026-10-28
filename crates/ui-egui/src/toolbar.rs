@@ -1029,6 +1029,18 @@ fn ribbon_text(ui: &egui::Ui, at: egui::Pos2, text: &str, size: f32, color: Colo
     ui.painter().galley(origin, galley, color);
 }
 
+/// The command whose tool or dialog is open right now, shown pressed in the toolbar: a part or
+/// sketch tool, a dialog, or the running drawing tool (`drawing_ui::command_of`, fix wave 2).
+pub(crate) fn running_command(app: &SolveApp) -> Option<String> {
+    match (&app.tool, &app.dialog) {
+        (Some(tool), _) => Some(tool.cmd.to_string()),
+        // Create Sketch never lands in last_command (it is not repeatable).
+        (None, Some(d)) if matches!(d.kind, crate::dialogs::Kind::Sketch) => Some("sketch.create".to_string()),
+        (None, Some(_)) => app.last_command.as_ref().map(|(id, _)| id.clone()),
+        (None, None) => app.drawing.tool.as_ref().and_then(crate::drawing_ui::command_of).map(str::to_string),
+    }
+}
+
 /// SKETCH while editing a sketch and SHEET METAL while a sheet body is active take the contextual
 /// tab style; each is an ordinary tab otherwise (Inventor's Sketch tab is always shown).
 pub(crate) fn contextual_tab(app: &SolveApp, tab: &str) -> bool {
@@ -1251,14 +1263,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
         // Panels.
         let tab = app.ui.tab.clone();
         let scope = crate::profile::custom_scope(app);
-        // The command whose tool or dialog is open right now, shown pressed in the toolbar.
-        let running: Option<String> = match (&app.tool, &app.dialog) {
-            (Some(tool), _) => Some(tool.cmd.to_string()),
-            // Create Sketch never lands in last_command (it is not repeatable).
-            (None, Some(d)) if matches!(d.kind, crate::dialogs::Kind::Sketch) => Some("sketch.create".to_string()),
-            (None, Some(_)) => app.last_command.as_ref().map(|(id, _)| id.clone()),
-            _ => None,
-        };
+        let running = running_command(app);
         let mut px = ribbon_left;
         let top = r.top() + TAB_ROW_HEIGHT;
         let mut drop: Option<(&'static str, &'static str, Option<&'static str>)> = None;

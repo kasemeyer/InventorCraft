@@ -41,6 +41,26 @@ pub(crate) enum DrawingTool {
     Note(crate::drawing_notes_tool::NoteTool),
 }
 
+/// The ribbon command a running drawing tool stands for, shown pressed while it runs (fix wave
+/// 2): the button that started it. Move Dimension and Move Note come from a list, not a button.
+pub(crate) fn command_of(tool: &DrawingTool) -> Option<&'static str> {
+    use crate::drawing_notes_tool::NoteTool;
+    match tool {
+        DrawingTool::Place(p) if p.from_base => Some("drawing.view.base"),
+        DrawingTool::Place(_) => Some("drawing.view.projected"),
+        DrawingTool::Dimension(t) if t.moving.is_some() => None,
+        DrawingTool::Dimension(_) => Some("drawing.dim.general"),
+        DrawingTool::Note(t) => match t {
+            NoteTool::Text { .. } => Some("drawing.note.text"),
+            NoteTool::Leader { .. } => Some("drawing.note.leader"),
+            NoteTool::CenterMark { .. } => Some("drawing.centermark"),
+            NoteTool::Bisector { .. } => Some("drawing.centerline.bisector"),
+            NoteTool::HoleNote { .. } => Some("drawing.note.hole"),
+            NoteTool::Move { .. } => None,
+        },
+    }
+}
+
 /// The open drawing panel.
 pub(crate) enum DrawingPanel {
     /// Base View and Edit View (Task 5).
@@ -159,3 +179,7 @@ pub(crate) fn start_for(id: &str) -> Option<fn(&mut SolveApp)> {
 #[cfg(test)]
 #[path = "drawing_ui_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "drawing_ui_ribbon_tests.rs"]
+mod ribbon_tests;
