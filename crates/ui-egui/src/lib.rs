@@ -57,6 +57,7 @@ pub mod drag_extrude;
 pub mod drag_snap;
 pub(crate) mod drawing_dim_tool;
 pub(crate) mod drawing_menu;
+pub(crate) mod drawing_models;
 pub(crate) mod drawing_notes_tool;
 pub(crate) mod drawing_place;
 pub(crate) mod drawing_ui;
@@ -1435,6 +1436,8 @@ impl SolveApp {
         self.home.open = false;
         documents::prepare_open(self);
         if let Ok(r) = self.run("doc.open", json!({ "path": path })) {
+            // An opened drawing is brought up to date with its models (R68).
+            drawing_models::refresh_drawing(self);
             self.fit_view();
             stand_up::offer(self, path, &[], Some(&r));
         }
@@ -1698,6 +1701,8 @@ impl SolveApp {
     pub fn logic(&mut self, ctx: &egui::Context) {
         frame_watch::begin(self);
         file_picker::tick(self, ctx);
+        // The open tabs a drawing's views read, and an export waiting for its status to paint.
+        drawing_models::tick(self);
         render_workspace::sync_backend(self);
         render_workspace::tick(self, ctx);
         file_load::tick(self, ctx);

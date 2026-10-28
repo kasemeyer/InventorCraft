@@ -29,6 +29,8 @@ pub(crate) struct DrawingUi {
     pub(crate) dim_edit_when_created: bool,
     /// The last annotation command the note tools sent, and its parameters (Task 9).
     pub(crate) notes_last_sent: Option<(&'static str, serde_json::Value)>,
+    /// An export the save picker answered, waiting a frame for its status to paint (Task 11).
+    pub(crate) export: Option<crate::drawing_models::PendingExport>,
 }
 
 /// The running drawing tool.
@@ -147,6 +149,8 @@ pub(crate) const DRAWING_STARTS: &[(&str, fn(&mut SolveApp))] = &[
     ("drawing.note.hole", crate::drawing_notes_tool::start_hole_note),
     ("drawing.centermark", crate::drawing_notes_tool::start_center_mark),
     ("drawing.centerline.bisector", crate::drawing_notes_tool::start_bisector),
+    ("drawing.export.pdf", crate::drawing_models::export_pdf),
+    ("drawing.export.dxf", crate::drawing_models::export_dxf),
 ];
 
 /// The start `DRAWING_STARTS` gives command `id`, if any.

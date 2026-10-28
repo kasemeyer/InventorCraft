@@ -277,7 +277,12 @@ fn services(cc: &eframe::CreationContext<'_>) -> Services {
             Box::pin(async move { future.await.map(|p| p.path().to_string_lossy().into_owned()) })
         })),
         pick_save: Some(Box::new(move |name: &str, exts: &[&str]| {
-            let dialog = parent.clone().set_file_name(name);
+            // A name with a folder (a drawing beside its model) starts the dialog in that folder.
+            let full = std::path::Path::new(name);
+            let dialog = match (full.parent().filter(|dir| !dir.as_os_str().is_empty()), full.file_name()) {
+                (Some(dir), Some(file)) => parent.clone().set_directory(dir).set_file_name(file.to_string_lossy()),
+                _ => parent.clone().set_file_name(name),
+            };
             let dialog = if exts == [io::DESIGN_EXT, "json"] {
                 if name.ends_with(".json") {
                     dialog.add_filter("Plain JSON design", &["json"]).add_filter("SolidCraft container", &[io::DESIGN_EXT])

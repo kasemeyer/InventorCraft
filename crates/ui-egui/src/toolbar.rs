@@ -789,33 +789,13 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
                     close = true;
                 }
                 ui.separator();
-                if item_if(ui, "Export STL…", "", "mesh_export", shown) {
-                    FileAction::ExportMesh("stl").run(app);
-                    close = true;
-                }
-                if item_if(ui, "Export 3MF…", "", "mesh_export", shown) {
-                    FileAction::ExportMesh("3mf").run(app);
-                    close = true;
-                }
-                if item_if(ui, "Export STEP…", "", "export", shown) {
-                    FileAction::Export("step").run(app);
-                    close = true;
-                }
-                if item_if(ui, app.tr_label("Export Current View as DXF…"), "", "export", shown) {
-                    FileAction::Command("file.export_view_dxf").run(app);
-                    close = true;
-                }
-                if item_if(ui, "Export OBJ…", "", "export", shown) {
-                    FileAction::Export("obj").run(app);
-                    close = true;
-                }
-                if item_if(ui, "Export URDF…", "", "export", shown) {
-                    FileAction::Export("urdf").run(app);
-                    close = true;
-                }
-                if item(ui, "Export Design as JSON…", "", "export") {
-                    FileAction::Export("json").run(app);
-                    close = true;
+                for (label, icon, action) in export_rows(app) {
+                    // JSON exports with the design hidden too; the others act on the design.
+                    let on = shown || matches!(action, FileAction::Export("json"));
+                    if item_if(ui, app.tr_label(label), "", icon, on) {
+                        action.run(app);
+                        close = true;
+                    }
                 }
                 ui.separator();
                 if item_if(ui, &format!("{}…", app.tr_label("Design Properties")), "", "settings", shown) {
@@ -852,6 +832,26 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
     }
 }
 
+/// File's export rows (English label, icon, action): a drawing's PDF and DXF (Task 11), else the
+/// design's formats.
+pub(crate) fn export_rows(app: &SolveApp) -> Vec<(&'static str, &'static str, FileAction)> {
+    if app.session.doc.kind == DocumentKind::Drawing {
+        return vec![
+            ("Export PDF…", "export", FileAction::Command("drawing.export.pdf")),
+            ("Export DXF…", "dxf", FileAction::Command("drawing.export.dxf")),
+        ];
+    }
+    vec![
+        ("Export STL…", "mesh_export", FileAction::ExportMesh("stl")),
+        ("Export 3MF…", "mesh_export", FileAction::ExportMesh("3mf")),
+        ("Export STEP…", "export", FileAction::Export("step")),
+        ("Export Current View as DXF…", "export", FileAction::Command("file.export_view_dxf")),
+        ("Export OBJ…", "export", FileAction::Export("obj")),
+        ("Export URDF…", "export", FileAction::Export("urdf")),
+        ("Export Design as JSON…", "export", FileAction::Export("json")),
+    ]
+}
+
 /// Whether the design is on screen: viewport/menu editing stays disabled behind File.
 /// File owns its explicit Save/Save As/export actions and returns to the design before dispatch.
 pub fn design_shown(app: &SolveApp) -> bool {
@@ -864,6 +864,8 @@ pub fn save(app: &mut SolveApp) {
         return;
     }
     if app.session.path.is_some() {
+        // A drawing is brought up to date before it is written (R68).
+        crate::drawing_models::refresh_drawing(app);
         crate::save_job::start(app, "file.save", json!({}));
     } else {
         save_as(app);
@@ -871,7 +873,26 @@ pub fn save(app: &mut SolveApp) {
 }
 
 pub(crate) fn save_as(app: &mut SolveApp) {
+    if app.session.doc.kind == DocumentKind::Drawing {
+        save_drawing_as(app);
+        return;
+    }
     save_as_with_extension(app, solidcraft_engine::io::DESIGN_EXT);
+}
+
+/// Save As of a drawing: `.tcidrw`, starting beside its model while it was never saved
+/// (owner default; §8.6); brought up to date before it is written (R68).
+fn save_drawing_as(app: &mut SolveApp) {
+    let name = crate::drawing_models::save_as_name(app);
+    app.pick_save(&name, &[DocumentKind::Drawing.extension()], |app, path| {
+        if let Some(path) = path {
+            crate::drawing_models::refresh_drawing(app);
+            if crate::save_job::start(app, "file.save_as", json!({"path": path})) {
+                return;
+            }
+        }
+        crate::documents::saved_for_close(app);
+    });
 }
 
 fn save_as_with_extension(app: &mut SolveApp, extension: &str) {

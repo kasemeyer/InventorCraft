@@ -23,7 +23,9 @@ fn the_table_holds_only_tool_rows() {
             "drawing.note.leader",
             "drawing.note.hole",
             "drawing.centermark",
-            "drawing.centerline.bisector"
+            "drawing.centerline.bisector",
+            "drawing.export.pdf",
+            "drawing.export.dxf"
         ]
     );
     assert!(start_for("drawing.view.base").is_some() && start_for("drawing.view.projected").is_some());

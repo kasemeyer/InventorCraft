@@ -66,6 +66,8 @@ pub struct Documents {
     pub choice: Answer,
     /// Save As is answering a Close/Quit prompt.
     saving: bool,
+    /// Each tab's saved path and document, for the drawings' model provider (Task 11).
+    pub(crate) open_tabs: crate::drawing_models::Snapshot,
     /// Close Other Tabs / Close All Tabs: the tabs still to close, in increasing order (the last
     /// is closed first, so the ones before it keep their places). One with unsaved changes asks
     /// first; Cancel stops the rest (#3055).
@@ -187,11 +189,14 @@ pub fn switch(app: &mut SolveApp, i: usize) {
         *s = Some(out);
     }
     app.docs.active = i;
+    // A drawing that becomes active shows its models as they are now (R68).
+    crate::drawing_models::refresh_drawing(app);
 }
 
 /// Open `session` in a new tab after the active one and switch to it (`fit`: frame its model).
 /// The new tab takes the application's open project as it becomes active ([`swap_in`]).
-pub fn open_tab(app: &mut SolveApp, session: Session) -> Result<(), String> {
+pub fn open_tab(app: &mut SolveApp, mut session: Session) -> Result<(), String> {
+    crate::drawing_models::install(app, &mut session);
     if app.docs.slots.is_empty() {
         app.docs.slots.push(None);
         app.docs.active = 0;
@@ -214,7 +219,8 @@ pub fn active_is_blank(app: &SolveApp) -> bool {
 
 /// Show `session` (a design built or read elsewhere): in place of a blank active design,
 /// otherwise in a new tab.
-pub fn adopt(app: &mut SolveApp, session: Session) {
+pub fn adopt(app: &mut SolveApp, mut session: Session) {
+    crate::drawing_models::install(app, &mut session);
     if active_is_blank(app) {
         let rev = app.session.revision;
         crate::dialogs::cancel(app);
@@ -228,6 +234,7 @@ pub fn adopt(app: &mut SolveApp, session: Session) {
         app.session.invalidate_view(rev);
         app.cam = Camera::default();
         app.fit_view();
+        crate::drawing_models::refresh_drawing(app);
     } else if let Err(e) = open_tab(app, session) {
         app.set_status(e, true);
     }
@@ -551,6 +558,15 @@ pub(crate) fn tab_kinds(app: &SolveApp) -> Vec<DocumentKind> {
 }
 
 /// Where each tab's design is saved, in `tabs_info`'s order (`None`: not saved yet).
+/// Each tab's saved path and document, in tab order.
+pub(crate) fn tab_docs(app: &SolveApp) -> Vec<(Option<String>, std::sync::Arc<solidcraft_engine::doc::Document>)> {
+    let session = |s: &Session| (s.path.clone(), s.doc.clone());
+    if app.docs.slots.is_empty() {
+        return vec![session(&app.session)];
+    }
+    app.docs.slots.iter().map(|s| session(s.as_ref().map_or(&app.session, |d| &d.session))).collect()
+}
+
 pub(crate) fn tab_paths(app: &SolveApp) -> Vec<Option<String>> {
     if app.docs.slots.is_empty() {
         return vec![app.session.path.clone()];

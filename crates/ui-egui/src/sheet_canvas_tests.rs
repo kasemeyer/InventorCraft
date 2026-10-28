@@ -365,7 +365,9 @@ fn drawing_starts_are_exactly_the_tool_rows() {
             "drawing.note.leader",
             "drawing.note.hole",
             "drawing.centermark",
-            "drawing.centerline.bisector"
+            "drawing.centerline.bisector",
+            "drawing.export.pdf",
+            "drawing.export.dxf"
         ]
     );
     for (i, id) in ids.iter().enumerate() {

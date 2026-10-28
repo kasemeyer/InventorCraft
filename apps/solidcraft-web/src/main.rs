@@ -616,6 +616,8 @@ mod web {
                             // A design is saved to a file the user picks, or kept in the browser
                             // where the browser can't pick one; everything else is downloaded.
                             pick_save: Some(Box::new(move |name: &str, exts: &[&str]| {
+                                // The browser picks no folder: only a suggested name's file part is used.
+                                let name = name.rsplit(['/', '\\']).next().unwrap_or(name);
                                 let design = exts.contains(&solidcraft_engine::io::DESIGN_EXT);
                                 match disk::save_target(disk::supported(), design) {
                                     SaveTarget::Disk => Box::pin(disk::pick_save(&saver, name)),
