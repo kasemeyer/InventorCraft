@@ -2642,6 +2642,8 @@
   "ui.browser_bodies_other": "{count} 个实体",
   "ui.browser_collapse": "折叠浏览器",
   "ui.browser_expand": "展开浏览器",
+  "ui.browser_sheets_one": "{count} 张图纸",
+  "ui.browser_sheets_other": "{count} 张图纸",
   "ui.browser_title": "浏览器",
   "ui.calibrate": "校准",
   "ui.cancel": "取消",

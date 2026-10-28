@@ -2642,6 +2642,8 @@
   "ui.browser_bodies_other": "{count} ボディ",
   "ui.browser_collapse": "ブラウザを折りたたむ",
   "ui.browser_expand": "ブラウザを展開",
+  "ui.browser_sheets_one": "{count} シート",
+  "ui.browser_sheets_other": "{count} シート",
   "ui.browser_title": "ブラウザ",
   "ui.calibrate": "校正",
   "ui.cancel": "キャンセル",

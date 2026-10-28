@@ -2642,6 +2642,8 @@
   "ui.browser_bodies_other": "{count} bodies",
   "ui.browser_collapse": "Collapse the browser",
   "ui.browser_expand": "Expand the browser",
+  "ui.browser_sheets_one": "{count} sheet",
+  "ui.browser_sheets_other": "{count} sheets",
   "ui.browser_title": "Browser",
   "ui.calibrate": "Calibrate",
   "ui.cancel": "Cancel",

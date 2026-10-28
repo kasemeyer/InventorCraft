@@ -204,6 +204,17 @@ fn find_group(app: &SolveApp, id: u64) -> Option<&solidcraft_engine::doc::Browse
     app.session.doc.browser_groups.iter().find(|g| g.id == id)
 }
 
+/// The browser header's count: a drawing's sheets ("2 sheets"), else the model's bodies.
+pub(crate) fn header_count(app: &SolveApp) -> String {
+    let (n, one, other) = if crate::sheet_canvas::shows(app) {
+        let sheets = app.session.doc.drawing.as_deref().map_or(0, |m| m.sheets.len());
+        (sheets, "ui.browser_sheets_one", "ui.browser_sheets_other")
+    } else {
+        (app.session.model.state().bodies.len(), "ui.browser_bodies_one", "ui.browser_bodies_other")
+    };
+    crate::i18n::format(if n == 1 { one } else { other }, &[("count", &n.to_string())])
+}
+
 /// The bodies in a group (none for sketch and plane groups).
 pub fn group_bodies(app: &SolveApp, id: u64) -> Vec<String> {
     let st = app.session.world_state();
@@ -945,9 +956,7 @@ fn browser_header(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
         crate::ui_kit::disclosure(ui.painter(), pos2(right - t.form_section_icon_size / 2.0, rect.center().y), !collapsed, t.text_dim);
         right -= 18.0;
     }
-    let bodies = app.session.model.state().bodies.len();
-    let key = if bodies == 1 { "ui.browser_bodies_one" } else { "ui.browser_bodies_other" };
-    let count = crate::i18n::format(key, &[("count", &bodies.to_string())]);
+    let count = header_count(app);
     let galley = ui.painter().layout_no_wrap(count, FontId::proportional(t.font_body), t.text_dim);
     ui.painter().galley(pos2(right - galley.size().x, rect.center().y - galley.size().y / 2.0), galley, t.text_dim);
     if collapsible {

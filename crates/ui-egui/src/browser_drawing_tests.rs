@@ -245,3 +245,23 @@ fn drawing_properties_writes_the_title_block() {
     assert!(h.app.drawing.panel.is_none());
     assert_eq!((h.app.session.undo.len(), title_field(&h.app, "TITLE").as_str()), (undo, "BRACKET"));
 }
+
+#[test]
+fn the_header_counts_sheets_on_a_drawing() {
+    // Final wave item 5: "n sheets" on a drawing, the body count on a part (both profiles).
+    for mut h in [Harness::new(), inventor(Drawing)] {
+        h.app.home.open = false;
+        h.app.run("drawing.new", json!({})).unwrap();
+        h.frames(2);
+        assert_eq!(header_count(&h.app), "1 sheet");
+        h.app.run("drawing.sheet.add", json!({})).unwrap();
+        h.frames(2);
+        assert_eq!(header_count(&h.app), "2 sheets");
+    }
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    assert_eq!(header_count(&h.app), "0 bodies");
+    h.app.run("solid.box", json!({"length": 10, "width": 12, "height": 14})).unwrap();
+    h.frames(2);
+    assert_eq!(header_count(&h.app), "1 body");
+}
