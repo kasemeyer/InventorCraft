@@ -49,7 +49,8 @@ use solidcraft_doc::{Document, Metadata, ModelState};
 use solidcraft_geom::{Mesh, Vec3};
 
 /// The kind-less design extension. Such files still open everywhere a design opens; the UI's
-/// Save As, crash recovery and the web download still write it. The engine's `file.save` and
+/// Save As offers it only for a file that already has it, and the web download still writes it
+/// (Save As and crash recovery write the kind's own, wave 3 R102). The engine's `file.save` and
 /// `file.save_as` give a path without an extension the document kind's own instead.
 pub const DESIGN_EXT: &str = "solidcraft";
 /// The design extension of earlier releases. Compatibility shim (docs/compatibility.md): such

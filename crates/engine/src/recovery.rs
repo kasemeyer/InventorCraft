@@ -1,7 +1,7 @@
 //! Autosave and crash recovery.
 //!
-//! Each open design keeps its own recovery entry in the recovery folder: `<id>.solidcraft` (the design
-//! as of the last autosave), `<id>.json` (its file path, name and time) and `<id>.lock`, which
+//! Each open design keeps its own recovery entry in the recovery folder: `<id>.<kind>` (the design
+//! as of the last autosave, under its kind's extension: `.tcipart`, `.tciasm`, `.tcidrw`), `<id>.json` (its file path, name and time) and `<id>.lock`, which
 //! the app holds locked while it runs. Autosaves are written atomically, only when the design
 //! has unsaved changes it hasn't written yet; a design with nothing unsaved has no entry. An
 //! entry whose lock nobody holds belongs to an app that crashed (or closed with unsaved changes):
@@ -88,12 +88,17 @@ fn valid_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 64 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
-/// An entry's design: `<id>.solidcraft`, or `<id>.solvecraft` for an autosave copied from a
-/// pre-rename recovery folder (compatibility shim, docs/compatibility.md).
+/// An entry's design: `<id>.<kind>` (the document kind's extension, wave 3 R102, Plan A D3e), or
+/// `<id>.solidcraft` as earlier releases wrote it, or `<id>.solvecraft` for an autosave copied
+/// from a pre-rename recovery folder (compatibility shim, docs/compatibility.md): the first of
+/// `DESIGN_EXTS` that is there.
 fn design_file(dir: &Path, id: &str) -> PathBuf {
-    let current = file(dir, id, solidcraft_io::DESIGN_EXT);
-    let legacy = file(dir, id, solidcraft_io::LEGACY_DESIGN_EXT);
-    if !current.is_file() && legacy.is_file() { legacy } else { current }
+    solidcraft_io::DESIGN_EXTS.iter().map(|ext| file(dir, id, ext)).find(|f| f.is_file()).unwrap_or_else(|| file(dir, id, solidcraft_io::DESIGN_EXT))
+}
+
+/// Where an autosave of `doc` is written: under its kind's own extension.
+fn autosave_file(dir: &Path, id: &str, doc: &Document) -> PathBuf {
+    file(dir, id, doc.kind.extension())
 }
 
 fn file(dir: &Path, id: &str, ext: &str) -> PathBuf {
@@ -154,7 +159,7 @@ pub fn remove(dir: &Path, id: &str) -> Result<()> {
     if !is_entry {
         return Err(EngineError::Other(format!("no recovered design `{id}`")));
     }
-    for ext in ["json", solidcraft_io::DESIGN_EXT, solidcraft_io::LEGACY_DESIGN_EXT, "lock"] {
+    for ext in ["json", "lock"].into_iter().chain(solidcraft_io::DESIGN_EXTS) {
         let _ = fs::remove_file(file(dir, id, ext));
     }
     Ok(())
@@ -214,7 +219,7 @@ impl Snapshot {
             doc.visibility = self.visibility.clone();
             solidcraft_io::write_design_container(&doc)?
         };
-        solidcraft_io::write_atomic(&file(&self.dir, &self.id, solidcraft_io::DESIGN_EXT), &bytes, false).map_err(io)?;
+        solidcraft_io::write_atomic(&autosave_file(&self.dir, &self.id, &self.doc), &bytes, false).map_err(io)?;
         let entry = Entry {
             id: self.id.clone(),
             path: self.path.clone(),
@@ -309,7 +314,7 @@ impl Autosaver {
         self.last_at = Instant::now();
         if !s.is_dirty() {
             if self.has_entry {
-                for ext in ["json", "solidcraft"] {
+                for ext in std::iter::once("json").chain(solidcraft_io::DESIGN_EXTS) {
                     let _ = fs::remove_file(file(&self.dir, &self.id, ext));
                 }
                 self.has_entry = false;
@@ -352,7 +357,7 @@ impl Autosaver {
         // Crash replays start from this autosave from here, unless the design changed while it
         // was written: the journal then keeps the commands since its older start.
         if Arc::ptr_eq(&s.doc, &doc) {
-            crate::crash::rebased(s, Some(&file(&self.dir, &self.id, solidcraft_io::DESIGN_EXT)), true);
+            crate::crash::rebased(s, Some(&autosave_file(&self.dir, &self.id, &doc)), true);
         }
         self.last = Some((doc, visibility));
         Ok(())
@@ -365,7 +370,7 @@ impl Autosaver {
         if let Some(w) = self.writing.take() {
             let _ = w.done.recv();
         }
-        for ext in ["json", solidcraft_io::DESIGN_EXT] {
+        for ext in std::iter::once("json").chain(solidcraft_io::DESIGN_EXTS) {
             let _ = fs::remove_file(file(&self.dir, &self.id, ext));
         }
         self.lock = None;
@@ -444,6 +449,44 @@ mod tests {
         assert_eq!(entry.features, 1);
         remove(&d, &entry.id).unwrap();
         assert!(orphans(&d).is_empty());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// Wave 3 item 6 (R102, Plan A D3e): an autosave is written under the document kind's own
+    /// extension (a part's `<id>.tcipart`, an assembly's `<id>.tciasm`), never the kind-less
+    /// `.solidcraft`; it is listed, loads and is removed as before. An entry an earlier release
+    /// wrote as `<id>.solidcraft` still loads.
+    #[test]
+    fn autosaves_take_the_kind_extension() {
+        for (kind, ext) in [(solidcraft_doc::DocumentKind::Part, "tcipart"), (solidcraft_doc::DocumentKind::Assembly, "tciasm")] {
+            let d = dir(&format!("kind-{ext}"));
+            let mut s = Session::default();
+            s.doc_mut().kind = kind;
+            s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+            let mut a = Autosaver::new(&d, Duration::from_secs(3600)).unwrap();
+            assert!(a.save(&s).unwrap());
+            let id = a.id.clone();
+            assert!(d.join(format!("{id}.{ext}")).is_file(), "{ext}");
+            assert!(!d.join(format!("{id}.solidcraft")).exists());
+            drop(a);
+            assert_eq!(orphans(&d).iter().map(|e| e.id.clone()).collect::<Vec<_>>(), [id.clone()]);
+            let (doc, _) = load(&d, &id).unwrap();
+            assert_eq!(doc.kind, kind);
+            remove(&d, &id).unwrap();
+            assert!(!d.join(format!("{id}.{ext}")).exists() && orphans(&d).is_empty());
+            let _ = fs::remove_dir_all(&d);
+        }
+        // An entry written as `<id>.solidcraft`.
+        let d = dir("kind-legacy");
+        fs::create_dir_all(&d).unwrap();
+        let id = "4-5-6";
+        fs::write(d.join(format!("{id}.solidcraft")), solidcraft_io::write_design(&Document::default())).unwrap();
+        let entry = Entry { id: id.into(), path: None, name: "part".into(), saved_at: 1, features: 0 };
+        fs::write(d.join(format!("{id}.json")), serde_json::to_vec(&entry).unwrap()).unwrap();
+        assert_eq!(orphans(&d).len(), 1);
+        assert!(load(&d, id).is_ok());
+        remove(&d, id).unwrap();
+        assert!(!d.join(format!("{id}.solidcraft")).exists());
         let _ = fs::remove_dir_all(&d);
     }
 
@@ -532,7 +575,7 @@ mod tests {
         let mut t = Session::default();
         let r = t.execute("doc.recover", &json!({"dir": d.to_string_lossy(), "id": id, "discard": true})).unwrap();
         assert_eq!(r["features"], 1, "{r}");
-        assert!(orphans(&d).is_empty() && !file(&d, &id, "json").exists() && !file(&d, &id, "solidcraft").exists());
+        assert!(orphans(&d).is_empty() && !file(&d, &id, "json").exists() && !file(&d, &id, "tcipart").exists());
         let part = d.join("part.solidcraft");
         fs::write(&part, solidcraft_io::write_design(&Document::default())).unwrap();
         assert!(t.execute("doc.recover", &json!({"dir": d.to_string_lossy(), "id": "part", "discard": true})).is_err());
@@ -549,7 +592,7 @@ mod tests {
         assert!(a.tick(&s, false).unwrap());
         s.mark_saved();
         a.tick(&s, false).unwrap();
-        assert!(!file(&d, &a.id, "solidcraft").exists());
+        assert!(!file(&d, &a.id, "tcipart").exists() && !file(&d, &a.id, "solidcraft").exists());
         a.close(&s);
         assert_eq!(fs::read_dir(&d).unwrap().count(), 0);
         // Closing with unsaved changes keeps them for the next launch.

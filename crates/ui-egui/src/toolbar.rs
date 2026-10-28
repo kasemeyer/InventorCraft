@@ -665,7 +665,10 @@ impl FileAction {
             Self::SaveAs => save_as(app),
             Self::Undo => drop(app.run("edit.undo", json!({}))),
             Self::Redo => drop(app.run("edit.redo", json!({}))),
-            Self::SaveJson => save_as_with_extension(app, "json"),
+            Self::SaveJson => {
+                let name = format!("{}.json", app.session.doc.name);
+                save_design_as(app, &name, &["json"]);
+            }
             Self::Export(extension) => export(app, extension),
             Self::ExportMesh(format) => crate::dialogs_save_mesh::start_with_format(app, format),
             Self::Command(command) => app.start(command),
@@ -877,7 +880,27 @@ pub(crate) fn save_as(app: &mut SolveApp) {
         save_drawing_as(app);
         return;
     }
-    save_as_with_extension(app, solidcraft_engine::io::DESIGN_EXT);
+    let (name, extensions) = save_as_choice(app);
+    save_design_as(app, &name, &extensions);
+}
+
+/// Save As of a part or an assembly (wave 3 item 6, R102; Plan A Q1): `<name>.<kind's
+/// extension>` (`.tcipart`, `.tciasm`); the kind-less `.solidcraft` is offered as a second
+/// filter only when the file already has it (a plain Save of such a file keeps it, `save`).
+pub(crate) fn save_as_choice(app: &SolveApp) -> (String, Vec<&'static str>) {
+    let ext = app.session.doc.kind.extension();
+    let legacy = app
+        .session
+        .path
+        .as_deref()
+        .and_then(|p| std::path::Path::new(p).extension())
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case(solidcraft_engine::io::DESIGN_EXT));
+    let mut extensions = vec![ext];
+    if legacy {
+        extensions.push(solidcraft_engine::io::DESIGN_EXT);
+    }
+    (format!("{}.{ext}", app.session.doc.name), extensions)
 }
 
 /// Save As of a drawing: `.tcidrw`, starting beside its model while it was never saved
@@ -895,9 +918,8 @@ fn save_drawing_as(app: &mut SolveApp) {
     });
 }
 
-fn save_as_with_extension(app: &mut SolveApp, extension: &str) {
-    let name = format!("{}.{extension}", app.session.doc.name);
-    app.pick_save(&name, &[solidcraft_engine::io::DESIGN_EXT, "json"], |app, path| {
+fn save_design_as(app: &mut SolveApp, name: &str, extensions: &[&str]) {
+    app.pick_save(name, extensions, |app, path| {
         // A save under way answers a closing tab when it ends.
         if let Some(path) = path
             && crate::save_job::start(app, "file.save_as", json!({"path": path}))
@@ -3704,3 +3726,7 @@ mod sketch_return_tab_tests {
         assert_eq!(h.app.ui.tab, "MODEL", "{start}: falls back to MODEL");
     }
 }
+
+#[cfg(test)]
+#[path = "toolbar_save_tests.rs"]
+mod save_tests;
