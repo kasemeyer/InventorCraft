@@ -311,7 +311,7 @@ fn drawing_params(app: &SolveApp, model: Option<&str>) -> Value {
 }
 
 /// Create Drawing View (spec §2.1 path 2c): save the model first if it never was (Save As;
-/// cancelling cancels), then open a drawing tab with `drawing.new {model: <absolute path>,
+/// cancelling cancels; an edited saved model stays unsaved), then open a drawing tab with `drawing.new {model: <absolute path>,
 /// properties: {company}}`. Task 5 adds the Base View panel opening (R13).
 pub(crate) fn create_drawing_view(app: &mut SolveApp) {
     if app.file_picker_busy() || app.file_load.busy() {
@@ -323,14 +323,8 @@ pub(crate) fn create_drawing_view(app: &mut SolveApp) {
         return;
     }
     if let Some(path) = app.session.path.clone() {
-        // The drawing reads the model's file: an edited model is saved first, so the drawing shows
-        // the model as it is in memory (as Inventor works from the open model).
-        if app.session.is_dirty()
-            && let Err(e) = app.run("file.save", json!({ "path": path }))
-        {
-            app.set_status(e, true);
-            return;
-        }
+        // An edited model is not saved first: the open tabs serve the drawing the model as it is
+        // in memory (`drawing_models::OpenTabs`), as Inventor works from the open model.
         open_drawing_of(app, &path);
         return;
     }

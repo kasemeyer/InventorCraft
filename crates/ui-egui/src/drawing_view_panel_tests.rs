@@ -128,7 +128,8 @@ fn create_drawing_view_opens_the_panel_with_the_model() {
     assert!(p.model_editable());
     assert_eq!(count_of("drawing_view:model:editable"), Some(1.0));
 
-    // An edited model is saved first, so the drawing shows the model as it is in memory.
+    // An edited model is not saved (final wave item 30): the open tab serves the drawing the
+    // model as it is in memory.
     let mut h = inventor(Part);
     let block = block_part(&h.dir);
     h.app.open_path_async(&block);
@@ -138,11 +139,14 @@ fn create_drawing_view_opens_the_panel_with_the_model() {
         let params = json!({"model": params["model"], "orientation": "front", "lines": "hidden", "position": [17, 11]});
         solidcraft_engine::drawing::preview_view(&h.app.session, "drawing.view.base", &params).unwrap().len()
     };
+    let on_disk = std::fs::read(&block).unwrap();
     h.app.run("solid.box", json!({"length": "1 in", "width": "1 in", "height": "1 in", "corner": [100, 0, 0], "name": "Extra"})).unwrap();
     assert!(h.app.session.is_dirty());
     crate::documents::create_drawing_view(&mut h.app);
     h.frames(3);
     assert_eq!(h.app.session.doc.kind, Drawing);
+    assert_eq!(std::fs::read(&block).unwrap(), on_disk, "the model's file is untouched");
+    assert!(crate::documents::any_dirty(&h.app), "the model tab keeps its unsaved edit");
     let edited = front(&h);
     assert_eq!(crate::documents::tab_paths(&h.app)[0].as_deref(), Some(block.as_str()));
     // The untouched block's front view, for comparison.
