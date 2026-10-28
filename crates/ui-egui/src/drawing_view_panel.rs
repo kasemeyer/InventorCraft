@@ -407,6 +407,10 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context, mut p: ViewPanel) {
                     crate::ui_kit::row(ui, crate::i18n::tr("ui.drawing.tangent_edges"), |ui| {
                         let r = crate::ui_kit::checkbox(ui, "", &mut p.tangent_edges);
                         scenario::publish_handle("drawing_view:tangent_edges", r.rect.center());
+                        // A choice of its own stops following the base view, as the style buttons do.
+                        if r.clicked() {
+                            p.style_from_base = false;
+                        }
                     });
                 }
                 if let Some(error) = &p.error {

@@ -319,6 +319,23 @@ fn editing_a_view_runs_set_commands() {
 }
 
 #[test]
+fn tangent_edges_on_a_following_projected_view_take_effect() {
+    let (mut h, block) = block_drawing();
+    let [_, v2, _] = three_views(&mut h, &block);
+    let undo = h.app.session.undo.len();
+    edit_view(&mut h, v2);
+    assert!(panel(&h).style_from_base);
+    click(&mut h, "drawing_view:tab:display");
+    click(&mut h, "drawing_view:tangent_edges");
+    assert!(panel(&h).tangent_edges && !panel(&h).style_from_base, "a tangent-edge choice of its own stops following the base");
+    crate::drawing_ui::panel_ok(&mut h.app);
+    h.frames(2);
+    assert!(h.app.drawing.panel.is_none());
+    assert_eq!(last_undo(&h), (undo + 1, Some("View Style".into())));
+    assert!(view(&h, v2).tangent_edges);
+}
+
+#[test]
 fn hiding_lines_reports_suppressed_annotations() {
     let (mut h, block) = block_drawing();
     let [_, _, v3] = three_views(&mut h, &block);
