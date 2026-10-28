@@ -469,7 +469,7 @@ mod tests {
             assert!(d.join(format!("{id}.{ext}")).is_file(), "{ext}");
             assert!(!d.join(format!("{id}.solidcraft")).exists());
             drop(a);
-            assert_eq!(orphans(&d).iter().map(|e| e.id.clone()).collect::<Vec<_>>(), [id.clone()]);
+            assert_eq!(orphans(&d).iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), [id.as_str()]);
             let (doc, _) = load(&d, &id).unwrap();
             assert_eq!(doc.kind, kind);
             remove(&d, &id).unwrap();
