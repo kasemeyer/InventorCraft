@@ -139,6 +139,9 @@ fn a_stale_picture_is_drawn_again() {
     let start = undo(&h);
     crate::toolbar::save(&mut h.app);
     h.frames(10);
+    // The save runs on a worker: wait for it, as a person would (ten frames are not enough
+    // under a parallel test load).
+    h.settle();
     assert_eq!(undo(&h), start + 1, "the update before the save is one step");
     assert!(!h.app.session.is_dirty(), "and the save comes after it");
     let m = h.app.session.doc.drawing.clone().unwrap();
