@@ -112,7 +112,7 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context, mut p: SheetPanel) {
             field(ui, tr("ui.drawing.sheet_size"), "drawing_sheet:size", |ui| {
                 crate::ui_kit::dropdown_menu(ui, "drawing_sheet_size", p.size.letter(), |ui| {
                     for size in SIZES {
-                        let row = ui.selectable_label(p.size == size, size.letter());
+                        let row = crate::ui_kit::list_picker(ui, &format!("drawing_sheet_size:{}", size.letter()), size.letter(), p.size == size);
                         scenario::publish_handle(&format!("drawing_sheet:size:{}", size.letter()), row.rect.center());
                         if row.clicked() {
                             p.size = size;

@@ -507,13 +507,13 @@ fn component(ui: &mut egui::Ui, p: &mut ViewPanel, models: &[String], enter: &mu
         if editable {
             let r = crate::ui_kit::dropdown_menu(ui, "drawing_view_model", &current, |ui| {
                 for path in models {
-                    let row = ui.selectable_label(p.model.as_deref() == Some(path.as_str()), file_name(path));
+                    let row = crate::ui_kit::list_picker(ui, path, &file_name(path), p.model.as_deref() == Some(path.as_str()));
                     scenario::publish_handle(&format!("drawing_view:model_row:{}", file_name(path)), row.rect.center());
                     if row.clicked() {
                         p.model = Some(path.clone());
                     }
                 }
-                let row = ui.selectable_label(false, crate::i18n::tr("ui.drawing.browse"));
+                let row = crate::ui_kit::list_picker(ui, "drawing_view_model:browse", crate::i18n::tr("ui.drawing.browse"), false);
                 scenario::publish_handle("drawing_view:model:browse", row.rect.center());
                 if row.clicked() {
                     *browse = true;
@@ -605,7 +605,7 @@ fn scale_combo(ui: &mut egui::Ui, p: &mut ViewPanel, enter: &mut bool) {
     ui.scope_builder(egui::UiBuilder::new().max_rect(arrow).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
         let r = crate::ui_kit::dropdown_menu(ui, "drawing_view_scale", "", |ui| {
             for (name, _) in SCALE_PRESETS {
-                let row = ui.selectable_label(p.scale_text == name, name);
+                let row = crate::ui_kit::list_picker(ui, &format!("drawing_view_scale:{name}"), name, p.scale_text == name);
                 scenario::publish_handle(&format!("drawing_view:scale_row:{name}"), row.rect.center());
                 if row.clicked() {
                     p.scale_text = name.to_string();

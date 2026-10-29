@@ -288,6 +288,14 @@ pub(crate) fn text_emphasis(ui: &mut Ui, bold: &mut bool, italic: &mut bool) {
     }
 }
 
+/// The underline toggle beside `text_emphasis`, with the same glyph treatment; `name` is the
+/// translated accessible name and tooltip. Tokens: scope font/control tokens.
+pub(crate) fn text_underline(ui: &mut Ui, value: &mut bool, name: &str) -> egui::Response {
+    let response = ui.toggle_value(value, egui::RichText::new("U").underline()).on_hover_text(name).on_disabled_hover_text(name);
+    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), *value, name));
+    response
+}
+
 /// A command variant supplied by the panel; the kit only draws and returns its key.
 pub(crate) struct ToolChoice<'a> {
     pub key: &'a str,
