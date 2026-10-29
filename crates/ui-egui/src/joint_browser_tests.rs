@@ -341,3 +341,44 @@ mod delete {
         assert_eq!(h.app.session.doc.assembly.joints.len(), 2);
     }
 }
+
+/// R115 (Plan E-1 Task 3b): a design with constraints and no joints solves through the session's
+/// refresh, and still draws no joint frames (compiled joints are never joints, owner Q1).
+#[test]
+fn a_constraints_only_assembly_draws_no_joint_frames() {
+    use solidcraft_engine::doc::constraints::{Constraint, ConstraintKind, ConstraintSolution, PickWhat, geo_at};
+    use solidcraft_engine::doc::joints::occurrence_world;
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    crate::test_support::grounded_boxes(&[("A", 0), ("B", 30)], |id, p| h.app.run(id, p).unwrap());
+    let s = &h.app.session;
+    let occ = |name: &str| s.doc.occurrences.iter().find(|o| o.name == name).map(|o| o.id).unwrap();
+    let (a, b) = (occ("A:1"), occ("B:1"));
+    let st = s.model.state();
+    // A's top on B's bottom.
+    let picks = vec![
+        geo_at(&s.doc, &st, a, PickWhat::Face, solidcraft_engine::geom::Vec3::new(10.0, 10.0, 10.0)).unwrap(),
+        geo_at(&s.doc, &st, b, PickWhat::Face, solidcraft_engine::geom::Vec3::new(40.0, 10.0, 0.0)).unwrap(),
+    ];
+    let mate = Constraint {
+        id: 1_000_000,
+        name: "Mate:1".into(),
+        kind: ConstraintKind::Mate,
+        solution: ConstraintSolution::MateFace,
+        picks,
+        offset: 0.0,
+        limits: Default::default(),
+        exprs: Default::default(),
+        suppressed: false,
+        lock: false,
+        axis: None,
+        state: Vec::new(),
+    };
+    h.app.session.doc_mut().assembly.constraints.push(mate);
+    h.app.session.refresh();
+    let s = &h.app.session;
+    assert!(s.doc.assembly.joints.is_empty() && s.doc.assembly.solves());
+    assert_eq!(crate::dialogs_assembly::joint_frames_world(s), vec![]);
+    let bottom = solidcraft_engine::doc::apply_point(&occurrence_world(&s.doc, b), solidcraft_engine::geom::Vec3::new(40.0, 10.0, 0.0));
+    assert!((bottom.z - 10.0).abs() <= 1e-9, "B's bottom at {bottom:?}");
+}

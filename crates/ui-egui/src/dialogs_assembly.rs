@@ -1488,7 +1488,7 @@ thread_local! {
 /// Each joint's frame in the world (where its glyph sits): the frame of its first origin, on
 /// its occurrence as placed (including moves not captured yet).
 pub fn joint_frames_world(s: &Session) -> Vec<(u64, solidcraft_engine::doc::Mat)> {
-    if s.doc.assembly.joints.is_empty() {
+    if !s.doc.assembly.solves() {
         return Vec::new();
     }
     let key = format!("{}:{:?}", s.revision, s.pending_moves);
