@@ -28,7 +28,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .params("sheet: the sheet's index (0-based) → sheet: the active sheet (view state, no undo step)"),
     CommandSpec::new("drawing.sheet.set_size", "Sheet Size", sheet_set_size).icon("settings").params(
-        "sheet?: index (0-based; default the active sheet); size: A|B|C|D|E; landscape?: bool (default the sheet's) → sheet, size, landscape: the page, border and title block follow the new size",
+        "sheet?: index (0-based; default the active sheet); size: A|B|C|D|E; landscape?: bool (default the sheet's); name?: text (renames the sheet in the same undo step; checked as drawing.sheet.set_name) → sheet, size, landscape, name: the page, border and title block follow the new size",
     ),
     CommandSpec::new("drawing.sheet.set_name", "Sheet Name", sheet_set_name).icon("settings").params(
         "sheet?: index (0-based; default the active sheet); name: text (not empty, at most 100 characters; the browser shows <name>:<n>) → sheet, name",
@@ -103,16 +103,38 @@ fn sheet_set_size(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "size must be A, B, C, D or E"));
     }
     let (size, landscape) = size_params(p, cmd, sheet.size, sheet.landscape)?;
+    // Edit Sheet's OK changes the name with the size as one undo step (R99).
+    let name = match p.get("name") {
+        None | Some(Value::Null) => None,
+        Some(_) => Some(sheet_name_param(p, cmd)?),
+    };
+    let shown = name.clone().unwrap_or_else(|| sheet.name.clone());
     drawing::edit(s, cmd, |m, _| {
         template::resize_sheet(m, index, size, landscape).map_err(|e| EngineError::Other(format!("{cmd}: {e}")))?;
+        if let (Some(name), Some(sheet)) = (name, m.sheets.get_mut(index)) {
+            sheet.name = name;
+        }
         template::refresh_title_blocks(m);
         Ok(())
     })?;
-    Ok(json!({"sheet": index, "size": size.letter(), "landscape": landscape}))
+    Ok(json!({"sheet": index, "size": size.letter(), "landscape": landscape, "name": shown}))
 }
 
 /// Most characters of a sheet's name.
 const MAX_SHEET_NAME: usize = 100;
+
+/// The `name` param as a sheet's name: trimmed, not empty, at most `MAX_SHEET_NAME` characters,
+/// no control characters (`set_name` and `set_size`'s optional name).
+fn sheet_name_param(p: &Value, cmd: &str) -> Result<String> {
+    let name = p.get("name").and_then(Value::as_str).map(str::trim).ok_or_else(|| bad(cmd, "`name` must be text"))?;
+    if name.is_empty() {
+        return Err(bad(cmd, "a sheet needs a name"));
+    }
+    if name.chars().count() > MAX_SHEET_NAME || name.chars().any(char::is_control) {
+        return Err(bad(cmd, format!("a sheet's name is at most {MAX_SHEET_NAME} characters on one line")));
+    }
+    Ok(name.to_string())
+}
 
 /// `drawing.sheet.set_name` (Edit Sheet's Name, R104): one undo step.
 fn sheet_set_name(s: &mut Session, p: &Value) -> Result<Value> {
@@ -125,14 +147,7 @@ fn sheet_set_name(s: &mut Session, p: &Value) -> Result<Value> {
     if m.sheets.get(index).is_none() {
         return Err(bad(cmd, "the drawing has no sheets"));
     }
-    let name = p.get("name").and_then(Value::as_str).map(str::trim).ok_or_else(|| bad(cmd, "`name` must be text"))?;
-    if name.is_empty() {
-        return Err(bad(cmd, "a sheet needs a name"));
-    }
-    if name.chars().count() > MAX_SHEET_NAME || name.chars().any(char::is_control) {
-        return Err(bad(cmd, format!("a sheet's name is at most {MAX_SHEET_NAME} characters on one line")));
-    }
-    let name = name.to_string();
+    let name = sheet_name_param(p, cmd)?;
     let shown = name.clone();
     drawing::edit(s, cmd, |m, _| {
         if let Some(sheet) = m.sheets.get_mut(index) {

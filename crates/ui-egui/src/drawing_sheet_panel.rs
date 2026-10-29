@@ -7,11 +7,11 @@
 //!   left out: the title block always sits bottom-right.
 //! - Options: Exclude from count and Exclude from printing (shown disabled: not stored yet).
 //!
-//! OK (or Enter) runs `drawing.sheet.set_name` when the name changed and
-//! `drawing.sheet.set_size` when the size or orientation changed (the border and title block are
-//! placed again, and the canvas fits the new sheet). The engine has no way to group two commands
-//! into one undo step, so changing both takes two steps; changing one takes one. Esc or Cancel
-//! closes and sends nothing. Every profile (SolidCraft's drawings too) runs this code.
+//! OK (or Enter) sends one command, so it is always one undo step: `drawing.sheet.set_size` when
+//! the size or orientation changed, carrying the new name too when that changed (the border and
+//! title block are placed again, and the canvas fits the new sheet); `drawing.sheet.set_name` when
+//! only the name changed; nothing when nothing changed. Esc or Cancel closes and sends nothing.
+//! Every profile (SolidCraft's drawings too) runs this code.
 
 use serde_json::json;
 use solidcraft_engine::doc::drawing::AnsiSize;
@@ -58,22 +58,28 @@ pub(crate) fn open(app: &mut SolveApp, sheet: usize) {
     }
 }
 
-/// OK: the name, then the size and orientation, each only when changed. False when a command
-/// refused (the panel stays open).
-pub(crate) fn apply(app: &mut SolveApp, p: &SheetPanel) -> bool {
+/// OK: one command for whatever changed (one undo step). False when it refused (the panel stays
+/// open). On success the panel's `original` becomes what was applied, so a later OK on the same
+/// panel sends only what changed since.
+pub(crate) fn apply(app: &mut SolveApp, p: &mut SheetPanel) -> bool {
     if !p.can_ok() {
         return false;
     }
-    let name = p.name.trim();
-    if name != p.original.0 && app.run("drawing.sheet.set_name", json!({ "sheet": p.sheet, "name": name })).is_err() {
-        return false;
-    }
+    let name = p.name.trim().to_string();
+    let renamed = name != p.original.0;
     if (p.size, p.landscape) != (p.original.1, p.original.2) {
-        if app.run("drawing.sheet.set_size", json!({ "sheet": p.sheet, "size": p.size.letter(), "landscape": p.landscape })).is_err() {
+        let mut params = json!({ "sheet": p.sheet, "size": p.size.letter(), "landscape": p.landscape });
+        if renamed {
+            params["name"] = json!(name);
+        }
+        if app.run("drawing.sheet.set_size", params).is_err() {
             return false;
         }
         app.drawing.fit_pending = true;
+    } else if renamed && app.run("drawing.sheet.set_name", json!({ "sheet": p.sheet, "name": name })).is_err() {
+        return false;
     }
+    p.original = (name, p.size, p.landscape);
     true
 }
 
@@ -151,7 +157,7 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context, mut p: SheetPanel) {
         return;
     }
     if ((enter && can_ok) || action == crate::ui_kit::Action::Ok) && !menu_enter {
-        app.drawing.panel = if apply(app, &p) { None } else { Some(DrawingPanel::Sheet(p)) };
+        app.drawing.panel = if apply(app, &mut p) { None } else { Some(DrawingPanel::Sheet(p)) };
         return;
     }
     app.drawing.panel = Some(DrawingPanel::Sheet(p));

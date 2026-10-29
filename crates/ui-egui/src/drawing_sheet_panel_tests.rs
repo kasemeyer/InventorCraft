@@ -88,7 +88,9 @@ fn edit_sheet_sets_size_and_orientation_under_solidcraft() {
 }
 
 /// The name: one `drawing.sheet.set_name` step; the browser row reads `<name>:1`. With the size
-/// changed too, OK runs two commands (the engine has no command grouping): two undo steps.
+/// changed too, OK runs ONE `drawing.sheet.set_size` carrying the name: one undo step, and one
+/// undo puts both back. A successful OK refreshes the panel's starting point, so OK again on the
+/// same panel sends nothing.
 /// An empty name keeps OK off; Esc sends nothing.
 fn name(h: Harness) {
     let mut h = drawing(h);
@@ -103,7 +105,7 @@ fn name(h: Harness) {
     assert_eq!(model(&h).sheets[0].name, "Details");
     assert_eq!(h.app.session.undo.len(), undo + 1);
     assert!(crate::scenario::handle_at("row:Details:1").is_some(), "the browser row reads Details:1");
-    // Name and size: two steps.
+    // Name and size: one step.
     edit_sheet_from_the_browser(&mut h);
     assert_eq!(panel(&h).name, "Details");
     panel_mut(&mut h).name = "Layout".into();
@@ -111,7 +113,7 @@ fn name(h: Harness) {
     crate::drawing_ui::panel_ok(&mut h.app);
     h.frames(2);
     assert_eq!((model(&h).sheets[0].name.as_str(), model(&h).sheets[0].size), ("Layout", AnsiSize::C));
-    assert_eq!(h.app.session.undo.len(), undo + 3);
+    assert_eq!(h.app.session.undo.len(), undo + 2, "name and size together are one undo step");
     // Esc: nothing.
     edit_sheet_from_the_browser(&mut h);
     panel_mut(&mut h).name = "Other".into();
@@ -120,11 +122,26 @@ fn name(h: Harness) {
     h.frames(2);
     assert!(h.app.drawing.panel.is_none());
     assert_eq!((model(&h).sheets[0].name.as_str(), model(&h).sheets[0].size), ("Layout", AnsiSize::C));
-    assert_eq!(h.app.session.undo.len(), undo + 3);
+    assert_eq!(h.app.session.undo.len(), undo + 2);
     // OK with nothing changed sends nothing.
     edit_sheet_from_the_browser(&mut h);
     crate::drawing_ui::panel_ok(&mut h.app);
+    assert_eq!(h.app.session.undo.len(), undo + 2);
+    // A successful apply refreshes the panel's starting point: the same panel applied again
+    // sends nothing.
+    edit_sheet_from_the_browser(&mut h);
+    let mut p = panel(&h).clone();
+    p.name = "Final".into();
+    p.landscape = false;
+    assert!(crate::drawing_sheet_panel::apply(&mut h.app, &mut p));
     assert_eq!(h.app.session.undo.len(), undo + 3);
+    assert!(crate::drawing_sheet_panel::apply(&mut h.app, &mut p));
+    assert_eq!(h.app.session.undo.len(), undo + 3, "nothing changed since the last apply");
+    // One undo puts the name and the size back together.
+    h.app.run("edit.undo", json!({})).unwrap();
+    h.app.run("edit.undo", json!({})).unwrap();
+    let sheet = &model(&h).sheets[0];
+    assert_eq!((sheet.name.as_str(), sheet.size), ("Details", AnsiSize::D));
 }
 
 #[test]

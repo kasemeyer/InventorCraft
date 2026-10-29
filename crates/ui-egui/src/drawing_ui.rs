@@ -115,8 +115,8 @@ pub(crate) fn panel_ok(app: &mut SolveApp) {
                 app.drawing.panel = Some(DrawingPanel::Text(p));
             }
         }
-        Some(DrawingPanel::Sheet(p)) => {
-            if !crate::drawing_sheet_panel::apply(app, &p) {
+        Some(DrawingPanel::Sheet(mut p)) => {
+            if !crate::drawing_sheet_panel::apply(app, &mut p) {
                 app.drawing.panel = Some(DrawingPanel::Sheet(p));
             }
         }

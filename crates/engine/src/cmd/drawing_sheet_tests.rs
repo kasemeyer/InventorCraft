@@ -108,7 +108,7 @@ fn set_size_regenerates_border_and_title_block() {
     let (border, title) = (model(&s).sheets[0].border, model(&s).sheets[0].title_block);
     let undo = s.undo.len();
     let r = run(&mut s, "drawing.sheet.set_size", json!({"sheet": 0, "size": "B", "landscape": true}));
-    assert_eq!(r, json!({"sheet": 0, "size": "B", "landscape": true}));
+    assert_eq!(r, json!({"sheet": 0, "size": "B", "landscape": true, "name": "Sheet"}));
     assert_eq!(s.undo.len(), undo + 1, "one undo step");
     let m = model(&s);
     let page = &m.paper.layout("Sheet:1").unwrap().page;
@@ -241,6 +241,36 @@ fn set_name_names_a_sheet_in_one_step() {
     run(&mut s, "drawing.sheet.set_name", json!({"name": "Assembly"}));
     let names: Vec<&str> = model(&s).sheets.iter().map(|x| x.name.as_str()).collect();
     assert_eq!(names, ["Sheet", "Assembly"]);
+}
+
+/// Fix wave 3 (R99): Edit Sheet's OK renames and resizes in ONE undo step through
+/// `drawing.sheet.set_size`'s optional `name`, checked as `set_name` checks it; undo puts both back.
+#[test]
+fn set_size_with_a_name_is_one_undo_step() {
+    let mut s = new_drawing();
+    let undo = s.undo.len();
+    let r = run(&mut s, "drawing.sheet.set_size", json!({"sheet": 0, "size": "B", "landscape": false, "name": " Details "}));
+    assert_eq!(r, json!({"sheet": 0, "size": "B", "landscape": false, "name": "Details"}));
+    let sheet = &model(&s).sheets[0];
+    assert_eq!((sheet.name.as_str(), sheet.size, sheet.landscape), ("Details", AnsiSize::B, false));
+    assert_eq!(s.undo.len(), undo + 1, "one undo step for the name and the size");
+    for (bad, msg) in [
+        (json!("  "), "a sheet needs a name"),
+        (json!("x".repeat(101)), "a sheet's name is at most 100 characters on one line"),
+        (json!("a\nb"), "a sheet's name is at most 100 characters on one line"),
+        (json!(7), "`name` must be text"),
+    ] {
+        assert_eq!(
+            err(&mut s, "drawing.sheet.set_size", json!({"sheet": 0, "size": "C", "name": bad})),
+            format!("invalid parameters for `drawing.sheet.set_size`: {msg}")
+        );
+    }
+    let sheet = &model(&s).sheets[0];
+    assert_eq!((sheet.name.as_str(), sheet.size), ("Details", AnsiSize::B), "a refused name changes nothing");
+    assert_eq!(s.undo.len(), undo + 1);
+    run(&mut s, "edit.undo", json!({}));
+    let sheet = &model(&s).sheets[0];
+    assert_eq!((sheet.name.as_str(), sheet.size, sheet.landscape), ("Sheet", AnsiSize::D, true));
 }
 
 /// R104: a drawing saved before sheets had names (no `name` in its sheets) opens with "Sheet".
