@@ -9,8 +9,8 @@ use solidcraft_geom::Vec3;
 use solidcraft_kernel::FaceSurface;
 
 use super::{EdgeEnd, Geo, GeoRef, OriginItem};
-use crate::joints::edge::{edge_index, face_of};
-use crate::joints::face::named_face;
+use crate::joints::edge::{edge_index, planar_face_beside};
+use crate::joints::face::named_face_in;
 use crate::joints::{component_bodies, component_of, occurrence_world};
 use crate::{DocError, Document, IDENTITY, Mat, ModelBody, ModelState, Result, apply_point, apply_vector, mat_inverse};
 
@@ -143,20 +143,24 @@ pub fn resolve(doc: &Document, st: &ModelState, g: &GeoRef) -> Result<Prim> {
     let comp = component_of(doc, g.occurrence)?;
     match &g.geo {
         Geo::Origin { item } => Ok(origin(*item)),
-        Geo::Face { name, pick } => face(doc, st, name, *pick),
+        Geo::Face { name, pick } => face(doc, st, comp, name, *pick),
         Geo::Edge { name, pick } => {
             let (b, i, offset) = named_edge(doc, st, comp, name, *pick)?;
-            edge(b, i, &offset, *pick)
+            edge(b, i, &offset)
         }
         Geo::Vertex { edge, end, pick } => {
             let (b, i, offset) = named_edge(doc, st, comp, edge, *pick)?;
             let m = b.mesh();
             let e = m.edges.get(i).ok_or_else(|| lost("edge", edge))?;
-            let p = match end {
-                EdgeEnd::Start => e.first(),
-                EdgeEnd::End => e.last(),
+            let (Some(first), Some(last)) = (e.first(), e.last()) else { return Err(lost("edge", edge)) };
+            let (first, last) = (apply_point(&offset, *first), apply_point(&offset, *last));
+            let (kept, other) = match end {
+                EdgeEnd::Start => (first, last),
+                EdgeEnd::End => (last, first),
             };
-            p.map(|p| Prim::Point { p: apply_point(&offset, *p) }).ok_or_else(|| lost("edge", edge))
+            // The stored pick is the end as it was picked: an edge whose polyline runs the other
+            // way after a rebuild has that end at its other end.
+            Ok(Prim::Point { p: if other.dist(*pick) < 0.5 * kept.dist(*pick) { other } else { kept } })
         }
     }
 }
@@ -225,8 +229,9 @@ fn own(doc: &Document, b: &ModelBody, p: Vec3) -> Vec3 {
 
 /// A named face: planar → its centroid and outward normal; cylindrical → its axis (the surface's
 /// own direction) and radius; spherical → its centre and radius.
-fn face(doc: &Document, st: &ModelState, name: &str, pick: Vec3) -> Result<Prim> {
-    let nf = named_face(doc, st, pick, name).map_err(|_| lost("face", name))?;
+fn face(doc: &Document, st: &ModelState, comp: u64, name: &str, pick: Vec3) -> Result<Prim> {
+    // Only the picked occurrence's own bodies: another part's like-named face is not this pick.
+    let nf = named_face_in(doc, st, comp, pick, name).map_err(|_| lost("face", name))?;
     if let Some((p, n)) = nf.plane()? {
         return Ok(Prim::Plane { p, n });
     }
@@ -258,7 +263,7 @@ fn named_edge<'a>(doc: &Document, st: &'a ModelState, comp: u64, name: &str, pic
 }
 
 /// Edge `i` of `b` as a line (straight) or a circle (round), placed by `offset`.
-fn edge(b: &ModelBody, i: usize, offset: &Mat, pick: Vec3) -> Result<Prim> {
+fn edge(b: &ModelBody, i: usize, offset: &Mat) -> Result<Prim> {
     let m = b.mesh();
     let e = m.edges.get(i).map(Vec::as_slice).unwrap_or_default();
     let place = |p: Prim| placed(p, offset);
@@ -266,10 +271,12 @@ fn edge(b: &ModelBody, i: usize, offset: &Mat, pick: Vec3) -> Result<Prim> {
         return Ok(place(Prim::Line { p, d }));
     }
     let Some((c, fitted, r)) = circle(e) else { return Err(DocError::Invalid("a curved edge that is not a circle".into())) };
-    // The axis is the outward normal of the planar face beside the edge (the larger one); an
-    // edge with no planar face beside it keeps the normal of the circle's own plane.
-    let pick = mat_inverse(offset).map_or(pick, |inv| apply_point(&inv, pick));
-    let axis = face_of(b, i, None, pick).map_or(fitted, |(_, n, _)| n);
+    // The axis is the outward normal of the planar face beside the edge (the larger one). An
+    // edge with no planar face beside it (a cylinder meeting a cone) keeps the normal of the
+    // circle's own plane, whose sign follows the polyline's direction: arbitrary in v1, so an
+    // Opposed/Aligned Insert on such an edge may take either sense. A body whose faces can't be
+    // read is an error, not a fallback.
+    let axis = planar_face_beside(b, i)?.map_or(fitted, |(_, n, _)| n);
     Ok(place(Prim::Circle { c, axis, r }))
 }
 

@@ -271,6 +271,19 @@ pub fn locate_face(st: &ModelState, name: &str, p: Vec3) -> Option<FaceHit> {
     locate_in(st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh()), name, p)
 }
 
+/// [`locate_face`] over the bodies `keep` accepts only (a component's: an assembly constraint's
+/// pick names a face of its own occurrence, never a like-named face of another part).
+pub(crate) fn locate_face_among(st: &ModelState, keep: impl Fn(&ModelBody) -> bool, name: &str, p: Vec3) -> Option<FaceHit> {
+    if crate::sheet::split_sheet_face_name(name).is_some() {
+        return sheet_locate(st, name, p).filter(|hit| st.bodies.get(hit.body).is_some_and(&keep));
+    }
+    let kept = || st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh() && keep(b));
+    if legacy_name(name).is_none() {
+        naming::warm_names(kept().map(|(_, b)| b));
+    }
+    locate_in(kept(), name, p)
+}
+
 /// [`locate_face`] for a feature that works on the faces of the body called `body` (a shell, a
 /// draft…): the one face of that body with the very name, found without working out the names
 /// of every other body (a body named from geometry is meshed for it: seconds in a large model).

@@ -58,6 +58,19 @@ pub(crate) fn face_of(b: &ModelBody, i: usize, name: Option<&str>, pick: Vec3) -
     chosen.map(|(f, n, c, _)| (f, n, c)).ok_or_else(|| DocError::Invalid("joint origin: no planar face beside that edge".into()))
 }
 
+/// The larger planar face beside edge `i` (its index, outward normal and centroid), `None` when
+/// no face beside it is planar; an error only when the body's faces can't be read.
+pub(crate) fn planar_face_beside(b: &ModelBody, i: usize) -> Result<Option<(usize, Vec3, Vec3)>> {
+    let m = b.mesh();
+    let beside: Vec<usize> = m.edge_faces.get(i).map(|fs| fs.iter().map(|f| *f as usize).collect()).unwrap_or_default();
+    let infos = b.body.faces(tol(b))?;
+    Ok(beside
+        .iter()
+        .filter_map(|f| infos.iter().find(|x| x.index == *f).and_then(|x| x.plane_normal.map(|n| (x.index, n, x.centroid, x.area))))
+        .max_by(|a, b| a.3.total_cmp(&b.3))
+        .map(|(f, n, c, _)| (f, n, c)))
+}
+
 /// Edge `i`'s middle (along its polyline) and the direction it runs there.
 fn middle(e: &[Vec3]) -> Option<(Vec3, Vec3)> {
     let total: f64 = e.windows(2).map(|w| w[0].dist(w[1])).sum();

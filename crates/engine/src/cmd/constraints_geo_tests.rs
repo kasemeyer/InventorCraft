@@ -138,3 +138,31 @@ fn lost_picks_say_which() {
     assert!(e.contains("not a v1 pick"), "{e}");
     assert!(e.contains("torus"), "{e}");
 }
+
+/// A face name resolves only on its own occurrence's component: A's top named on B is lost, not
+/// A's plane (Task 2 review).
+#[test]
+fn a_face_resolves_on_its_own_occurrence_only() {
+    let s = blocks();
+    let (a_top, _) = pick(&s, "A", PickWhat::Face, v(50.0, 25.0, 20.0));
+    let Geo::Face { name, .. } = a_top.geo else { panic!("{a_top:?}") };
+    let on_b = GeoRef { occurrence: occ(&s, "B"), geo: Geo::Face { name: name.clone(), pick: v(50.0, 25.0, 20.0) } };
+    let e = resolve(&s.doc, &s.model.state(), &on_b).unwrap_err().to_string();
+    assert!(e.contains("no longer exists") && e.contains(&name), "{e}");
+}
+
+/// A vertex whose stored end is now the edge's other end (its polyline reversed by a rebuild)
+/// resolves to the end nearer the stored pick.
+#[test]
+fn a_reversed_edge_keeps_the_picked_vertex() {
+    let s = blocks();
+    let (g, _) = pick(&s, "A", PickWhat::Vertex, v(100.0, 50.0, 20.0));
+    let Geo::Vertex { edge, end, pick: at } = g.geo else { panic!("{g:?}") };
+    let other = match end {
+        solidcraft_doc::constraints::EdgeEnd::Start => solidcraft_doc::constraints::EdgeEnd::End,
+        solidcraft_doc::constraints::EdgeEnd::End => solidcraft_doc::constraints::EdgeEnd::Start,
+    };
+    let reversed = GeoRef { occurrence: g.occurrence, geo: Geo::Vertex { edge, end: other, pick: at } };
+    let p = resolve(&s.doc, &s.model.state(), &reversed).unwrap();
+    assert!(p.point().is_some_and(|p| close(p, v(100.0, 50.0, 20.0), TOL)), "reversed end {p:?}");
+}

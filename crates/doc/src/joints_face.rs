@@ -34,6 +34,17 @@ fn gone(name: &str) -> DocError {
 /// attach elsewhere).
 pub(crate) fn named_face<'a>(doc: &Document, st: &'a ModelState, pick: Vec3, name: &str) -> Result<NamedFace<'a>> {
     let hit = crate::name_lookup::locate_face(st, name, pick).ok_or_else(|| gone(name))?;
+    face_of_hit(doc, st, hit, pick, name)
+}
+
+/// [`named_face`] among component `comp`'s bodies only.
+pub(crate) fn named_face_in<'a>(doc: &Document, st: &'a ModelState, comp: u64, pick: Vec3, name: &str) -> Result<NamedFace<'a>> {
+    let hit = crate::name_lookup::locate_face_among(st, |b| doc.model_body_component(b) == comp, name, pick).ok_or_else(|| gone(name))?;
+    face_of_hit(doc, st, hit, pick, name)
+}
+
+/// The named face a lookup found, placed by its body's offset.
+fn face_of_hit<'a>(doc: &Document, st: &'a ModelState, hit: crate::name_lookup::FaceHit, pick: Vec3, name: &str) -> Result<NamedFace<'a>> {
     let body = st.bodies.get(hit.body).ok_or_else(|| gone(name))?;
     let Some(offset) = doc.model_body_offset(body).copied() else {
         return Ok(NamedFace { body, face: hit.face, point: hit.point, offset: IDENTITY });
