@@ -368,6 +368,7 @@ fn part_design(s: &Session, sc: &Scope, stem: &str, cmd: &str) -> Result<(Sessio
     let mut scope = Document { assembly: source.assembly.clone(), ..Document::default() };
     let mapped = |o: &u64| sc.occurrences.contains_key(o);
     scope.assembly.joints.retain(|j| mapped(&j.a.occurrence) && mapped(&j.b.occurrence));
+    scope.assembly.constraints.retain(|c| c.picks.iter().all(|g| mapped(&g.occurrence)));
     scope.assembly.origins.retain(|o| mapped(&o.origin.occurrence));
     scope.assembly.contact_sets.retain(|c| c.occurrences.iter().all(mapped));
     scope.assembly.exploded.retain(|v| v.moves.iter().all(|(o, _)| mapped(o)));
@@ -425,6 +426,7 @@ fn clear_history(s: &mut Session, sc: &Scope) {
     });
     let a = &mut d.assembly;
     a.joints.retain(|j| !inner.contains(&j.a.occurrence) && !inner.contains(&j.b.occurrence));
+    a.constraints.retain(|c| !c.picks.iter().any(|g| inner.contains(&g.occurrence)));
     let joints: BTreeSet<u64> = a.joints.iter().map(|j| j.id).collect();
     a.links.retain(|l| joints.contains(&l.a) && joints.contains(&l.b));
     a.studies.retain(|study| study.keys.iter().all(|k| joints.contains(&k.joint)));

@@ -453,8 +453,10 @@ fn inventor_commands() -> BTreeSet<&'static str> {
 /// 9bb4d408 (466 commands, 305 placed). The count may only fall, except by a plan's new
 /// commands: Plan D-1's 29 drawing commands (161 to 190) and Plan D-2 Task 0's
 /// `drawing.note.edit` (191; R74), which the Drawing ribbon does not place. Plan D-2 Task 1's
-/// Drawing ribbon places ten drawing commands (191 - 10 = 181).
-const INVENTOR_UNPLACED: usize = 182;
+/// Drawing ribbon places ten drawing commands (191 - 10 = 181). Plan E-1 Task 0 measured the
+/// base N = 182 (R121). Plan E-1 Task 4's six constraint commands (+6): 182 + 6 = 188 (E-2 Task 1
+/// places them).
+const INVENTOR_UNPLACED: usize = 188;
 
 #[test]
 fn inventor_assembly_ribbon_follows_the_capture() {

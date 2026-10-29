@@ -17,6 +17,8 @@ pub(super) fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
         None | Some(Value::Null) => s.doc.assembly.joints.iter().map(|j| j.id).collect(),
         v => vec![joint_id(s, v, cmd)?],
     };
+    // What constraints compile to is never inspected as a joint (owner Q1).
+    let ids: Vec<u64> = ids.into_iter().filter(|id| solidcraft_doc::constraints::owner_of(*id).is_none()).collect();
     let st = s.model.state();
     let sol = joints::solve(&s.doc, &st);
     let vals = joints::joint_values(&s.doc.assembly, &solidcraft_doc::constraints::Compiled::default());

@@ -9,6 +9,7 @@
 
 pub mod capture;
 pub mod cmd;
+pub mod constraints;
 pub mod control_auth;
 pub mod control_pending;
 pub mod crash;
@@ -930,8 +931,10 @@ impl Session {
         // A drawing holds no bodies, features or components: only the commands on files,
         // documents, history and the drawing itself change it.
         // `file.insert_*` (STEP, mesh) adds model geometry, so it is refused too (R47).
+        // The constraint commands' own check refuses a drawing, saying what they need (Plan E-1).
         if spec.undoable
             && self.doc.kind == solidcraft_doc::DocumentKind::Drawing
+            && !spec.id.starts_with("constraint.")
             && (!DRAWING_COMMANDS.iter().any(|p| spec.id.starts_with(p)) || spec.id.starts_with("file.insert_"))
         {
             return Err(EngineError::Other(format!("{}: a drawing holds no model geometry: open the part or assembly", spec.id)));

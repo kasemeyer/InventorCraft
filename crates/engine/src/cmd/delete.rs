@@ -1,7 +1,7 @@
 //! Delete for everything that can be selected, in one undo step: sketch entities (while
 //! sketching), timeline features and sketches (with the features that depend on them),
 //! construction planes and axes, bodies (a Remove feature from here on in the timeline), occurrences and
-//! components, canvases and joints. `dry_run` reports what would go and what would fail without
+//! components, canvases, joints and assembly constraints. `dry_run` reports what would go and what would fail without
 //! changing anything, so the UI can ask first.
 
 use serde_json::{Value, json};
@@ -13,7 +13,7 @@ use crate::params::{bad, bool_};
 use crate::{EngineError, Result, Sel, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("selection.delete", "Delete", delete).icon("delete").params(
-    "items?: [selection items]; components?, occurrences?, canvases?, joints?: [ids or names]; dry_run?: bool → deleted, deleted_joints, would_fail, skipped (one undo step)",
+    "items?: [selection items]; components?, occurrences?, canvases?, joints?, constraints?: [ids or names]; dry_run?: bool → deleted, deleted_joints, deleted_constraints, would_fail, skipped (one undo step)",
 )];
 
 /// Run another command's body inside this one (so the whole delete is one undo step).
@@ -58,6 +58,19 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
         };
         if joints.len() > 10_000 || joints.iter().any(|j| !j.is_string() && j.as_u64().is_none()) {
             return Err(bad(cmd, "`joints` must contain at most 10000 ids or names"));
+        }
+    }
+    // Assembly constraints by id or name, run as constraint.delete (spec §5).
+    let constraints: Vec<String> = match p.get("constraints").filter(|v| !v.is_null()) {
+        None => Vec::new(),
+        Some(Value::Array(list)) if list.len() <= 10_000 && list.iter().all(|c| c.is_string() || c.as_u64().is_some()) => {
+            list.iter().map(|c| c.as_str().map(str::to_string).unwrap_or_else(|| c.to_string())).collect()
+        }
+        Some(_) => return Err(bad(cmd, "`constraints` must contain at most 10000 ids or names")),
+    };
+    for k in &constraints {
+        if s.doc.assembly.constraint(k).is_none() {
+            return Err(bad(cmd, format!("no constraint `{k}`")));
         }
     }
     let before = s.model.clone();
@@ -118,6 +131,11 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
     let mut done = false;
     for id in &joints {
         sub(s, "joint.delete", json!({"joint": id}))?;
+        done = true;
+    }
+    let mut deleted_constraints = 0;
+    if !constraints.is_empty() {
+        deleted_constraints = sub(s, "constraint.delete", json!({"constraint": constraints}))?["deleted"].as_u64().unwrap_or(0);
         done = true;
     }
     if !entities.is_empty() {
@@ -190,7 +208,9 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
     // Features after a rolled-back marker count too (#3471).
     let would_fail: Vec<String> =
         super::edit::newly_broken_in_history(&before_doc, &before, &s.doc, &s.model).into_iter().map(|(name, _)| name).collect();
-    Ok(json!({ "deleted": deleted, "deleted_joints": joints, "bodies": bodies, "would_fail": would_fail, "skipped": skipped }))
+    Ok(
+        json!({ "deleted": deleted, "deleted_joints": joints, "deleted_constraints": deleted_constraints, "bodies": bodies, "would_fail": would_fail, "skipped": skipped }),
+    )
 }
 
 #[cfg(test)]

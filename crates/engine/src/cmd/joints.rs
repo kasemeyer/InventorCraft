@@ -181,7 +181,7 @@ pub(super) fn place_holding(s: &mut Session, held: &joints::Held) -> joints::Sol
     resolve_with_analysis(s, held, joints::Analysis::Placement)
 }
 
-fn solution(s: &Session, held: &joints::Held, analysis: joints::Analysis) -> joints::Solution {
+pub(crate) fn solution(s: &Session, held: &joints::Held, analysis: joints::Analysis) -> joints::Solution {
     #[cfg(test)]
     solve_counts::record(analysis);
     // The session's memo of loop degrees of freedom (R130); a poisoned lock solves without it.
@@ -558,7 +558,7 @@ pub(crate) fn value(s: &Session, v: &Value, angle: bool, cmd: &str) -> Result<f6
 
 /// The expression a number was typed as, kept so the joint follows the parameters it names
 /// (`None` for a plain number, or for text that names no parameter, such as `"5 mm"`).
-fn typed(v: Option<&Value>) -> Option<String> {
+pub(crate) fn typed(v: Option<&Value>) -> Option<String> {
     match v {
         Some(Value::String(t)) if !solidcraft_doc::expr::references(t).is_empty() => Some(t.trim().to_string()),
         _ => None,
