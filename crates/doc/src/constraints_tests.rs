@@ -194,7 +194,7 @@ fn expressions_follow_constraints() {
     doc.assembly = asm;
     let users = doc.param_users("v");
     assert!(
-        users.iter().any(|u| matches!(u, crate::ParamUser::Joint { joint: 11, name, input } if name == "Mate:1" && input == "offset")),
+        users.iter().any(|u| matches!(u, crate::ParamUser::Constraint { constraint: 11, name, input } if name == "Mate:1" && input == "offset")),
         "{users:?}"
     );
 }

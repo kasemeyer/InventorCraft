@@ -579,6 +579,8 @@ pub enum ParamUser {
     /// A joint's offset, angle or value, or a motion link's gear, rack or screw length (`input`
     /// says which; a link is named by the joint it drives).
     Joint { joint: u64, name: String, input: String },
+    /// An assembly constraint's offset, min or max (`input` says which; R129).
+    Constraint { constraint: u64, name: String, input: String },
     /// A sheet metal or plastic rule's value (`kind` says which, `field` which value).
     Rule { kind: String, name: String, field: String },
     /// The plane a canvas lies on (`input` is its label, e.g. `Offset`).
@@ -596,6 +598,7 @@ impl ParamUser {
                 None => format!("configuration column {column}"),
             },
             ParamUser::Joint { name, input, .. } => format!("joint {name} ({input})"),
+            ParamUser::Constraint { name, input, .. } => format!("constraint {name} ({input})"),
             ParamUser::Rule { kind, name, field } => format!("{kind} rule {name} ({field})"),
             ParamUser::Canvas { name, input, .. } => format!("canvas {name} ({input})"),
         }
@@ -726,14 +729,12 @@ impl Document {
         }
         for (joint, input, e) in self.assembly.exprs() {
             if expr::references(e).iter().any(|r| r == name) {
-                let jname = self
-                    .assembly
-                    .joints
-                    .iter()
-                    .find(|j| j.id == joint)
-                    .map(|j| j.name.clone())
-                    .or_else(|| self.assembly.constraints.iter().find(|c| c.id == joint).map(|c| c.name.clone()))
-                    .unwrap_or_else(|| joint.to_string());
+                // A constraint is named as a constraint (R129); ids are unique across both.
+                if let Some(c) = self.assembly.constraints.iter().find(|c| c.id == joint) {
+                    out.push(ParamUser::Constraint { constraint: joint, name: c.name.clone(), input });
+                    continue;
+                }
+                let jname = self.assembly.joints.iter().find(|j| j.id == joint).map(|j| j.name.clone()).unwrap_or_else(|| joint.to_string());
                 out.push(ParamUser::Joint { joint, name: jname, input });
             }
         }
