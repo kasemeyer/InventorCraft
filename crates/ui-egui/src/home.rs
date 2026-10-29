@@ -1506,7 +1506,10 @@ mod tests {
         h.frames(3);
         h.settle();
         assert!(!h.app.home.open);
-        assert_eq!(h.app.session.path.as_deref(), h.dir.join("Copy.solidcraft").to_str());
+        // R102: Save As of a legacy `.solidcraft` design suggests the kind's own extension (the
+        // harness's blank design is the default kind), so the copy never lands on the source.
+        let copy = format!("Copy.{}", h.app.session.doc.kind.extension());
+        assert_eq!(h.app.session.path.as_deref(), h.dir.join(copy).to_str());
         assert_eq!(std::fs::read(source).unwrap(), bytes);
     }
 
