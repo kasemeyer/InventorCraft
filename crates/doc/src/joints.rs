@@ -1617,9 +1617,9 @@ fn loop_dof(tree: &Tree, closing: &[u64], asm: &Assembly, vals: &Values, dof: &m
 /// start is closed first, from where it is. Then the held values `moves` go from the values they
 /// are held from to their current ones in small steps, each solved from the last, so the mechanism
 /// stays on its branch (an open four-bar does not flip crossed). Returns the values that changed
-/// from what is stored, by (joint, index), and updates `vals` (empty when there is nothing to do
-/// or the group is too big to solve), or `None` when the loops can't close, or can't stay closed
-/// on the way.
+/// from what is stored, by (joint, index), and updates `vals` (empty when there is nothing to
+/// do), or `None` when the loops can't close, or can't stay closed on the way. `close_loops`
+/// leaves out groups over `MAX_LOOP_VALUES`.
 fn close_group(
     tree: &Tree,
     closing: &[u64],
@@ -1630,9 +1630,6 @@ fn close_group(
     spent: &std::cell::Cell<usize>,
     vals: &mut Values,
 ) -> Option<BTreeMap<(u64, usize), f64>> {
-    if vars.len() > MAX_LOOP_VALUES {
-        return Some(BTreeMap::new());
-    }
     let bounds = limit_bounds(tree, vars);
     let scale = loop_scale(tree, around, vals);
     // Closer than the conflict check needs: 1e-7 mm, and turns of 1e-10 rad across the loop.

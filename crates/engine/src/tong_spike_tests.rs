@@ -66,11 +66,18 @@ fn ms(t: Instant) -> f64 {
 ///
 /// Timings are wall-clock: on a hybrid CPU (performance and efficiency cores) a test process in
 /// the background can be moved to the slow cores mid-run (every phase of a frame 3-5x slower at
-/// once), so the timed rows are read with the process pinned to the performance cores, as the
-/// app in the foreground runs.
+/// once), so the spike pins itself to the performance cores first ([`pin_to_performance_cores`]),
+/// as the app in the foreground runs. Run (R127) with the solver crates optimised as a release
+/// build optimises them (the plain `ci` profile builds them at opt-level 1: rows 1-3 run about ten
+/// times slower), from one line:
+/// `cargo test -p solidcraft-engine --profile ci --config profile.ci.package.solidcraft-doc.opt-level=3
+/// --config profile.ci.package.solidcraft-geom.opt-level=3 --config
+/// profile.ci.package.solidcraft-sketch.opt-level=3 --lib -- tong_spike --ignored --nocapture`.
+/// (`--release` gives the same optimisation but its test build takes over ten minutes.)
 #[test]
-#[ignore = "spike: run with --release --ignored --nocapture"]
+#[ignore = "spike: cargo test -p solidcraft-engine --profile ci --config profile.ci.package.solidcraft-doc.opt-level=3 --config profile.ci.package.solidcraft-geom.opt-level=3 --config profile.ci.package.solidcraft-sketch.opt-level=3 --lib -- tong_spike --ignored --nocapture"]
 fn spike_meets_spec_8_1() {
+    println!("{}", pin_to_performance_cores());
     let built = Instant::now();
     let t = tong(9);
     println!("tong(9): {} occurrences, {} joints, built in {:.0} ms", t.session.doc.occurrences.len(), t.joints, ms(built));
@@ -137,7 +144,9 @@ fn spike_meets_spec_8_1() {
     }
     let tip = solidcraft_doc::apply_point(&joints::occurrence_world(&s.doc, jaw), Vec3::new(20.0, 0.0, 0.0)) - a;
     if reached < 60 {
-        last.as_object_mut().map(|o| o.remove("values"));
+        if let Some(o) = last.as_object_mut() {
+            o.remove("values");
+        }
         println!("drag: last reach {last}");
     }
     let (med, p) = (median(&mut frames.clone()), p95(&mut frames.clone()));
@@ -175,10 +184,14 @@ fn spike_meets_spec_8_1() {
     let at = Instant::now();
     let back = joints::solve_holding(&moved, &st, &held);
     let recover_ms = ms(at);
-    let origin = |m: &solidcraft_doc::Mat| Vec3::new(m[3][0], m[3][1], m[3][2]);
+    // The whole placement, turn included: the occurrence's origin and points 100 mm along its
+    // own x and y.
+    let probes = [Vec3::ZERO, Vec3::X * 100.0, Vec3::Y * 100.0];
     let mut worst = (0.0f64, 0u64);
     for (o, m) in &base.world {
-        let d = back.world.get(o).map_or(f64::INFINITY, |n| origin(n).dist(origin(m)));
+        let d = back.world.get(o).map_or(f64::INFINITY, |n| {
+            probes.iter().map(|p| solidcraft_doc::apply_point(n, *p).dist(solidcraft_doc::apply_point(m, *p))).fold(0.0, f64::max)
+        });
         if d > worst.0 || d.is_nan() {
             worst = (d, *o);
         }
@@ -192,8 +205,8 @@ fn spike_meets_spec_8_1() {
             base.world.len(),
             back.conflicts.len()
         ),
-        "<= 1e-4 mm".into(),
-        worst.0 <= 1e-4 && back.world.len() == base.world.len(),
+        "<= 1e-4 mm (origin and points 100 mm along x, y), 0 conflicts".into(),
+        worst.0 <= 1e-4 && back.world.len() == base.world.len() && back.conflicts.is_empty(),
     ));
 
     // 6. Groups checked, not solved (over a cap).
@@ -221,4 +234,81 @@ fn spike_meets_spec_8_1() {
     }
     let failed: Vec<&String> = rows.iter().filter(|r| !r.3).map(|r| &r.0).collect();
     assert!(failed.is_empty(), "failed rows: {failed:?}");
+}
+
+/// Pin this process to the performance cores at high priority (Windows; elsewhere nothing), and
+/// say which mask it used. On a hybrid Intel CPU Windows numbers the performance cores' threads
+/// first, two per core, so they are the first `2 * (logical - cores)` logical processors; a CPU
+/// with no efficiency cores (logical = 2 * cores, or no hyper-threading) keeps every processor.
+/// High priority too: at normal priority a background process pinned to those cores still ran
+/// every row about 3.5x slower (Windows power throttling). `unsafe` is forbidden in the
+/// workspace, so both are set through PowerShell on this process id.
+fn pin_to_performance_cores() -> String {
+    if !cfg!(windows) {
+        return "affinity: unchanged (not Windows)".into();
+    }
+    let script = [
+        "$c = Get-CimInstance Win32_Processor",
+        "$l = ($c | Measure-Object NumberOfLogicalProcessors -Sum).Sum",
+        "$n = ($c | Measure-Object NumberOfCores -Sum).Sum",
+        "$p = $l - $n",
+        &format!("$me = Get-Process -Id {}", std::process::id()),
+        "$me.PriorityClass = 'High'",
+        "if ($p -le 0 -or 2 * $p -ge $l -or $l -gt 62) { 'affinity: unchanged, priority high ({0} logical, {1} cores)' -f $l, $n }          else { $m = [long][math]::Pow(2, 2 * $p) - 1; $me.ProcessorAffinity = [IntPtr]$m; \
+         'affinity: 0x{0:X}, priority high (performance cores; {1} logical, {2} cores)' -f $m, $l, $n }",
+    ]
+    .join("; ");
+    match std::process::Command::new("powershell.exe").args(["-NoProfile", "-NonInteractive", "-Command", &script]).output() {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
+        Ok(o) => format!("affinity: unchanged (powershell: {})", String::from_utf8_lossy(&o.stderr).trim()),
+        Err(e) => format!("affinity: unchanged ({e})"),
+    }
+}
+
+/// The reach mitigation (spec §8.1 row 3): tong(4) has 116 closing joints, over the old
+/// design-wide cap of 100, yet the jaw's chain is in few of them, so a drag frame reaches.
+#[test]
+fn joints_reach_drags_a_design_with_more_loops_than_the_cap() {
+    let mut t = tong(4);
+    let sol = joints::solve(&t.session.doc, &t.session.model.state());
+    assert_eq!(sol.groups.iter().map(|g| g.members.len()).sum::<usize>(), 116);
+    let jaw = t.modules[2].jaw;
+    let a = Vec3::new(0.0, 0.0, 80.0);
+    let tip = solidcraft_doc::apply_point(&joints::occurrence_world(&t.session.doc, jaw), Vec3::new(20.0, 0.0, 0.0));
+    let deg = 91.0f64.to_radians();
+    let to = a + Vec3::new(20.0 * deg.cos(), 20.0 * deg.sin(), 0.0);
+    let r = run(
+        &mut t.session,
+        "joint.reach",
+        json!({"occurrence": jaw, "at": [tip.x, tip.y, tip.z], "point": [to.x, to.y, to.z], "continuous": true, "quiet": true}),
+    );
+    assert_eq!(r["reason"], json!(null));
+    assert_eq!(r["reached"], json!(true), "{r}");
+    assert_eq!(r["conflicts"], json!([]));
+}
+
+/// The per-chain cap still holds: 101 redundant Rigid copies of module 0's crank close loops on
+/// the jaw's chain (no values of their own), and the reach is refused, saying why.
+#[test]
+fn joints_reach_refuses_a_chain_in_more_than_100_loops() {
+    let mut t = tong(1);
+    let jaw = t.modules[0].jaw;
+    let crank = t.session.doc.assembly.joints.iter().find(|j| j.id == t.modules[0].crank).unwrap().clone();
+    let doc = t.session.doc_mut();
+    for k in 0..101 {
+        let mut j = crank.clone();
+        j.id = doc.allocate_id().unwrap();
+        j.name = format!("Extra{k}");
+        j.kind = solidcraft_doc::joints::JointKind::Rigid;
+        j.values = Vec::new();
+        doc.assembly.joints.push(j);
+    }
+    let tip = solidcraft_doc::apply_point(&joints::occurrence_world(&t.session.doc, jaw), Vec3::new(20.0, 0.0, 0.0));
+    let r = run(
+        &mut t.session,
+        "joint.reach",
+        json!({"occurrence": jaw, "at": [tip.x, tip.y, tip.z], "point": [tip.x - 1.0, tip.y, tip.z], "quiet": true}),
+    );
+    assert_eq!(r["reason"], json!("its chain is in more than 100 closed loops"), "{r}");
+    assert_eq!(r["moved"], json!(false));
 }
