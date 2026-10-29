@@ -24,21 +24,22 @@ fn volume(s: &mut Session) -> f64 {
     run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap()
 }
 
+/// R123: a paste (reuse) into an empty assembly is grounded like a Place; beside another part
+/// it starts free.
 #[test]
-fn reused_design_insertion_is_free_even_before_a_link_exists() {
+fn reused_design_insertion_is_grounded_only_as_the_first_component() {
     let dir = folder("reuse-grounding");
     let file = dir.join("part.solidcraft");
     part(&file, 30);
     let mut s = Session::default();
-    for count in 1..=2 {
-        let inserted = run(&mut s, "component.insert_design", json!({"path": file, "reuse": true}));
-        let occurrence = inserted["occurrence"].as_u64().unwrap();
-        assert!(!s.doc.occurrences.iter().find(|o| o.id == occurrence).unwrap().grounded);
-        assert_eq!(s.doc.links.len(), 1);
-        assert_eq!(s.undo.len(), count, "each paste is one undo step");
-        run(&mut s, "occurrence.move", json!({"occurrence": occurrence, "translate": [10, 0, 0]}));
-        run(&mut s, "edit.undo", json!({}));
-    }
+    let grounded = |s: &Session, v: &Value| s.doc.occurrences.iter().find(|o| Some(o.id) == v["occurrence"].as_u64()).unwrap().grounded;
+    let first = run(&mut s, "component.insert_design", json!({"path": file, "reuse": true}));
+    assert!(grounded(&s, &first), "the first paste is grounded: {first}");
+    let second = run(&mut s, "component.insert_design", json!({"path": file, "reuse": true}));
+    assert!(!grounded(&s, &second), "the second paste is free: {second}");
+    assert_eq!(s.doc.links.len(), 1);
+    assert_eq!(s.undo.len(), 2, "each paste is one undo step");
+    run(&mut s, "occurrence.move", json!({"occurrence": second["occurrence"], "translate": [10, 0, 0]}));
     let mut ordinary = Session::default();
     let inserted = run(&mut ordinary, "component.insert_design", json!({"path": file}));
     let occurrence = inserted["occurrence"].as_u64().unwrap();

@@ -851,6 +851,30 @@ mod tests {
         assert!(slice_on(&mut h), "clicking the \"Slice\" label must toggle it on");
     }
 
+    /// R107: SolidCraft has no ribbon button for Constraint Settings; the Sketch Palette's More
+    /// section carries the Point alignment check, and it toggles the preference.
+    #[test]
+    fn the_more_sections_point_alignment_check_toggles_the_preference() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.settle();
+        assert_eq!(crate::profile::active(&h.app).id, "solidcraft");
+        assert!(h.widget("Point alignment").is_none(), "More is collapsed by default");
+        let at = crate::scenario::handle_at("sketch_palette:options_fold").unwrap();
+        h.call("ui.click", json!({"x": at.x, "y": at.y}));
+        h.settle();
+        assert!(crate::constraint_settings::point_alignment(&h.app), "on by default");
+        let [x, y] = h.widget("Point alignment").expect("the check is in More");
+        h.call("ui.click", json!({"x": x, "y": y}));
+        h.settle();
+        assert!(!crate::constraint_settings::point_alignment(&h.app), "the check turns it off");
+        assert_eq!(h.app.preferences.point_alignment.get("solidcraft"), Some(&false));
+        let [x, y] = h.widget("Point alignment").unwrap();
+        h.call("ui.click", json!({"x": x, "y": y}));
+        h.settle();
+        assert!(crate::constraint_settings::point_alignment(&h.app), "and on again");
+    }
+
     /// The modes the Feature Options row draws pressed, in family order.
     fn pressed_modes(h: &crate::scenario::Harness, family: &crate::sketch_families::Family) -> Vec<&'static str> {
         let tree = h.output.accesskit_update.as_ref().unwrap();

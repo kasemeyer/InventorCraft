@@ -191,8 +191,9 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
     let (design_name, sf, faces) = linked_bodies(&file, s.path.as_deref())?;
     let name = str_(p, "name").filter(|n| !n.trim().is_empty()).map(str::to_string).unwrap_or(design_name);
     let mut create = json!({"name": name, "activate": false});
-    // Clipboard insertion uses reuse even for the first paste, which must stay movable.
-    if p.get("reuse").and_then(Value::as_bool).unwrap_or(false) {
+    // A paste (reuse) starts free beside other parts; into an empty assembly it is grounded
+    // like a Place (R123).
+    if p.get("reuse").and_then(Value::as_bool).unwrap_or(false) && s.doc.occurrences.iter().any(|o| o.parent == 0) {
         create["grounded"] = json!(false);
     }
     if let Some(parent) = p.get("parent") {

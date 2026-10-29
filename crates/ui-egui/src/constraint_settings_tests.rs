@@ -96,3 +96,48 @@ fn the_dimension_tool_text_never_aligns() {
     h.frames(1);
     assert!(inference::current().is_none_or(|i| i.kind != Kind::Align), "{:?}", inference::current());
 }
+
+/// The point of the active sketch a paste would go to at sketch position `at`.
+fn paste_point(h: &mut Harness, at: [f64; 2]) -> Vec2 {
+    let [x, y] = h.at(&json!({"sketch": at})).unwrap();
+    let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+    crate::viewport::sketch_point_at(&h.app, &proj, egui::pos2(x as f32, y as f32)).unwrap().0
+}
+
+#[test]
+fn a_tool_change_forgets_scrubbed_points_and_a_paste_after_a_draw_tool_is_not_aligned() {
+    let mut h = fixture(false);
+    step(&mut h, json!({"start":"sketch.line"}));
+    // Passing over the point scrubs it; aligned while the Line tool runs.
+    step(&mut h, json!({"move":{"sketch":[10, 0]}}));
+    h.frames(1);
+    assert!(!inference::scrubbed().is_empty(), "the point was scrubbed");
+    let p = hover(&mut h, [30.3, 0.4]);
+    assert!(p.y.abs() < 1e-9, "{p:?}");
+    // The tool ends: the scrubbed points go, and a paste location is not aligned.
+    step(&mut h, json!({"key":"Escape"}));
+    h.frames(2);
+    assert!(h.app.tool.is_none(), "the tool ended");
+    assert!(h.app.session.active_sketch.is_some(), "still in the sketch");
+    assert!(inference::scrubbed().is_empty(), "a tool change forgets the scrubbed points");
+    let q = paste_point(&mut h, [30.3, 0.4]);
+    assert!(q.y > 0.2, "a paste location is not aligned after the tool ends: {q:?}");
+}
+
+#[test]
+fn dragging_existing_dimension_text_never_snaps() {
+    for inv in [false, true] {
+        let mut h = fixture(inv);
+        step(&mut h, json!({"call":"engine.execute","params":{"command":"sketch.line","params":{"points":[[0,20],[40,20]],"infer":false}}}));
+        let d =
+            h.app.run("sketch.dimension", json!({"entities":["l1"],"value":40,"text_at":[20,28]})).unwrap()["param"].as_str().unwrap().to_string();
+        h.settle();
+        let from = crate::dim_view::drawn_at(&d).expect("the dimension is drawn");
+        // Dropped where a drawn point would align with (10, 0) (y = 0) and off the grid.
+        step(&mut h, json!({"drag":[{"dimension": d}, {"sketch":[30.33, 0.47]}]}));
+        h.settle();
+        let to = crate::dim_view::drawn_at(&d).unwrap();
+        assert!(to.dist(Vec2::new(30.33, 0.47)) < 0.05, "inventor={inv}: from {from:?} to {to:?}");
+        assert!(inference::current().is_none_or(|i| i.kind != Kind::Align), "inventor={inv}");
+    }
+}

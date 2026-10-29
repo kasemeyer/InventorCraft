@@ -146,14 +146,20 @@ pub fn paste(app: &mut SolveApp, at: Option<Pos2>) -> bool {
     if let Some(path) = app.linked_design_clipboard.clone() {
         let (parent_path, translate) = paste_placement(app, at);
         let Ok(out) = app.run("component.insert_design", json!({"path": path, "reuse": true, "translate":translate})) else { return false };
-        if let Some(id) = out.get("occurrence").and_then(Value::as_u64) {
+        // Into an empty assembly the paste is grounded, like a Place (R123): nothing to move.
+        let grounded = |id: u64| app.session.doc.occurrences.iter().any(|o| o.id == id && o.grounded);
+        if let Some(id) = out.get("occurrence").and_then(Value::as_u64).filter(|id| !grounded(*id)) {
             let mut movement = crate::browser::OccMove::new(id);
             movement.path = parent_path;
             movement.path.push(id);
             movement.baseline = app.session.doc.occurrences.iter().find(|o| o.id == id).map(|o| o.transform);
             app.tree.occurrence_move = Some(movement);
         }
-        app.set_status("Pasted linked component: use Move/Copy to position it", false);
+        if app.tree.occurrence_move.is_some() {
+            app.set_status("Pasted linked component: use Move/Copy to position it", false);
+        } else {
+            app.set_status("Pasted linked component, grounded as the assembly's first part", false);
+        }
         return true;
     }
     if app.session.clipboard.is_empty() {

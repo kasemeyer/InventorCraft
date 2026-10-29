@@ -2967,6 +2967,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     let rect = ui.max_rect();
     app.viewport.rect = Some(rect);
+    crate::sketch_tools::track_context(app);
     refresh_layout(app, ui.ctx().pixels_per_point());
     let resp = ui.interact(rect, ui.id().with("viewport"), Sense::click_and_drag());
     let flat = crate::dialogs_sheet::flat_active(app);

@@ -463,7 +463,8 @@ fn big_box(dir: &std::path::Path) -> String {
 /// largest preset up to 1:1 at which front, top and right fit half the sheet inside its border.
 /// On the D sheet (printable 33 × 21 in, half 16.5 × 10.5): the 4 × 1 × 3 block fits at 1:1
 /// ((4 + 1) + 1 = 6 across); the 40 × 20 × 10 box does not at 1:2 (60·0.5 + 1 = 31 > 16.5) but
-/// does at 1:4 (60·0.25 + 1 = 16 ≤ 16.5, 30·0.25 + 1 = 8.5 ≤ 10.5), as Inventor draws it. Both the ribbon path and Create Drawing View's; Edit View keeps the view's own scale.
+/// does at 1:4 (60·0.25 + 1 = 16 ≤ 16.5, 30·0.25 + 1 = 8.5 ≤ 10.5), as Inventor draws it.
+/// Both the ribbon path and Create Drawing View's; Edit View keeps the view's own scale.
 fn the_scale_defaults_to_the_fit(mut h: Harness) {
     h.app.home.open = false;
     let block = absolute(&block_part(&h.dir));

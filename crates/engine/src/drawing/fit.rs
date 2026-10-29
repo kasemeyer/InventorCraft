@@ -1,8 +1,9 @@
 //! The default scale of a new base view (wave 3, R100 amended by R108; owner default, plan §8.8):
 //! the largest preset scale up to 1:1 at which the model's front, top and right views fit HALF the
 //! sheet's printable width and half its printable height, as Inventor's default leaves room for
-//! dimensions and further views (a 40 × 20 × 10 in part on a D sheet is 1:4, as Inventor draws it). Only ever down from 1:1: a small part is drawn full size, never enlarged. Every
-//! profile (SolidCraft's drawings too) gets the same default from this pure function.
+//! dimensions and further views (a 40 × 20 × 10 in part on a D sheet is 1:4, as Inventor draws
+//! it). Only ever down from 1:1: a small part is drawn full size, never enlarged. Every profile
+//! (SolidCraft's drawings too) gets the same default from this pure function.
 
 use solidcraft_doc::{AnsiSize, ModelKind, ModelRef, SCALE_PRESETS};
 

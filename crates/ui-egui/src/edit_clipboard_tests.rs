@@ -49,7 +49,8 @@ fn start(h: &Harness, id: &str) -> Vec2 {
 }
 
 fn clipboard_frame(h: &mut Harness, ctx: &egui::Context, events: Vec<egui::Event>) {
-    let _ = ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| super::handle(&mut h.app, ui.ctx()));
+    let mut out = ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| super::handle(&mut h.app, ui.ctx()));
+    out.textures_delta.clear();
 }
 
 fn middle_button(pressed: bool) -> egui::Event {
@@ -257,8 +258,11 @@ fn contribution_linked_design_clipboard_crosses_tabs_reuses_links_and_undoes_onc
         assert_eq!(app.session.doc.features.len(), 1);
         assert_eq!(app.session.doc.occurrences.len(), n);
         assert_eq!(app.session.undo.len(), n);
-        assert!(app.session.doc.occurrences.iter().all(|o| !o.grounded));
-        assert!(app.tree.occurrence_move.is_some());
+        // R123: the first paste into an empty assembly is grounded (nothing to move); the
+        // second is free and opens Move.
+        let last = app.session.doc.occurrences.last().unwrap();
+        assert_eq!(last.grounded, n == 1);
+        assert_eq!(app.tree.occurrence_move.is_some(), n == 2);
     }
     app.tree.occurrence_move = None;
     app.run("edit.undo", json!({})).unwrap();
@@ -278,6 +282,9 @@ fn contribution_occurrence_move_panel_belongs_to_its_document() {
     let mut app = contribution_saved_part(&file);
     assert!(super::copy(&mut app));
     crate::documents::open_tab(&mut app, solidcraft_engine::Session::default()).unwrap();
+    // The first paste is grounded (R123); the second opens Move.
+    assert!(super::paste(&mut app, None));
+    assert!(app.tree.occurrence_move.is_none());
     assert!(super::paste(&mut app, None));
     let id = app.tree.occurrence_move.as_ref().unwrap().occurrence;
     app.run("occurrence.move", json!({"occurrence":id,"translate":[10,0,0],"capture":false})).unwrap();
@@ -304,6 +311,8 @@ fn contribution_linked_paste_uses_the_pointer_and_pending_numeric_move() {
     let projection = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
     let pointed = Vec3::new(40., 25., 8.);
     let at = projection.to_screen(pointed).unwrap();
+    // A first paste grounds (R123); the one under test goes beside it.
+    assert!(super::paste(&mut h.app, None));
     let undo = h.app.session.undo.len();
     assert!(super::paste(&mut h.app, Some(at)));
     h.frames(3);
@@ -327,7 +336,7 @@ fn contribution_linked_paste_uses_the_pointer_and_pending_numeric_move() {
     assert_eq!(h.app.session.undo.len(), undo + 1, "pending movement does not split the initial paste undo");
     h.app.run("edit.undo", json!({})).unwrap();
     h.frames(3);
-    assert!(h.app.session.doc.links.is_empty());
+    assert_eq!(h.app.session.doc.occurrences.len(), 1, "undo takes the paste back; the grounded first stays");
     assert!(h.app.tree.occurrence_move.is_none());
     crate::documents::switch(&mut h.app, 0);
     assert_eq!(h.app.session.doc.features.len(), 1, "source geometry stays untouched");

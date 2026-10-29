@@ -79,6 +79,8 @@ thread_local! {
     /// Whether the tool placing points aligns them with sketch points (R107): kept from the last
     /// hover, as a click takes the tool out of the app while it runs.
     static ALIGNING: Cell<bool> = const { Cell::new(false) };
+    /// The active sketch and running tool seen last frame ([`track_context`]).
+    static CONTEXT: RefCell<Option<(Option<u64>, Option<(&'static str, crate::tools::Kind)>)>> = const { RefCell::new(None) };
     /// Curvature comb teeth (foot, tip) shown while the comb tool is active.
     static COMBS: RefCell<Vec<Vec<[Vec3; 2]>>> = const { RefCell::new(Vec::new()) };
     /// The image file a Canvas or Decal tool places.
@@ -363,6 +365,20 @@ fn combs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
             painter.add(egui::Shape::line(tips, Stroke::new(1.4, tk.warning)));
         }
     });
+}
+
+/// Once a frame, before anything snaps: when the active sketch or the running tool changed, the
+/// scrubbed points are forgotten (they belong to that sketch and gesture), and once no tool
+/// runs, points are no longer aligned (a paste location after a Draw tool is not).
+pub fn track_context(app: &SolveApp) {
+    let now = (app.session.active_sketch, app.tool.as_ref().map(|t| (t.cmd, t.kind)));
+    let changed = CONTEXT.with(|c| c.replace(Some(now)) != Some(now));
+    if changed {
+        crate::inference::clear_scrubbed();
+        if now.1.is_none() {
+            ALIGNING.with(|c| c.set(false));
+        }
+    }
 }
 
 /// Snap a cursor point on the sketch plane to what is inferred while drawing: a line's
