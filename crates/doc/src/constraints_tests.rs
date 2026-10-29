@@ -254,3 +254,35 @@ fn loading_validates_constraints() {
         .collect();
     assert_eq!(Document::from_json(&file(Value::from(many))).unwrap_err().to_string(), "too many constraints");
 }
+
+/// R128: a saved record has exactly the picks its solution takes, an id below `COMPILED_BASE`, and an
+/// id and name no other constraint has.
+#[test]
+fn loading_refuses_wrong_picks_ids_and_names() {
+    let file = |constraints: Vec<Constraint>| {
+        let mut v: Value = serde_json::from_str(&Document::new("A").to_json()).unwrap();
+        v["assembly"] = json!({ "constraints": constraints });
+        v.to_string()
+    };
+    let open_err = |constraints: Vec<Constraint>| Document::from_json(&file(constraints)).unwrap_err().to_string();
+
+    let short_vector =
+        Constraint { solution: ConstraintSolution::ExplicitVector, ..record(1, "Angle:1", ConstraintKind::Angle, vec![face(1, "a"), face(2, "b")]) };
+    assert_eq!(short_vector.validate().unwrap_err().to_string(), "Angle takes 3 picks, not 2");
+    assert_eq!(open_err(vec![short_vector]), "constraint Angle:1: Angle takes 3 picks, not 2");
+
+    let long_mate = record(2, "Mate:1", ConstraintKind::Mate, vec![face(1, "a"), face(2, "b"), face(3, "c")]);
+    assert_eq!(long_mate.validate().unwrap_err().to_string(), "Mate takes 2 picks, not 3");
+    assert_eq!(open_err(vec![long_mate]), "constraint Mate:1: Mate takes 2 picks, not 3");
+    let symmetry = record(3, "Symmetry:1", ConstraintKind::Symmetry, vec![face(1, "a"), face(2, "b")]);
+    assert_eq!(symmetry.validate().unwrap_err().to_string(), "Symmetry takes 3 picks, not 2");
+    Constraint { picks: vec![face(1, "a"), face(2, "b"), face(3, "c")], ..symmetry }.validate().unwrap();
+
+    assert_eq!(open_err(vec![mate(4, "Mate:1"), mate(4, "Mate:2")]), "constraint Mate:2: id 4 is already another constraint's");
+    assert_eq!(open_err(vec![mate(4, "Mate:1"), mate(5, "Mate:1")]), "constraint Mate:1: the name is already another constraint's");
+    assert_eq!(
+        open_err(vec![mate(COMPILED_BASE, "Mate:1")]),
+        format!("constraint Mate:1: id {COMPILED_BASE} is in the range kept for compiled joints")
+    );
+    Document::from_json(&file(vec![mate(COMPILED_BASE - 1, "Mate:1"), mate(5, "Mate:2")])).unwrap();
+}

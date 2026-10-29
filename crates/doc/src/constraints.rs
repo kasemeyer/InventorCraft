@@ -238,17 +238,21 @@ fn check_name_text(name: &str) -> Result<()> {
 }
 
 impl Constraint {
-    /// The checks a constraint passes on load and on create: 2-3 picks, finite numbers in range,
+    /// The checks a constraint passes on load and on create: the picks its solution takes (2, or 3
+    /// for Angle's explicit vector and Symmetry), finite numbers in range,
     /// `min ≤ max`, a solution its kind has, a non-empty name of at most 128 characters. A `state`
     /// that does not fit is not an error (the solve re-seeds it).
     pub fn validate(&self) -> Result<()> {
         let bad = |why: String| Err(DocError::Invalid(why));
         check_name_text(&self.name)?;
-        if !(2..=3).contains(&self.picks.len()) {
-            return bad(format!("a constraint picks 2 or 3 things, not {}", self.picks.len()));
-        }
         if !self.solution.fits(self.kind) {
             return bad(format!("{} has no `{}` solution", self.kind.word(), self.solution.word()));
+        }
+        // Exactly the picks its solution takes (R128): a short Explicit vector or a long Mate never
+        // reaches the solve.
+        let picks = self.kind.picks(self.solution);
+        if self.picks.len() != picks {
+            return bad(format!("{} takes {picks} picks, not {}", self.kind.word(), self.picks.len()));
         }
         let (cap, unit) = if self.kind.is_angle() { (MAX_OFFSET_DEG, "deg") } else { (MAX_OFFSET_MM, "mm") };
         for (what, v) in [("offset", Some(self.offset)), ("min", self.limits.min), ("max", self.limits.max)] {
@@ -278,13 +282,26 @@ impl Constraint {
 }
 
 /// Check every constraint of a design being opened: at most [`MAX_CONSTRAINTS`], each passing
-/// [`Constraint::validate`] (the error names it).
+/// [`Constraint::validate`], with an id below [`COMPILED_BASE`] and an id and name no other
+/// constraint has (R128). The error names the constraint.
 pub(crate) fn validate_loaded(asm: &Assembly) -> Result<()> {
     if asm.constraints.len() > MAX_CONSTRAINTS {
         return Err(DocError::Invalid("too many constraints".into()));
     }
+    let mut ids = std::collections::BTreeSet::new();
+    let mut names = std::collections::BTreeSet::new();
     for c in &asm.constraints {
-        c.validate().map_err(|e| DocError::Invalid(format!("constraint {}: {e}", c.name)))?;
+        let refuse = |why: String| DocError::Invalid(format!("constraint {}: {why}", c.name));
+        c.validate().map_err(|e| refuse(e.to_string()))?;
+        if c.id >= COMPILED_BASE {
+            return Err(refuse(format!("id {} is in the range kept for compiled joints", c.id)));
+        }
+        if !ids.insert(c.id) {
+            return Err(refuse(format!("id {} is already another constraint's", c.id)));
+        }
+        if !names.insert(c.name.as_str()) {
+            return Err(refuse("the name is already another constraint's".into()));
+        }
     }
     Ok(())
 }
