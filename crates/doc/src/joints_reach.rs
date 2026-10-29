@@ -9,8 +9,8 @@ use solidcraft_geom::Vec3;
 use solidcraft_sketch::linalg;
 
 use super::{
-    Assembly, Held, MAX_LOOP_VALUES, MAX_LOOP_WORK, MAX_LOOPS, Solution, Tree, Values, apply_links, build, close_within, jacobian, joint_values,
-    largest, least_squares, limit_bounds, link_chains, loop_groups, loop_scale, loose_gap, unknowns,
+    Assembly, Held, MAX_CLOSING, MAX_LOOP_VALUES, MAX_LOOP_WORK, MAX_LOOPS, Solution, Tree, Values, apply_links, build, close_within, jacobian,
+    joint_values, largest, least_squares, limit_bounds, link_chains, loop_groups, loop_scale, loose_gap, unknowns,
 };
 use crate::{Document, ModelState, apply_point, apply_vector, mat_mul};
 
@@ -97,8 +97,8 @@ pub fn reach(doc: &Document, st: &ModelState, r: &Reach) -> Result<Reached, Stri
         .into());
     }
     // The loops those values are in, and the values of theirs that follow.
-    if built.closing.len() > MAX_LOOPS {
-        return Err(format!("the design has more than {MAX_LOOPS} closed loops"));
+    if built.closing.len() > MAX_CLOSING {
+        return Err(format!("the design has more than {MAX_CLOSING} closed loops"));
     }
     let groups = loop_groups(tree, &built.closing, asm, &linked);
     let (mut vars, mut closers, mut around) = (drive.clone(), Vec::new(), path.clone());
@@ -122,6 +122,11 @@ pub fn reach(doc: &Document, st: &ModelState, r: &Reach) -> Result<Reached, Stri
     }
     if vars.len() > MAX_LOOP_VALUES {
         return Err(format!("its chain and loops have more than {MAX_LOOP_VALUES} values"));
+    }
+    // Only the loops its values are in count: a design of many separate mechanisms has many
+    // loops, each mechanism few.
+    if closers.len() > MAX_LOOPS {
+        return Err(format!("its chain is in more than {MAX_LOOPS} closed loops"));
     }
     let scale = loop_scale(tree, &around, &vals);
     let bounds = limit_bounds(tree, &vars);
