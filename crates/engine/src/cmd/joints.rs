@@ -1468,7 +1468,7 @@ mod reach_tests;
 mod relations_tests;
 #[cfg(test)]
 #[path = "joints_tests.rs"]
-mod tests;
+pub(crate) mod tests;
 #[cfg(test)]
 #[path = "joints_turn_tests.rs"]
 mod turn_tests;

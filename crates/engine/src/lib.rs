@@ -1396,9 +1396,13 @@ mod sketch_edit_removed_tests;
 #[cfg(test)]
 mod split_face_tests;
 #[cfg(test)]
+pub(crate) mod test_support;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod thread_tests;
+#[cfg(test)]
+mod tong_spike_tests;
 #[cfg(test)]
 mod view_bounds_tests;
 #[cfg(test)]

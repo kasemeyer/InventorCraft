@@ -885,6 +885,23 @@ pub struct Solution {
     pub dof: BTreeMap<u64, usize>,
     /// Occurrences fixed in place (grounded, or the root's).
     pub fixed: Vec<u64>,
+    /// The groups of loops the solve took on, in the order it took them (empty when no joint
+    /// closes a loop).
+    #[serde(skip)]
+    pub groups: Vec<LoopGroup>,
+}
+
+/// One group of loops solved together: its closing joints, how many values it moves, and whether
+/// a cap (`MAX_CLOSING`, `MAX_LOOPS`, `MAX_LOOP_VALUES` or `MAX_LOOP_WORK`) left it unsolved, so
+/// it is only checked.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LoopGroup {
+    /// The group's loop-closing joint ids.
+    pub members: Vec<u64>,
+    /// The values the solve moves to close it (0 when it was skipped before they were counted).
+    pub values: usize,
+    /// Skipped or stopped by a cap: checked, not solved.
+    pub capped: bool,
 }
 
 /// Joint values by joint id.
@@ -1224,17 +1241,25 @@ fn held_moves(asm: &Assembly, held: &Held, touches: &BTreeSet<(u64, usize)>, val
 /// Returns the moved joints' new stored values (and updates `vals`), and the closing joints of
 /// the groups whose held values moved but which can't stay closed on the way (nothing in those
 /// moves; a group that can't close without moving is left to the conflict check).
-fn close_loops(tree: &Tree, closing: &[u64], asm: &Assembly, held: &Held, vals: &mut Values) -> (Values, BTreeSet<u64>) {
+fn close_loops(tree: &Tree, closing: &[u64], asm: &Assembly, held: &Held, vals: &mut Values, report: &mut Vec<LoopGroup>) -> (Values, BTreeSet<u64>) {
     let (mut changed, mut stuck) = (BTreeMap::new(), BTreeSet::new());
     if closing.len() > MAX_CLOSING {
+        report.push(LoopGroup { members: closing.to_vec(), values: 0, capped: true });
         return (Values::new(), stuck);
     }
     let linked = set_values(asm);
     let groups = loop_groups(tree, closing, asm, &linked);
     let spent = std::cell::Cell::new(0usize);
-    for (group, around, touches) in groups.iter().filter(|(c, _, _)| c.len() <= MAX_LOOPS) {
+    for (group, around, touches) in &groups {
+        let vars = unknowns(tree, around, asm, &linked, held);
+        if group.len() > MAX_LOOPS || vars.len() > MAX_LOOP_VALUES {
+            report.push(LoopGroup { members: group.clone(), values: vars.len(), capped: true });
+            continue;
+        }
         let moves = held_moves(asm, held, touches, vals);
-        match close_group(tree, group, around, &moves, asm, held, &linked, &spent, vals) {
+        let closed = close_group(tree, group, around, &vars, &moves, asm, &spent, vals);
+        report.push(LoopGroup { members: group.clone(), values: vars.len(), capped: spent.get() > MAX_LOOP_WORK });
+        match closed {
             Some(m) => changed.extend(m),
             None if !moves.is_empty() => stuck.extend(group.iter().copied()),
             None => {}
@@ -1571,7 +1596,7 @@ fn loop_dof(tree: &Tree, closing: &[u64], asm: &Assembly, vals: &Values, dof: &m
     }
 }
 
-/// Close one group of loops: move the values of the joints `around` them (all but the `held`
+/// Close one group of loops: move `vars`, the values of the joints `around` them (all but the `held`
 /// values, motion-link targets and rigid joints, within their limits; a linked value moves
 /// through the start of its link chain) until every loop-closing joint meets. A loop open at the
 /// start is closed first, from where it is. Then the held values `moves` go from the values they
@@ -1584,18 +1609,16 @@ fn close_group(
     tree: &Tree,
     closing: &[u64],
     around: &BTreeSet<u64>,
+    vars: &[(u64, usize)],
     moves: &[(u64, usize, f64, f64)],
     asm: &Assembly,
-    held: &Held,
-    linked: &BTreeSet<(u64, usize)>,
     spent: &std::cell::Cell<usize>,
     vals: &mut Values,
 ) -> Option<BTreeMap<(u64, usize), f64>> {
-    let vars = unknowns(tree, around, asm, linked, held);
     if vars.len() > MAX_LOOP_VALUES {
         return Some(BTreeMap::new());
     }
-    let bounds = limit_bounds(tree, &vars);
+    let bounds = limit_bounds(tree, vars);
     let scale = loop_scale(tree, around, vals);
     // Closer than the conflict check needs: 1e-7 mm, and turns of 1e-10 rad across the loop.
     let tol = (1e-10 * scale).min(1e-7);
@@ -1811,7 +1834,7 @@ pub fn solve_holding_with_analysis(doc: &Document, st: &ModelState, held: &Held,
     let Built { tree, mut placed, closing, mut dof } = build(doc, st, &vals, &mut sol);
     let mut stuck = BTreeSet::new();
     if !closing.is_empty() {
-        (sol.values, stuck) = close_loops(&tree, &closing, asm, held, &mut vals);
+        (sol.values, stuck) = close_loops(&tree, &closing, asm, held, &mut vals, &mut sol.groups);
         if !sol.values.is_empty() {
             placed = tree.place(&vals);
         }

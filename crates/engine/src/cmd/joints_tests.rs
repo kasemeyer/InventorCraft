@@ -381,7 +381,7 @@ pub(super) fn pin(s: &mut Session, kind: &str, name: &str, a: &str, b: &str, p: 
 }
 
 /// Where circles about `p` (radius `r`) and `q` (radius `s`) in the XY plane meet.
-pub(super) fn meet(p: Vec3, r: f64, q: Vec3, s: f64) -> [Vec3; 2] {
+pub(crate) fn meet(p: Vec3, r: f64, q: Vec3, s: f64) -> [Vec3; 2] {
     let d = q - p;
     let l = d.len();
     let a = (r * r - s * s + l * l) / (2.0 * l);
