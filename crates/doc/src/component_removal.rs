@@ -30,9 +30,9 @@ impl Document {
     }
 
     /// Remove component `root` with every component inside it, the features made in them, their
-    /// occurrences, the joints, motion links, joint origins, contact sets, motion keys and
-    /// exploded moves that refer to those occurrences, the bodies' component assignments, and the
-    /// components' standard-part, link, appearance and configuration records.
+    /// occurrences, the joints, constraints, motion links, joint origins, contact sets, motion keys
+    /// and exploded moves that refer to those occurrences, the bodies' component assignments, and
+    /// the components' standard-part, link, appearance and configuration records.
     ///
     /// Refused (nothing changes) for the design itself, an unknown component, or a tree that
     /// supplies a body transfer recorded outside it.
@@ -67,6 +67,7 @@ impl Document {
             .collect();
         let assembly = &mut self.assembly;
         assembly.joints.retain(|j| !joints.contains(&j.id));
+        assembly.constraints.retain(|c| c.picks.iter().all(|g| !occurrences.contains(&g.occurrence)));
         assembly.links.retain(|l| !joints.contains(&l.a) && !joints.contains(&l.b));
         assembly.origins.retain(|o| !occurrences.contains(&o.origin.occurrence));
         for set in &mut assembly.contact_sets {

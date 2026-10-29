@@ -575,11 +575,15 @@ pub struct Assembly {
     pub traces: Vec<crate::motion::MotionTrace>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exploded: Vec<crate::motion::ExplodedView>,
+    /// Assembly constraints (`constraints.rs`), compiled into joints each solve.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub constraints: Vec<crate::constraints::Constraint>,
 }
 
 impl Assembly {
-    /// Every expression the joints and motion links keep, with the joint (or the driven joint of
-    /// a link) and what it sets: `offset`, `angle`, a value's name, or a coupling's length.
+    /// Every expression the joints, motion links and constraints keep, with the joint (or the
+    /// driven joint of a link, or the constraint) and what it sets: `offset`, `angle`, a value's
+    /// name, a coupling's length, or a constraint's `offset`, `min` or `max`.
     pub fn exprs(&self) -> Vec<(u64, String, &str)> {
         let mut out = Vec::new();
         for j in &self.joints {
@@ -606,6 +610,12 @@ impl Assembly {
                         out.push((*joint, format!("trace {} {label}", trace.sketch), e.as_str()));
                     }
                 }
+            }
+        }
+        for c in &self.constraints {
+            let x = &c.exprs;
+            for (what, e) in [("offset", &x.offset), ("min", &x.min), ("max", &x.max)] {
+                out.extend(e.as_deref().map(|e| (c.id, what.to_string(), e)));
             }
         }
         out
@@ -636,6 +646,10 @@ impl Assembly {
                 }
             }
         }
+        for c in &mut self.constraints {
+            let x = &mut c.exprs;
+            out.extend([x.offset.as_mut(), x.min.as_mut(), x.max.as_mut()].into_iter().flatten());
+        }
         out
     }
 
@@ -649,6 +663,7 @@ impl Assembly {
             && self.studies.is_empty()
             && self.traces.is_empty()
             && self.exploded.is_empty()
+            && self.constraints.is_empty()
     }
 }
 

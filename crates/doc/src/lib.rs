@@ -18,6 +18,7 @@ pub use clipboard::{clone_expression, remap_topology};
 mod component_removal;
 pub use component_removal::RemovedTree;
 pub mod config;
+pub mod constraints;
 pub mod construct;
 pub mod display_quality;
 pub mod display_units;

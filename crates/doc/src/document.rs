@@ -3117,6 +3117,7 @@ impl Document {
         if d.features.len() > MAX_FEATURES || d.params.len() > MAX_PARAMS {
             return Err(DocError::Invalid("document too large".into()));
         }
+        crate::constraints::validate_loaded(&d.assembly)?;
         // A design saved before R122 has driven dimensions without names.
         d.sync_reference_params();
         Ok(d)

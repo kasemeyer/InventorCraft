@@ -726,7 +726,14 @@ impl Document {
         }
         for (joint, input, e) in self.assembly.exprs() {
             if expr::references(e).iter().any(|r| r == name) {
-                let jname = self.assembly.joints.iter().find(|j| j.id == joint).map(|j| j.name.clone()).unwrap_or_else(|| joint.to_string());
+                let jname = self
+                    .assembly
+                    .joints
+                    .iter()
+                    .find(|j| j.id == joint)
+                    .map(|j| j.name.clone())
+                    .or_else(|| self.assembly.constraints.iter().find(|c| c.id == joint).map(|c| c.name.clone()))
+                    .unwrap_or_else(|| joint.to_string());
                 out.push(ParamUser::Joint { joint, name: jname, input });
             }
         }
