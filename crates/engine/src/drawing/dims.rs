@@ -114,29 +114,45 @@ pub(crate) fn linear(first: &Anchor, second: &Anchor, direction: Direction, plac
 pub(crate) fn radial(paper: &Drawing, h: Handle, c: Vec2, r: f64, diameter: bool, placement: Vec2, scale: f64) -> Option<Dimension> {
     let u = (placement - c).normalized();
     let u = if u == Vec2::ZERO || !u.is_finite() { Vec2::X } else { u };
-    // A model radius reaches the sheet through mm/in and projection arithmetic a hair off its
-    // value (.375 in as 0.37499999999999994), and the renderer measures |tip - defpt| with float
-    // noise of its own: a .375 radius then read R.37 or R.38 by the leader's direction (wave 3).
-    // The radius is taken to the nearest 1e-9 in (three decimals finer than the finest precision
-    // shown), and the tip steps out (by at most 8e-12 in) until it measures at least that, so the
-    // value rounds as the exact one does.
+    // A model radius reaches the sheet a hair off its value (.375 in as 0.37499999999999994):
+    // the circle is taken to the nearest 1e-9 in, and `settle_radial` does the rest.
     let r = (r * 1e9).round() / 1e9;
     let defpt = if diameter { c - u * r } else { c };
-    let want = if diameter { 2.0 * r } else { r };
-    let mut tip = c + u * r;
-    for k in 1..=8 {
-        if tip.dist(defpt) >= want {
-            break;
-        }
-        tip = c + u * (r + f64::from(k) * 1e-12);
-    }
+    let tip = c + u * r;
     let mut d = blank(if diameter { DimKind::Diameter } else { DimKind::Radius }, scale);
     d.defpt = v3(defpt);
     d.p15 = v3(tip);
     d.text_mid = v3(placement);
     d.user_text_pos = true;
+    settle_radial(&mut d);
+    let tip = d.p15.xy();
     d.assoc = assoc::radial_assoc(paper, h, diameter, defpt, tip);
     (d.assoc.len() == 2).then_some(d)
+}
+
+/// A radius or diameter dimension's tip (p15) set so that the renderer, which measures
+/// |p15 - defpt| with float noise, never reads it a hair under its value to 1e-9 in: a .375
+/// radius read R.37 or R.38 by the leader's direction (wave 3), and again after every
+/// `drawing.update` re-snapped the tip. The tip steps out along the leader by at most 8e-12 in.
+/// Other kinds are left alone.
+pub(crate) fn settle_radial(d: &mut Dimension) {
+    if !matches!(d.kind, DimKind::Radius | DimKind::Diameter) {
+        return;
+    }
+    let (from, tip) = (d.defpt.xy(), d.p15.xy());
+    let u = (tip - from).normalized();
+    if u == Vec2::ZERO || !u.is_finite() {
+        return;
+    }
+    let want = (from.dist(tip) * 1e9).round() / 1e9;
+    let mut at = tip;
+    for k in 1..=8 {
+        if at.dist(from) >= want {
+            break;
+        }
+        at = from + u * (want + f64::from(k) * 1e-12);
+    }
+    (d.p15.x, d.p15.y) = (at.x, at.y);
 }
 
 /// Adds `d` to `layout` on DIMENSION with its measurement; its handle.

@@ -719,3 +719,26 @@ fn a_radius_rounds_the_same_at_every_placement() {
         assert_eq!(r["text"].as_str(), Some("R.38"), "at {at:?}");
     }
 }
+
+/// Coordinator follow-up: the .375 radius keeps reading "R.38" through `drawing.update` (the
+/// regenerated circle re-snaps each tip with the same float noise), whatever way its leader
+/// points: the hole goes to 1 in and back to .75 in, an update after each.
+#[test]
+fn a_radius_rounds_the_same_after_the_model_updates() {
+    let (mut s, block, v) = front("a_radius_rounds_the_same_after_the_model_updates");
+    let hole = edge_at(&s, v, [10.375, 8.0]);
+    let dims: Vec<u64> = (0..36)
+        .map(|i| {
+            let a = f64::from(i) * 10f64.to_radians() + 0.013;
+            let at = [10.0 + 1.3 * a.cos(), 8.0 + 1.3 * a.sin()];
+            handle(&run(&mut s, "drawing.dim.radius", json!({"view": v, "picks": [{"edge": hole}], "placement": at})))
+        })
+        .collect();
+    for (diameter, text) in [("1 in", "R.50"), ("0.75 in", "R.38")] {
+        edit_model(&block, &[("timeline.edit", json!({"feature": "Drill", "set": {"diameter": diameter}}))]);
+        run(&mut s, "drawing.update", json!({}));
+        for h in &dims {
+            assert_eq!(dimension_text(model(&s), *h).as_deref(), Some(text), "dimension {h} after the hole went to {diameter}");
+        }
+    }
+}

@@ -170,6 +170,9 @@ pub(crate) fn recompute(dm: &Dimension, prev: Option<&Dimension>, before: &Drawi
         nd.text_mid.x += first.x;
         nd.text_mid.y += first.y;
     }
+    // TCI-CAD: a re-snapped radial tip must read as the circle's value, not a hair under it
+    // (wave 3).
+    super::dims::settle_radial(&mut nd);
     if nd != *dm {
         nd.block = None;
     }
