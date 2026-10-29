@@ -363,6 +363,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let mut tie = false;
     let mut start = None;
     let feature = active_feature(app);
+    // Constraint Settings' Point alignment (R107), kept with the display options here.
+    let align_on = crate::constraint_settings::point_alignment(app);
+    let mut align_toggle = false;
     let has_curves = !selected_curves(app).is_empty();
     let selected_types = if has_curves { selected_linetypes(app) } else { std::array::from_fn(|i| mode(app) == i as u8) };
     let panel = crate::ui_kit::Panel::new(
@@ -474,6 +477,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                             set = Some((key.to_string(), !shown(key)));
                         }
                     }
+                    align_toggle = crate::ui_kit::checkbox_row(ui, "point_alignment", "ui.point_alignment", align_on);
                 });
                 section_alias("sketch_palette:options_fold", "ui.palette_more");
             }
@@ -501,6 +505,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     app.viewport.palette_rect = response.map(|r| r.response.rect.expand(frame.stroke.width));
     if let Some(rect) = app.viewport.palette_rect {
         crate::scenario::publish_rect("sketch_palette:outer", rect);
+    }
+    if align_toggle {
+        crate::constraint_settings::set_point_alignment(app, !align_on);
     }
     if let Some((key, on)) = set {
         let mut params = serde_json::Map::new();

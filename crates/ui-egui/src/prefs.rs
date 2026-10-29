@@ -557,6 +557,10 @@ preference_settings! {
     /// opens the panel); absent = off. Not written while empty.
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     dim_edit_when_created: std::collections::BTreeMap<String, bool> = Default::default();
+    /// Per profile id, Constraint Settings' "Point alignment" (R107: a sketch point being placed
+    /// lines up with existing ones); absent = on. Not written while empty.
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    point_alignment: std::collections::BTreeMap<String, bool> = Default::default();
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     split_faces: std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>> = Default::default();
     /// Interface language (a registered locale ID).

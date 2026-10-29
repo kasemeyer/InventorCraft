@@ -127,7 +127,7 @@ const PART_FACES: &[(&str, &str, &[(&str, bool)])] = &[
     ),
     ("SKETCH", "PATTERN", &[("sketch.pattern.rectangular", S), ("sketch.pattern.circular", S), ("sketch.mirror", S)]),
     // The capture's order: Dimension large and alone, then a small column standing for Auto
-    // Dimension / Show Constraints / Constraint Settings, then the grid. `horizontal_vertical`
+    // Dimension / Show Constraints, then Constraint Settings itself (R107), then the grid. `horizontal_vertical`
     // stands in for both Horizontal and Vertical, at Horizontal's place; midpoint and polygon
     // have no capture slot and close the grid.
     (
@@ -138,6 +138,7 @@ const PART_FACES: &[(&str, &str, &[(&str, bool)])] = &[
             ("sketch.auto_constrain", S),
             ("sketch.auto_constrain_from_datum", S),
             ("sketch.constrainer", S),
+            ("sketch.constraint_settings", S),
             ("sketch.constraint.coincident", S),
             ("sketch.constraint.parallel", S),
             ("sketch.constraint.tangent", S),

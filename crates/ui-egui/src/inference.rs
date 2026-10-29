@@ -2,7 +2,9 @@
 //! cursor snaps to directions and places taken from the existing geometry (parallel or
 //! perpendicular to a line, on the extension of a line, tangent to a circle or arc, or through
 //! the centre of a circle or arc). A dashed guide and a label show it; placing the point adds
-//! the matching constraint.
+//! the matching constraint. Every drawing tool also aligns the point it places horizontally or
+//! vertically with an existing sketch point (R107, Constraint Settings' Point alignment): a
+//! dotted guide from that point, no constraint.
 
 use std::cell::RefCell;
 
@@ -23,6 +25,8 @@ pub enum Kind {
     Tangent,
     /// The new line passes through the centre of a circle or arc.
     Center,
+    /// The point lines up horizontally and/or vertically with existing sketch points (R107).
+    Align,
 }
 
 /// A snap taken from existing geometry: what, to which curve, where the point goes, how far the
@@ -37,6 +41,8 @@ pub struct Inference {
     /// Point argument for the new endpoint: `"<id>.center"` when it lands on the centre, or
     /// `"on:<id>:x,y"` when it lands on the circle. None: a free point on the radial line.
     pub arg: Option<String>,
+    /// A second guide: point alignment with two points at once (their intersection).
+    pub guide2: Option<(Vec2, Vec2)>,
 }
 
 impl Inference {
@@ -47,12 +53,72 @@ impl Inference {
             Kind::Extension => "Ext",
             Kind::Tangent => "T",
             Kind::Center => "Ctr",
+            Kind::Align => "Aln",
         }
     }
 }
 
 thread_local! {
     static PENDING: RefCell<Option<Inference>> = const { RefCell::new(None) };
+    /// Sketch points the cursor passed over lately, the latest first (R107's "scrubbed").
+    static SCRUBBED: RefCell<Vec<Vec2>> = const { RefCell::new(Vec::new()) };
+}
+
+/// How many scrubbed points are remembered.
+const SCRUBBED_MAX: usize = 4;
+
+/// The cursor passed over the sketch point at `p`: it takes priority for point alignment.
+pub fn scrub(p: Vec2) {
+    SCRUBBED.with(|s| {
+        let mut s = s.borrow_mut();
+        s.retain(|q| q.dist(p) > 1e-9);
+        s.insert(0, p);
+        s.truncate(SCRUBBED_MAX);
+    });
+}
+
+/// The scrubbed points, the latest first.
+pub fn scrubbed() -> Vec<Vec2> {
+    SCRUBBED.with(|s| s.borrow().clone())
+}
+
+/// Forget the scrubbed points (the sketch or the tool changed).
+pub fn clear_scrubbed() {
+    SCRUBBED.with(|s| s.borrow_mut().clear());
+}
+
+/// Point alignment (R107): the cursor `lp` within `tol` of the vertical or horizontal through an
+/// existing sketch point snaps onto that line; both at once snap to their intersection. The
+/// `scrubbed` points (the cursor passed over them lately, the latest first) take priority, then
+/// every sketch point and the origin, the one nearest the line (then nearest the cursor) first.
+/// A point the cursor is on (within `tol` on both axes) is not an alignment.
+pub fn point_alignment(sk: &Sketch, scrubbed: &[Vec2], lp: Vec2, tol: f64) -> Option<Inference> {
+    let all: Vec<Vec2> = sk.points.iter().map(|p| p.pos).chain(std::iter::once(Vec2::ZERO)).collect();
+    let live: Vec<Vec2> = scrubbed.iter().copied().filter(|q| all.iter().any(|p| p.dist(*q) < 1e-9)).collect();
+    let on_point = all.iter().any(|p| (p.x - lp.x).abs() < tol && (p.y - lp.y).abs() < tol);
+    if on_point {
+        return keep(None);
+    }
+    // The anchor along one axis (`axis` reads the coordinate the line through it fixes).
+    let pick = |axis: fn(Vec2) -> f64| -> Option<Vec2> {
+        let off = |p: Vec2| (axis(p) - axis(lp)).abs();
+        if let Some(p) = live.iter().copied().find(|p| off(*p) < tol) {
+            return Some(p);
+        }
+        all.iter()
+            .copied()
+            .filter(|p| off(*p) < tol)
+            .min_by(|a, b| (off(*a), a.dist(lp)).partial_cmp(&(off(*b), b.dist(lp))).unwrap_or(std::cmp::Ordering::Equal))
+    };
+    let vertical = pick(|p| p.x);
+    let horizontal = pick(|p| p.y);
+    let at = Vec2::new(vertical.map_or(lp.x, |p| p.x), horizontal.map_or(lp.y, |p| p.y));
+    let (guide, guide2) = match (vertical, horizontal) {
+        (Some(v), Some(h)) => ((v, at), Some((h, at))),
+        (Some(a), None) | (None, Some(a)) => ((a, at), None),
+        (None, None) => return keep(None),
+    };
+    keep(Some(Inference { kind: Kind::Align, curve: String::new(), at, dist: at.dist(lp), guide, arg: None, guide2 }))
 }
 
 /// Forget the current inference (another snap won, or the tool ended).
@@ -97,7 +163,7 @@ pub fn tangent(sk: &Sketch, prev: Vec2, lp: Vec2, tol: f64) -> Option<Inference>
             let on_arc = sk.shape(i).is_none_or(|sh| sh.dist(t) < 1e-6);
             let e = t.dist(lp);
             if on_arc && e < tol && best.as_ref().is_none_or(|b| e < b.dist) {
-                best = Some(Inference { kind: Kind::Tangent, curve: c.id.clone(), at: t, dist: e, guide: (prev, t), arg: None });
+                best = Some(Inference { kind: Kind::Tangent, curve: c.id.clone(), at: t, dist: e, guide: (prev, t), arg: None, guide2: None });
             }
         }
     }
@@ -152,7 +218,7 @@ pub fn through_center(sk: &Sketch, prev: Vec2, lp: Vec2, tol: f64) -> Option<Inf
         }
         let dist = at.dist(lp);
         if dist <= tol && best.as_ref().is_none_or(|b| dist < b.dist) {
-            best = Some(Inference { kind: Kind::Center, curve: c.id.clone(), at, dist, guide: (prev, at), arg });
+            best = Some(Inference { kind: Kind::Center, curve: c.id.clone(), at, dist, guide: (prev, at), arg, guide2: None });
         }
     }
     keep(best)
@@ -195,6 +261,7 @@ pub fn lines(sk: &Sketch, prev: Vec2, lp: Vec2, tol: f64) -> Option<Inference> {
                     dist: e,
                     guide: (prev - d * (t.signum() * tol * 6.0), at + d * (t.signum() * tol * 6.0)),
                     arg: None,
+                    guide2: None,
                 });
             }
         }
@@ -206,7 +273,7 @@ pub fn lines(sk: &Sketch, prev: Vec2, lp: Vec2, tol: f64) -> Option<Inference> {
             let e = at.dist(lp);
             if e < tol * 0.8 && !touches {
                 let from = if s < 0.0 { a } else { b };
-                offer(Inference { kind: Kind::Extension, curve: c.id.clone(), at, dist: e * 0.9, guide: (from, at), arg: None });
+                offer(Inference { kind: Kind::Extension, curve: c.id.clone(), at, dist: e * 0.9, guide: (from, at), arg: None, guide2: None });
             }
         }
     }
@@ -218,6 +285,10 @@ pub fn lines(sk: &Sketch, prev: Vec2, lp: Vec2, tol: f64) -> Option<Inference> {
 pub fn commit(app: &mut SolveApp, line: &str, end: Vec2) {
     let Some(i) = current().filter(|i| i.at.dist(end) < 1e-9) else { return };
     clear();
+    // Point alignment places the point and adds nothing (as Inventor's).
+    if i.kind == Kind::Align {
+        return;
+    }
     // The endpoint is the circle's centre: the line already ends on that point.
     if matches!(i.kind, Kind::Center) && i.arg.as_deref().is_some_and(|a| a.ends_with(".center")) {
         return;
@@ -228,6 +299,7 @@ pub fn commit(app: &mut SolveApp, line: &str, end: Vec2) {
         Kind::Tangent => ("sketch.constraint.tangent", json!({"a": i.curve, "b": line})),
         Kind::Extension => ("sketch.constraint.coincident", json!({"a": format!("{line}.end"), "b": i.curve})),
         Kind::Center => ("sketch.constraint.coincident", json!({"a": format!("{}.center", i.curve), "b": line})),
+        Kind::Align => return,
     };
     // An inference only adds what the sketch does not already have: one that is already implied
     // (redundant) or would conflict is simply not kept.
@@ -235,16 +307,26 @@ pub fn commit(app: &mut SolveApp, line: &str, end: Vec2) {
     let _ = app.session.execute(cmd, &params);
 }
 
-/// The dashed guide of the current inference (its label is the snap hint) (while the Line tool is active).
+/// The dashed guide of the current inference (its label is the snap hint) (while the Line tool is
+/// active), or the dotted guide(s) of a point alignment (any drawing tool).
 pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
-    if app.tool.as_ref().is_none_or(|t| t.cmd != "sketch.line") {
+    let Some(i) = current() else { return };
+    if app.tool.as_ref().is_none_or(|t| i.kind != Kind::Align && t.cmd != "sketch.line") {
         return;
     }
-    let Some(i) = current() else { return };
     let st = app.session.world_state();
     let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else { return };
     let to = |p: Vec2| proj.to_screen(ss.plane.to_world(p));
     let tk = Tokens::get();
+    if i.kind == Kind::Align {
+        for (from, onto) in std::iter::once(i.guide).chain(i.guide2) {
+            if let (Some(a), Some(b)) = (to(from), to(onto)) {
+                crate::scenario::publish_handle("inference:align_guide", a);
+                painter.extend(Shape::dotted_line(&[a, b], tk.rubber_band, 4.0, 1.0));
+            }
+        }
+        return;
+    }
     if let (Some(a), Some(b)) = (to(i.guide.0), to(i.guide.1)) {
         painter.add(Shape::dashed_line(&[a, b], Stroke::new(1.0, tk.rubber_band), 5.0, 4.0));
     }
@@ -361,6 +443,73 @@ mod tests {
         let off = through_center(&s, Vec2::new(20.0, 0.0), Vec2::new(-10.0, 0.2), 0.5).expect("through, off the arc");
         assert!(off.at.dist(Vec2::new(-10.0, 0.0)) < 1e-9, "{:?}", off.at);
         assert!(off.arg.is_none());
+    }
+
+    fn points(at: &[(f64, f64)]) -> Sketch {
+        let mut s = Sketch::new();
+        for (i, (x, y)) in at.iter().enumerate() {
+            let _ = s.add_point(Vec2::new(*x, *y), Some(&format!("p{i}")));
+        }
+        s
+    }
+
+    #[test]
+    fn a_point_aligns_horizontally_with_an_existing_point() {
+        let s = points(&[(10.0, 0.0)]);
+        let i = point_alignment(&s, &[], Vec2::new(30.3, 0.4), 1.0).expect("aligned");
+        assert_eq!(i.kind, Kind::Align);
+        assert!(i.at.dist(Vec2::new(30.3, 0.0)) < 1e-12, "{:?}", i.at);
+        assert_eq!(i.guide, (Vec2::new(10.0, 0.0), Vec2::new(30.3, 0.0)));
+        assert_eq!(i.guide2, None);
+        assert_eq!(i.label(), "Aln");
+        // Out of the tolerance: nothing.
+        assert!(point_alignment(&s, &[], Vec2::new(30.3, 1.4), 1.0).is_none());
+    }
+
+    #[test]
+    fn two_anchors_snap_to_their_intersection() {
+        // (10, 0) horizontally and (25, 40) vertically.
+        let s = points(&[(10.0, 0.0), (25.0, 40.0)]);
+        let i = point_alignment(&s, &[], Vec2::new(25.6, 0.7), 1.0).expect("both");
+        assert!(i.at.dist(Vec2::new(25.0, 0.0)) < 1e-12, "{:?}", i.at);
+        assert_eq!(i.guide, (Vec2::new(25.0, 40.0), Vec2::new(25.0, 0.0)));
+        assert_eq!(i.guide2, Some((Vec2::new(10.0, 0.0), Vec2::new(25.0, 0.0))));
+    }
+
+    #[test]
+    fn the_origin_is_an_anchor_and_standing_on_a_point_is_not_an_alignment() {
+        let s = points(&[(10.0, 5.0)]);
+        let i = point_alignment(&s, &[], Vec2::new(0.4, 20.0), 1.0).expect("origin");
+        assert_eq!(i.guide.0, Vec2::ZERO);
+        assert!(i.at.dist(Vec2::new(0.0, 20.0)) < 1e-12);
+        assert!(point_alignment(&s, &[], Vec2::new(10.2, 5.3), 1.0).is_none(), "on the point itself");
+    }
+
+    #[test]
+    fn a_scrubbed_point_beats_a_farther_collinear_one() {
+        // Both lie on the cursor's row within the tolerance: (50, 0.5) is the nearer to it,
+        // (10, 0) the farther; scrubbed, (10, 0) wins.
+        let s = points(&[(10.0, 0.0), (50.0, 0.5)]);
+        let plain = point_alignment(&s, &[], Vec2::new(30.0, 0.6), 1.0).unwrap();
+        assert_eq!(plain.guide.0, Vec2::new(50.0, 0.5));
+        let i = point_alignment(&s, &[Vec2::new(10.0, 0.0)], Vec2::new(30.0, 0.6), 1.0).unwrap();
+        assert_eq!(i.guide.0, Vec2::new(10.0, 0.0));
+        assert!(i.at.dist(Vec2::new(30.0, 0.0)) < 1e-12);
+        // A scrubbed position no point stands on any more is ignored.
+        let gone = point_alignment(&s, &[Vec2::new(12.0, 0.0)], Vec2::new(30.0, 0.6), 1.0).unwrap();
+        assert_eq!(gone.guide.0, Vec2::new(50.0, 0.5));
+    }
+
+    #[test]
+    fn scrub_keeps_the_latest_first_and_a_few() {
+        clear_scrubbed();
+        for x in 0..6 {
+            scrub(Vec2::new(f64::from(x), 0.0));
+        }
+        scrub(Vec2::new(4.0, 0.0));
+        assert_eq!(scrubbed(), [Vec2::new(4.0, 0.0), Vec2::new(5.0, 0.0), Vec2::new(3.0, 0.0), Vec2::new(2.0, 0.0)]);
+        clear_scrubbed();
+        assert!(scrubbed().is_empty());
     }
 
     #[test]

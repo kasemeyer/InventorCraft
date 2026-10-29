@@ -2928,6 +2928,8 @@ pub fn sketch_point_at(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<(Vec2, 
         if let Hit::SketchPoint { sketch, id, at } = h
             && sketch == sid
         {
+            // Passed over: it leads point alignment for a while (R107).
+            crate::inference::scrub(at);
             return Some((at, Some(id)));
         }
     }

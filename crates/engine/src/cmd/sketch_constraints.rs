@@ -41,6 +41,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("constrainer")
         .enabled(in_sketch)
         .params("entities: [one or two sketch entity ids]: applies the constraint the geometry nearly has (horizontal/vertical, parallel, perpendicular, collinear, coincident, concentric, equal, tangent)"),
+    CommandSpec::new("sketch.constraint_settings", "Constraint Settings", constraint_settings)
+        .icon("settings")
+        .enabled(in_sketch)
+        .noundo()
+        .doc_only()
+        .params("none: the app opens its Constraint Settings panel (Point alignment, saved with the app's preferences); nothing in the design changes"),
     CommandSpec::new("sketch.toggle_driven", "Toggle Driven Dimension", toggle_driven).icon("dimension")
         .enabled(in_sketch)
         .params("constraint: dimension id, driven?: bool (default toggles); a driving dimension gets a parameter with its current value"),
@@ -347,6 +353,11 @@ fn guess(sk: &Sketch, ents: &[String], cmd: &str) -> Result<ConstraintKind> {
         },
         _ => Err(bad(cmd, "`entities` must list one or two entities")),
     }
+}
+
+/// Constraint Settings live in the app (R107): the command names the panel it opens.
+fn constraint_settings(_: &mut Session, _: &Value) -> Result<Value> {
+    Ok(json!({"panel": "constraint_settings"}))
 }
 
 fn smart_constrain(s: &mut Session, p: &Value) -> Result<Value> {

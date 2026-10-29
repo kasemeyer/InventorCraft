@@ -23,6 +23,7 @@ mod colour_tokens_tests;
 #[cfg(test)]
 mod colour_vision_tests;
 pub mod command_help;
+pub mod constraint_settings;
 pub mod context_menu;
 pub mod control;
 pub mod control_job;
@@ -1114,6 +1115,10 @@ impl SolveApp {
             });
             return;
         }
+        if id == "sketch.constraint_settings" {
+            constraint_settings::open(self);
+            return;
+        }
         if id == "component.relink" {
             linked_source::start_selected(self);
             return;
@@ -1982,6 +1987,7 @@ impl SolveApp {
         mouse_gesture::show(self, ui.ctx());
         delete::show(self, ui.ctx());
         linked_source::show_copies(self, ui.ctx());
+        constraint_settings::show(self, ui.ctx());
         shortcut_box::show(self, ui.ctx());
         prefs::show(self, ui.ctx());
         toolbar_custom::window(self, ui.ctx());

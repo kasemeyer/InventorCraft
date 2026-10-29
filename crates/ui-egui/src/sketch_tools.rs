@@ -76,6 +76,9 @@ thread_local! {
     /// The inference the cursor snapped to last (label, sketch point), for the hint.
     static SNAP: RefCell<Option<(&'static str, Vec2)>> = const { RefCell::new(None) };
     static PREV: Cell<Option<Vec2>> = const { Cell::new(None) };
+    /// Whether the tool placing points aligns them with sketch points (R107): kept from the last
+    /// hover, as a click takes the tool out of the app while it runs.
+    static ALIGNING: Cell<bool> = const { Cell::new(false) };
     /// Curvature comb teeth (foot, tip) shown while the comb tool is active.
     static COMBS: RefCell<Vec<Vec<[Vec3; 2]>>> = const { RefCell::new(Vec::new()) };
     /// The image file a Canvas or Decal tool places.
@@ -456,6 +459,31 @@ pub fn refine_snap(
         } else if dx < tol && dy > tol {
             best = Some((dx, "V", Vec2::new(prev.x, g(lp.y))));
         }
+    }
+    // Point alignment (R107): any drawing tool's point lines up with an existing sketch point;
+    // never the Dimension tool's text, nor while a dimension's value is being edited.
+    let aligning = match app.tool.as_ref() {
+        Some(t) => {
+            let on = matches!(t.kind, crate::tools::Kind::Draw(_)) && !crate::dim_view::editing();
+            ALIGNING.with(|c| c.set(on));
+            on
+        }
+        None => ALIGNING.with(Cell::get),
+    };
+    if aligning {
+        for p in sk.points.iter().map(|p| p.pos).chain(std::iter::once(Vec2::ZERO)) {
+            if p.dist(lp) < tol {
+                crate::inference::scrub(p);
+            }
+        }
+    }
+    if !mid_only
+        && best.is_none()
+        && aligning
+        && crate::constraint_settings::point_alignment(app)
+        && let Some(i) = crate::inference::point_alignment(sk, &crate::inference::scrubbed(), lp, tol)
+    {
+        best = Some((i.dist, i.label(), i.at));
     }
     // Line tool: parallel or perpendicular to a line, or on a line's extension.
     if !mid_only

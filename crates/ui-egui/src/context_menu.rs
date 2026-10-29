@@ -230,6 +230,8 @@ pub struct MenuState {
     pub confirm: Option<crate::delete::Pending>,
     /// Identical copies Extract to File found, waiting to be linked too.
     pub link_copies: Option<crate::linked_source::Copies>,
+    /// The Constraint Settings panel, open, with the Point alignment it opened with (Cancel).
+    pub constraint_settings: Option<bool>,
     /// The Properties window: title and measurements.
     pub props: Option<(String, Value)>,
     /// The viewport menu opened over something: it offers Select Other.
