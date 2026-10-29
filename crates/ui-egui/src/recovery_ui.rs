@@ -402,7 +402,8 @@ mod tests {
         edit(&mut app);
         tick_and_wait(&mut app);
         let id = entries(&dir)[0].id.clone();
-        let blocked = dir.join(format!("{id}.solidcraft"));
+        // The autosave takes the document kind's extension (R102), as `recovery` writes it.
+        let blocked = dir.join(format!("{id}.{}", app.session.doc.kind.extension()));
         fs::remove_file(&blocked).unwrap();
         fs::create_dir(&blocked).unwrap();
         edit(&mut app);
