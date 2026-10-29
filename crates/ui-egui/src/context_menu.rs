@@ -385,7 +385,11 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::DrawingRoot => drawing_root_items(app),
         Target::Sheet { index } => {
             let active = app.session.drawing_sheet == *index;
-            vec![cmd(app, "drawing.sheet.activate", "Activate Sheet").with(json!({ "sheet": index })).on(!active)]
+            vec![
+                cmd(app, "drawing.sheet.activate", "Activate Sheet").with(json!({ "sheet": index })).on(!active),
+                // Edit Sheet (R99, R104): the panel on this sheet.
+                crate::marking_menu::item(app, "ui.drawing.editSheet", crate::profile_workflow::MenuContext::Empty).with(json!({ "sheet": index })),
+            ]
         }
         Target::DrawingView { view } => crate::drawing_menu::view_items(app, *view),
         Target::Origin => crate::browser::origin_items(app),
@@ -1165,6 +1169,11 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         }
         "ui.createDrawingView" => crate::documents::create_drawing_view(app),
         "ui.drawing.properties" => crate::browser::drawing::open_properties(app),
+        "ui.drawing.editSheet" => {
+            if let Some(sheet) = p.get("sheet").and_then(Value::as_u64).and_then(|s| usize::try_from(s).ok()) {
+                crate::drawing_sheet_panel::open(app, sheet);
+            }
+        }
         "ui.drawing.editView" => {
             if let Some(view) = id_of(&p, "view") {
                 crate::drawing_view_panel::open(app, None, crate::drawing_view_panel::Origin::Edit(view));

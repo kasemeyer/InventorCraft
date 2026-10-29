@@ -180,7 +180,14 @@ pub(crate) fn add_sheet(m: &mut DrawingModel, size: AnsiSize, landscape: bool) -
     let title_insert = m.paper.new_handle();
     layout.entities.push(Entity { handle: title_insert, common: on_border(), kind: EntityKind::Insert(insert(TITLE_BLOCK, at, attribs)) });
     m.paper.layouts.push(layout);
-    m.sheets.push(solidcraft_doc::SheetMeta { layout: name, size, landscape, border: border_insert, title_block: title_insert });
+    m.sheets.push(solidcraft_doc::SheetMeta {
+        name: solidcraft_doc::DEFAULT_SHEET_NAME.to_string(),
+        layout: name,
+        size,
+        landscape,
+        border: border_insert,
+        title_block: title_insert,
+    });
     index
 }
 

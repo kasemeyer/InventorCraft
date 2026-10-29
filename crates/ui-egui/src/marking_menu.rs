@@ -244,6 +244,8 @@ pub(crate) fn item(app: &SolveApp, id: &str, ctx: MenuContext) -> Item {
         "ui.drawing.editNote" => act("ui.drawing.editNote", "Edit Note", "text").on(app.drawing.tool.is_none()),
         "ui.drawing.moveNote" => act("ui.drawing.moveNote", "Move Note", "move").on(app.drawing.tool.is_none()),
         "ui.drawing.properties" => act("ui.drawing.properties", "Drawing Properties…", "settings").on(app.drawing.tool.is_none()),
+        // A sheet's Edit Sheet (R99, R104).
+        "ui.drawing.editSheet" => act("ui.drawing.editSheet", "Edit Sheet", "settings").on(app.drawing.tool.is_none()),
         // A drawing of the open part or assembly (spec §2.1 path 2c).
         "ui.createDrawingView" => {
             act("ui.createDrawingView", "Create Drawing View", "camera").on(app.session.doc.kind != DocumentKind::Drawing && !app.file_picker_busy())

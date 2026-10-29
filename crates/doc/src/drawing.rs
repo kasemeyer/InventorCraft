@@ -54,9 +54,20 @@ impl DrawingModel {
     }
 }
 
+/// A sheet's name before one is given (Inventor's "Sheet"; the browser shows `Sheet:1`).
+pub const DEFAULT_SHEET_NAME: &str = "Sheet";
+
+fn default_sheet_name() -> String {
+    DEFAULT_SHEET_NAME.to_string()
+}
+
 /// One sheet: a CADCraft layout with our border and title block placed on it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SheetMeta {
+    /// The sheet's name (Edit Sheet, R104); the browser shows `<name>:<n>`. Drawings saved before
+    /// it existed load with [`DEFAULT_SHEET_NAME`].
+    #[serde(default = "default_sheet_name")]
+    pub name: String,
     /// The CADCraft layout's name.
     pub layout: String,
     pub size: AnsiSize,

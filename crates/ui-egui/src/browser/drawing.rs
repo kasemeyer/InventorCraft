@@ -118,7 +118,9 @@ fn sheet(app: &mut SolveApp, ui: &mut egui::Ui, m: &DrawingModel, index: usize, 
     let key = format!("d:sheet:{index}");
     let open = is_open(app, &key, true);
     let active = app.session.drawing_sheet.min(m.sheets.len().saturating_sub(1)) == index;
-    let label = format!("{}:{}", node_label(app, "sheet"), index + 1);
+    // `<name>:<n>` (R104); the default name is the profile's word for a sheet, as before.
+    let name = m.sheets.get(index).map(|s| s.name.as_str()).filter(|n| *n != solidcraft_engine::doc::DEFAULT_SHEET_NAME);
+    let label = format!("{}:{}", name.map_or_else(|| node_label(app, "sheet"), str::to_string), index + 1);
     let r = draw_row(
         ui,
         ui.id().with(&key),

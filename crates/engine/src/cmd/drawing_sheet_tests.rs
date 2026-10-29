@@ -216,3 +216,46 @@ fn restoring_a_checkpoint_clamps_the_sheet() {
     s.restore_checkpoint(id).unwrap();
     assert_eq!((model(&s).sheets.len(), s.drawing_sheet), (1, 0));
 }
+
+/// R104: a sheet is named "Sheet" until `drawing.sheet.set_name` names it: one undo step, an
+/// empty name refused with no step, undo puts the old name back.
+#[test]
+fn set_name_names_a_sheet_in_one_step() {
+    let mut s = new_drawing();
+    assert_eq!(model(&s).sheets[0].name, "Sheet");
+    let undo = s.undo.len();
+    let r = run(&mut s, "drawing.sheet.set_name", json!({"sheet": 0, "name": "  Details "}));
+    assert_eq!(r, json!({"sheet": 0, "name": "Details"}));
+    assert_eq!(model(&s).sheets[0].name, "Details");
+    assert_eq!(s.undo.len(), undo + 1);
+    assert_eq!(
+        err(&mut s, "drawing.sheet.set_name", json!({"sheet": 0, "name": "  "})),
+        "invalid parameters for `drawing.sheet.set_name`: a sheet needs a name"
+    );
+    assert!(err(&mut s, "drawing.sheet.set_name", json!({"sheet": 3, "name": "X"})).contains("sheet 3 does not exist"));
+    assert_eq!(s.undo.len(), undo + 1);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(model(&s).sheets[0].name, "Sheet");
+    // A new sheet is "Sheet" too; with no `sheet` the active one is named.
+    run(&mut s, "drawing.sheet.add", json!({}));
+    run(&mut s, "drawing.sheet.set_name", json!({"name": "Assembly"}));
+    let names: Vec<&str> = model(&s).sheets.iter().map(|x| x.name.as_str()).collect();
+    assert_eq!(names, ["Sheet", "Assembly"]);
+}
+
+/// R104: a drawing saved before sheets had names (no `name` in its sheets) opens with "Sheet".
+#[test]
+fn a_drawing_saved_before_sheet_names_opens_named_sheet() {
+    let s = new_drawing();
+    let mut v: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    let sheets = v["drawing"]["sheets"].as_array_mut().expect("the drawing's sheets in the file");
+    for sheet in sheets.iter_mut() {
+        assert!(sheet.as_object_mut().unwrap().remove("name").is_some());
+    }
+    let dir = crate::cmd::drawing::drawing_fixture::temp_dir("a_drawing_saved_before_sheet_names");
+    let path = dir.join("old.tcidrw");
+    std::fs::write(&path, v.to_string()).unwrap();
+    let mut t = Session::default();
+    run(&mut t, "doc.open", json!({"path": path.to_string_lossy()}));
+    assert_eq!(model(&t).sheets[0].name, "Sheet");
+}

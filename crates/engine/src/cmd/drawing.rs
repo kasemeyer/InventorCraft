@@ -30,6 +30,9 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("drawing.sheet.set_size", "Sheet Size", sheet_set_size).icon("settings").params(
         "sheet?: index (0-based; default the active sheet); size: A|B|C|D|E; landscape?: bool (default the sheet's) → sheet, size, landscape: the page, border and title block follow the new size",
     ),
+    CommandSpec::new("drawing.sheet.set_name", "Sheet Name", sheet_set_name).icon("settings").params(
+        "sheet?: index (0-based; default the active sheet); name: text (not empty, at most 100 characters; the browser shows <name>:<n>) → sheet, name",
+    ),
     CommandSpec::new("drawing.properties.set", "Drawing Properties", properties_set).icon("settings").params(
         "title?, company?, dwg_no?, rev?, drawn_by?, drawn_date?, checked_by?, checked_date?, approved_by?, approved_date?, material?: text → properties: every title block field; SIZE, SCALE and SHEET are computed and refused",
     ),
@@ -106,6 +109,38 @@ fn sheet_set_size(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(())
     })?;
     Ok(json!({"sheet": index, "size": size.letter(), "landscape": landscape}))
+}
+
+/// Most characters of a sheet's name.
+const MAX_SHEET_NAME: usize = 100;
+
+/// `drawing.sheet.set_name` (Edit Sheet's Name, R104): one undo step.
+fn sheet_set_name(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "drawing.sheet.set_name";
+    let m = drawing::require(s, cmd)?;
+    let index = match p.get("sheet") {
+        None | Some(Value::Null) => active_sheet(s, m),
+        Some(_) => sheet_index(m, p, cmd)?,
+    };
+    if m.sheets.get(index).is_none() {
+        return Err(bad(cmd, "the drawing has no sheets"));
+    }
+    let name = p.get("name").and_then(Value::as_str).map(str::trim).ok_or_else(|| bad(cmd, "`name` must be text"))?;
+    if name.is_empty() {
+        return Err(bad(cmd, "a sheet needs a name"));
+    }
+    if name.chars().count() > MAX_SHEET_NAME || name.chars().any(char::is_control) {
+        return Err(bad(cmd, format!("a sheet's name is at most {MAX_SHEET_NAME} characters on one line")));
+    }
+    let name = name.to_string();
+    let shown = name.clone();
+    drawing::edit(s, cmd, |m, _| {
+        if let Some(sheet) = m.sheets.get_mut(index) {
+            sheet.name = name;
+        }
+        Ok(())
+    })?;
+    Ok(json!({"sheet": index, "name": shown}))
 }
 
 fn properties_set(s: &mut Session, p: &Value) -> Result<Value> {

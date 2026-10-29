@@ -60,6 +60,7 @@ pub(crate) mod drawing_menu;
 pub(crate) mod drawing_models;
 pub(crate) mod drawing_notes_tool;
 pub(crate) mod drawing_place;
+pub(crate) mod drawing_sheet_panel;
 pub(crate) mod drawing_ui;
 pub(crate) mod drawing_view_panel;
 pub mod edit_clipboard;

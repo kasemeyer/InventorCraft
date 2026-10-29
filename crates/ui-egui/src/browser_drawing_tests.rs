@@ -154,7 +154,7 @@ fn double_clicking_a_sheet_activates_it() {
     assert_eq!(h.app.session.drawing_sheet, 0);
     // The sheet's menu activates it too.
     let menu = crate::context_menu::items(&h.app, &Target::Sheet { index: 1 });
-    assert_eq!(ids(&menu), ["drawing.sheet.activate"]);
+    assert_eq!(ids(&menu), ["drawing.sheet.activate", "ui.drawing.editSheet"]);
     run_item(&mut h.app, &menu[0], egui::Pos2::ZERO);
     assert_eq!(h.app.session.drawing_sheet, 1);
 }

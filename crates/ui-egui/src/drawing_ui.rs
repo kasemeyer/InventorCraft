@@ -73,6 +73,8 @@ pub(crate) enum DrawingPanel {
     Dimension(crate::drawing_dim_tool::DimPanel),
     /// A note's text, new or edited (Task 9).
     Text(crate::drawing_notes_tool::TextPanel),
+    /// Edit Sheet: a sheet's name, size and orientation (wave 3, R99, R104).
+    Sheet(crate::drawing_sheet_panel::SheetPanel),
 }
 
 /// Whether the open panel would accept OK now (R72; each panel variant answers for itself).
@@ -84,6 +86,7 @@ pub(crate) fn panel_can_ok(app: &SolveApp) -> bool {
         // OK with nothing changed closes the panel and sends nothing.
         Some(DrawingPanel::Dimension(_)) => true,
         Some(DrawingPanel::Text(p)) => p.can_ok(),
+        Some(DrawingPanel::Sheet(p)) => p.can_ok(),
         None => false,
     }
 }
@@ -110,6 +113,11 @@ pub(crate) fn panel_ok(app: &mut SolveApp) {
         Some(DrawingPanel::Text(mut p)) => {
             if !crate::drawing_notes_tool::apply(app, &mut p) {
                 app.drawing.panel = Some(DrawingPanel::Text(p));
+            }
+        }
+        Some(DrawingPanel::Sheet(p)) => {
+            if !crate::drawing_sheet_panel::apply(app, &p) {
+                app.drawing.panel = Some(DrawingPanel::Sheet(p));
             }
         }
         None => {}
@@ -158,6 +166,7 @@ pub(crate) fn show_panel(app: &mut SolveApp, ctx: &egui::Context) {
         Some(DrawingPanel::View(p)) => crate::drawing_view_panel::show(app, ctx, p),
         Some(DrawingPanel::Dimension(p)) => crate::drawing_dim_tool::show(app, ctx, p),
         Some(DrawingPanel::Text(p)) => crate::drawing_notes_tool::show(app, ctx, p),
+        Some(DrawingPanel::Sheet(p)) => crate::drawing_sheet_panel::show(app, ctx, p),
         None => {}
     }
 }
