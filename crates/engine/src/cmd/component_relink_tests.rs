@@ -47,6 +47,32 @@ fn reused_design_insertion_is_grounded_only_as_the_first_component() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// R123 on the reuse path: a paste of a design already linked, when no root occurrence remains
+/// (its one occurrence sits under a component that is no longer placed), is the assembly's
+/// first part and is grounded too.
+#[test]
+fn a_reused_paste_with_no_root_occurrence_left_is_grounded() {
+    let dir = folder("reuse-no-root");
+    let file = dir.join("part.solidcraft");
+    part(&file, 30);
+    let mut s = Session::default();
+    let first = run(&mut s, "component.insert_design", json!({"path": file}))["occurrence"].as_u64().unwrap();
+    let sub = run(&mut s, "component.create", json!({"name": "Sub", "activate": false}));
+    let (sub, sub_occurrence) = (sub["component"].as_u64().unwrap(), sub["occurrence"].as_u64().unwrap());
+    // The linked part's only occurrence is nested; nothing is placed at the root.
+    s.doc_mut().occurrences.retain(|o| o.id != sub_occurrence);
+    s.doc_mut().occurrences.iter_mut().filter(|o| o.id == first).for_each(|o| o.parent = sub);
+    assert!(!s.doc.occurrences.iter().any(|o| o.parent == 0));
+    let pasted = run(&mut s, "component.insert_design", json!({"path": file, "reuse": true}));
+    assert_eq!(s.doc.links.len(), 1, "the existing link is reused: {pasted}");
+    let id = pasted["occurrence"].as_u64().unwrap();
+    assert!(s.doc.occurrences.iter().find(|o| o.id == id).unwrap().grounded, "the paste is grounded: {pasted}");
+    // Beside a root occurrence a reused paste stays free.
+    let second = run(&mut s, "component.insert_design", json!({"path": file, "reuse": true}))["occurrence"].as_u64().unwrap();
+    assert!(!s.doc.occurrences.iter().find(|o| o.id == second).unwrap().grounded);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 #[test]
 fn relink_repairs_a_moved_source_for_every_instance_in_one_undo_step() {
     let dir = folder("moved");

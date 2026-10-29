@@ -752,7 +752,9 @@ impl Document {
     }
 
     /// Remove a stored parameter; refused while something uses it (the error lists the users).
+    /// A reference parameter (R122) is refused like a change: the sync would recreate it.
     pub fn remove_param(&mut self, name: &str) -> Result<()> {
+        self.refuse_reference_change(name)?;
         if self.param(name).is_none() {
             if self.features.iter().any(|f| f.param_names.iter().any(|n| n == name)) {
                 return Err(DocError::Invalid(format!("`{name}` is a feature's input: delete or edit the feature instead")));

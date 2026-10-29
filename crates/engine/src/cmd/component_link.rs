@@ -185,7 +185,17 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
         let existing = s.doc.links.iter().find(|(_, link)| absolute(&resolve(s.path.as_deref(), &link.path)) == file).map(|(id, _)| *id);
         if let Some(component) = existing {
             let parent = p.get("parent").cloned().unwrap_or_else(|| json!(s.active_component));
-            return super::component::copy_occurrence(s, &json!({"component": component, "parent": parent, "translate": translate}));
+            // With no root occurrence left the copy is the assembly's first part: grounded, as
+            // a fresh paste into an empty assembly is (R123).
+            let first = !s.doc.occurrences.iter().any(|o| o.parent == 0);
+            let mut out = super::component::copy_occurrence(s, &json!({"component": component, "parent": parent, "translate": translate}))?;
+            if first && let Some(id) = out["occurrence"].as_u64() {
+                if let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| o.id == id) {
+                    o.grounded = true;
+                }
+                out["grounded"] = json!(true);
+            }
+            return Ok(out);
         }
     }
     let (design_name, sf, faces) = linked_bodies(&file, s.path.as_deref())?;

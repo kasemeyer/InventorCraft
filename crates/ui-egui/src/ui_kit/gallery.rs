@@ -813,6 +813,11 @@ const ELEMENTS: &[Element] = &[
             text_emphasis(ui, &mut s.checked, &mut false);
         });
     }),
+    element!("text_underline", "dialog:row:Gallery", None, |ui, s| {
+        row(ui, "Gallery", |ui| {
+            text_underline(ui, &mut s.checked, "Underline");
+        });
+    }),
     element!("value_pair_named", "dialog:row:Position", Some("dialog:Distance X"), |ui, s| {
         value_pair(ui, "Position", [&mut s.value, &mut s.second], ["X", "Y"], Some(["Distance X", "Distance Y"]));
     }),

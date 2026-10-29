@@ -241,8 +241,9 @@ fn dimension_draft(app: &SolveApp, entities: Vec<String>, at: Option<Vec2>) -> R
     draft_of(app, sketch, &entities, at, false).or_else(|error| draft_of(app, sketch, &entities, at, true).map_err(|_| error))
 }
 
-/// The draft of one dimension: its parameter (for a driven one, its constraint id, since it
-/// has no parameter), the parameter's expression, and the scratch session it was added in.
+/// The draft of one dimension: its parameter (for a driven one, its constraint id: its
+/// reference parameter has no editable expression), the parameter's expression, and the
+/// scratch session it was added in.
 fn draft_of(app: &SolveApp, sketch: u64, entities: &[String], at: Option<Vec2>, driven: bool) -> Result<(String, String, DimensionDraft), String> {
     let mut scratch = app.session.scratch();
     let mut params = json!({"entities": entities, "driven": driven});
@@ -528,7 +529,8 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
     let draft_centres = draft_sketch.map(|solved| chain_centres(&solved.sketch));
     let mut constraints = sk.constraints.iter().map(|c| (ss, c, false)).collect::<Vec<_>>();
     if let (Some(source), Some((param, _))) = (draft_sketch, draft.as_ref()) {
-        // A driven draft is keyed by its constraint id (it has no parameter).
+        // A driven draft is keyed by its constraint id (draft_of): its reference parameter is
+        // named in the scratch document, but the id is what the draft knows it by.
         let ours = |c: &&solidcraft_engine::sketch::Constraint| c.param.as_deref() == Some(param.as_str()) || (c.driven && c.id == *param);
         constraints.extend(source.sketch.constraints.iter().filter(ours).map(|c| (source, c, true)));
     }
@@ -619,7 +621,13 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
         let frame = Container::new(ui.ctx(), Surface::Toast).tooltip_frame(ui.ctx());
         let mut tip = tip;
         tip.popup = tip.popup.frame(frame);
-        tip.show(|ui| crate::ui_kit::text(ui, &name, crate::ui_kit::Text::Value("dimension_reference", false)));
+        tip.show(|ui| {
+            // A value row takes the width it is offered: offer the name's own width, so the
+            // tip hugs "d6" rather than spanning the tooltip's maximum width.
+            let width = ui.painter().layout_no_wrap(name.clone(), font.clone(), tk.text).size().x.ceil() + 1.0;
+            ui.set_max_width(width);
+            crate::ui_kit::text(ui, &name, crate::ui_kit::Text::Value("dimension_reference", false))
+        });
     }
     edit_box(app, ui.ctx());
 }
@@ -1045,7 +1053,7 @@ mod tests {
     }
 
     /// Placing a dimension the sketch can't take previews it as driven: in the draft it is a
-    /// driven constraint with no parameter, labelled in parentheses (#320).
+    /// driven constraint holding a reference parameter (R122), labelled in parentheses (#320).
     #[test]
     fn an_over_constraining_placement_previews_a_driven_dimension() {
         cancel();

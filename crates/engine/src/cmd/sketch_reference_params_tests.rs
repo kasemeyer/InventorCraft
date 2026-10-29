@@ -85,9 +85,26 @@ fn a_driven_dimension_is_a_reference_parameter_listed_as_one() {
     assert_eq!(row["value"], 70.0, "{row}");
     let d1 = list["parameters"].as_array().unwrap().iter().find(|r| r["name"] == t.d1.as_str()).cloned().unwrap();
     assert!(d1.get("reference").is_none(), "{d1}");
-    // Read-only: a change is refused with a message.
+    // Read-only: a change is refused with a message, and leaves no undo step.
+    let undo = t.s.undo.len();
     let e = t.s.execute("parameters.change", &json!({"name": t.d2, "expression": "30 mm"})).unwrap_err().to_string();
     assert!(e.contains("reference parameter") && e.contains(&t.d2), "{e}");
+    assert_eq!(t.s.doc.param(&t.d2).unwrap().expr, "70 mm");
+    assert_eq!(t.s.undo.len(), undo, "a refused change leaves no undo step");
+}
+
+/// Deleting a reference parameter is refused with the change's message: the sync would
+/// otherwise recreate it at once, so the delete would silently do nothing.
+#[test]
+fn deleting_a_reference_parameter_is_refused() {
+    let mut t = slot();
+    let undo = t.s.undo.len();
+    let change = t.s.execute("parameters.change", &json!({"name": t.d2, "expression": "30 mm"})).unwrap_err().to_string();
+    let e = t.s.execute("parameters.delete", &json!({"name": t.d2})).unwrap_err().to_string();
+    assert_eq!(e, change, "the delete is refused with the change's message");
+    let e = t.s.execute("parameters.change", &json!({"delete": t.d2})).unwrap_err().to_string();
+    assert_eq!(e, change, "so is a delete through parameters.change");
+    assert_eq!(t.s.undo.len(), undo, "a refused delete leaves no undo step");
     assert_eq!(t.s.doc.param(&t.d2).unwrap().expr, "70 mm");
 }
 
