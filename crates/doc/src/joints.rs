@@ -739,12 +739,12 @@ fn link_of(j: &Joint, q: &[f64]) -> Mat {
 }
 
 /// Bodies of a component in the model (its own frame).
-fn component_bodies<'a>(doc: &Document, st: &'a ModelState, component: u64) -> Vec<&'a crate::ModelBody> {
+pub(crate) fn component_bodies<'a>(doc: &Document, st: &'a ModelState, component: u64) -> Vec<&'a crate::ModelBody> {
     st.bodies.iter().filter(|b| doc.model_body_component(b) == component).collect()
 }
 
 /// The component an occurrence places (0 for the root).
-fn component_of(doc: &Document, occ: u64) -> Result<u64> {
+pub(crate) fn component_of(doc: &Document, occ: u64) -> Result<u64> {
     if occ == 0 {
         return Ok(0);
     }
@@ -2064,14 +2064,14 @@ impl Document {
 pub mod cam;
 
 #[path = "joints_edge.rs"]
-mod edge;
+pub(crate) mod edge;
 pub use edge::edge_snap;
 
 #[path = "joints_reach.rs"]
 mod reach;
 
 #[path = "joints_face.rs"]
-mod face;
+pub(crate) mod face;
 pub use face::{end_faces, face_name_at, named_face_spot, pin_end, round_end_at};
 #[path = "joints_relations.rs"]
 mod relations;

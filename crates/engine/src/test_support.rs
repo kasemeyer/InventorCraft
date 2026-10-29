@@ -231,3 +231,61 @@ pub(crate) fn tong(modules: usize) -> Tong {
     b.doc.assembly.joints = b.joints;
     Tong { session: crate::Session::new(b.doc), body, modules: out, hand_dof, joints }
 }
+
+// Task 2 (assembly constraints): the blocks fixture and its helpers.
+
+/// `s.execute(id, &p)`, panicking with the message on error.
+pub(crate) fn run(s: &mut crate::Session, id: &str, p: serde_json::Value) -> serde_json::Value {
+    match s.execute(id, &p) {
+        Ok(v) => v,
+        Err(e) => panic!("{id} {p}: {e}"),
+    }
+}
+
+/// Occurrence id of component `name` (as `cmd/joints_tests.rs` `occ`).
+pub(crate) fn occ(s: &crate::Session, name: &str) -> u64 {
+    let c = s.doc.find_component(name).unwrap_or_else(|| panic!("no component {name}"));
+    s.doc.occurrence_of(c).map(|o| o.id).unwrap_or_else(|| panic!("component {name} is not placed"))
+}
+
+/// A world point of occurrence `name`'s component point `p`.
+pub(crate) fn at(s: &crate::Session, name: &str, p: Vec3) -> Vec3 {
+    apply_point(&solidcraft_doc::joints::occurrence_world(&s.doc, occ(s, name)), p)
+}
+
+/// Components by commands (`component.create {name, grounded}`, then the primitive, then
+/// `component.activate {"component": "root"}`), in this order:
+///   "A" grounded: solid.box {length 100, width 50, height 20, corner [0, 0, 0]};
+///   "B": solid.box {100, 50, 20, corner [0, 0, 40]};
+///   "Plate": solid.box {80, 80, 10, corner [150, -40, 0], name "Plate"}, then
+///            solid.cylinder {diameter 20, height 12, base [190, 0, -1], operation "cut", name "Hole"};
+///   "Pin": solid.cylinder {diameter 20, height 60, base [300, 0, 50], name "PinBody"};
+///   "Drum": solid.cylinder {diameter 30, height 40, base [400, 0, 0]};
+///   "Ball": solid.sphere {diameter 30, center [500, 0, 50]}.
+pub(crate) fn blocks() -> crate::Session {
+    use serde_json::json;
+    let mut s = crate::Session::default();
+    let parts: [(&str, bool, Vec<(&str, serde_json::Value)>); 6] = [
+        ("A", true, vec![("solid.box", json!({"length": 100, "width": 50, "height": 20, "corner": [0, 0, 0]}))]),
+        ("B", false, vec![("solid.box", json!({"length": 100, "width": 50, "height": 20, "corner": [0, 0, 40]}))]),
+        (
+            "Plate",
+            false,
+            vec![
+                ("solid.box", json!({"length": 80, "width": 80, "height": 10, "corner": [150, -40, 0], "name": "Plate"})),
+                ("solid.cylinder", json!({"diameter": 20, "height": 12, "base": [190, 0, -1], "operation": "cut", "name": "Hole"})),
+            ],
+        ),
+        ("Pin", false, vec![("solid.cylinder", json!({"diameter": 20, "height": 60, "base": [300, 0, 50], "name": "PinBody"}))]),
+        ("Drum", false, vec![("solid.cylinder", json!({"diameter": 30, "height": 40, "base": [400, 0, 0]}))]),
+        ("Ball", false, vec![("solid.sphere", json!({"diameter": 30, "center": [500, 0, 50]}))]),
+    ];
+    for (name, grounded, steps) in parts {
+        run(&mut s, "component.create", json!({"name": name, "grounded": grounded}));
+        for (id, p) in steps {
+            run(&mut s, id, p);
+        }
+        run(&mut s, "component.activate", json!({"component": "root"}));
+    }
+    s
+}

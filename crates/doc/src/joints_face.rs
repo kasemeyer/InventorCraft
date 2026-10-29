@@ -19,7 +19,7 @@ const RIM_SAMPLES: usize = 16;
 /// A face found by its persistent name: its body, its index there, the point of it nearest the
 /// pick (the component's coordinates) and the body's offset (a body moved in from another
 /// component keeps its geometry where it was made; the offset places it).
-pub(super) struct NamedFace<'a> {
+pub(crate) struct NamedFace<'a> {
     pub body: &'a ModelBody,
     pub face: usize,
     pub point: Vec3,
@@ -32,7 +32,7 @@ fn gone(name: &str) -> DocError {
 
 /// The face called `name` nearest `pick` (an error when it is gone: a joint must not quietly
 /// attach elsewhere).
-pub(super) fn named_face<'a>(doc: &Document, st: &'a ModelState, pick: Vec3, name: &str) -> Result<NamedFace<'a>> {
+pub(crate) fn named_face<'a>(doc: &Document, st: &'a ModelState, pick: Vec3, name: &str) -> Result<NamedFace<'a>> {
     let hit = crate::name_lookup::locate_face(st, name, pick).ok_or_else(|| gone(name))?;
     let body = st.bodies.get(hit.body).ok_or_else(|| gone(name))?;
     let Some(offset) = doc.model_body_offset(body).copied() else {

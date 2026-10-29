@@ -50,6 +50,7 @@ pub use view_dxf::sketch::exportable as view_dxf_exportable;
 pub use view_navigation::standard_view;
 pub(crate) mod component_link;
 mod config;
+mod constraints;
 mod file;
 mod frame;
 mod inspect;
@@ -291,6 +292,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(component::COMMANDS.iter());
     v.extend(component_link::COMMANDS.iter());
     v.extend(joints::COMMANDS.iter());
+    v.extend(constraints::COMMANDS.iter());
     v.extend(clearance::COMMANDS.iter());
     v.extend(motion::COMMANDS.iter());
     v.extend(config::COMMANDS.iter());

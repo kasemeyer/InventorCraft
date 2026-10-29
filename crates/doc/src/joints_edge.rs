@@ -30,7 +30,7 @@ fn nearest_edge(b: &ModelBody, p: Vec3) -> Option<(usize, f64)> {
 }
 
 /// Edge `i` of `b`: by its name (`None` when the body has no such edge), else the edge at `pick`.
-fn edge_index(b: &ModelBody, name: Option<&str>, pick: Vec3) -> Option<usize> {
+pub(crate) fn edge_index(b: &ModelBody, name: Option<&str>, pick: Vec3) -> Option<usize> {
     match name {
         Some(n) => crate::name_lookup::locate_edge(b, n, pick).ok().map(|h| h.edge),
         None => nearest_edge(b, pick).filter(|(_, d)| *d <= tol(b)).map(|(i, _)| i),
@@ -39,7 +39,7 @@ fn edge_index(b: &ModelBody, name: Option<&str>, pick: Vec3) -> Option<usize> {
 
 /// The planar face beside edge `i` the origin sits on: the named one, else the larger planar face
 /// the edge bounds. Its index, outward normal and centroid.
-fn face_of(b: &ModelBody, i: usize, name: Option<&str>, pick: Vec3) -> Result<(usize, Vec3, Vec3)> {
+pub(crate) fn face_of(b: &ModelBody, i: usize, name: Option<&str>, pick: Vec3) -> Result<(usize, Vec3, Vec3)> {
     let m = b.mesh();
     let beside: Vec<usize> = m.edge_faces.get(i).map(|fs| fs.iter().map(|f| *f as usize).collect()).unwrap_or_default();
     let infos = b.body.faces(tol(b))?;
