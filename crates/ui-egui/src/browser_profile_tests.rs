@@ -194,3 +194,30 @@ fn inventor_history_work_planes_keep_their_eye_and_select_as_planes() {
     let id = h.app.session.doc.features.iter().find(|f| f.name == name).unwrap().id;
     assert_eq!(h.app.session.selection, [Sel::Feature { id }], "ordinary features still select as features");
 }
+
+/// R103: the first part placed into an empty assembly shows the pin of a grounded part; the
+/// second does not; Ground on it toggles the pin. Both profiles.
+#[test]
+fn placed_first_part_shows_the_grounded_pin_under_both_profiles() {
+    let dir = std::env::temp_dir().join(format!("tci-place-pin-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut part = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    part.run("document.new_part", json!({"name":"leg"})).unwrap();
+    part.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Leg"})).unwrap();
+    let leg = dir.join("leg.tcipart");
+    part.run("file.save", json!({"path": leg.to_string_lossy()})).unwrap();
+    for inv in [false, true] {
+        let mut h = if inv { inventor(Assembly) } else { Harness::new() };
+        h.app.run("document.new_assembly", json!({"name":"porch"})).unwrap();
+        let first = h.app.run("component.insert_design", json!({"path": leg.to_string_lossy(), "name":"First"})).unwrap();
+        h.app.run("component.insert_design", json!({"path": leg.to_string_lossy(), "name":"Second"})).unwrap();
+        h.frames(2);
+        let pins: Vec<String> = crate::scenario::handles("badge:pin:").into_iter().map(|(n, _)| n).collect();
+        assert!(pins.iter().any(|n| n == "badge:pin:First:1"), "inventor={inv}: {pins:?} {:?}", labels());
+        assert!(!pins.iter().any(|n| n.starts_with("badge:pin:Second")), "inventor={inv}: {pins:?}");
+        h.app.run("occurrence.ground", json!({"occurrence": first["occurrence"]})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::handles("badge:pin:").is_empty(), "inventor={inv}: Ground toggles the pin off");
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}

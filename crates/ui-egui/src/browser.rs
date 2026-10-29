@@ -511,6 +511,8 @@ pub(crate) fn draw_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
     for b in row.badges {
         let br = Rect::from_center_size(pos2(bx + 6.0, cy), vec2(12.0, 12.0));
         badge(ui.painter(), br, b, t.text_dim);
+        // Tests and the control channel find a row's badges (the pin of a grounded part, R103).
+        crate::scenario::publish_handle(&format!("badge:{b}:{}", row.label), br.center());
         bx += 15.0;
     }
     crate::scenario::publish_handle(&format!("row:{}", row.label), r.center());

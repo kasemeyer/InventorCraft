@@ -348,3 +348,30 @@ fn a_part_that_already_holds_links_opens_with_them() {
     assert_eq!(run(&mut t, "component.links", json!({}))["links"][0]["found"], true);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// R103: the first part placed into an empty assembly is grounded at the origin, as Inventor
+/// does; later placements start free; Ground toggles either; undo restores (#2804 kept).
+#[test]
+fn the_first_placed_design_is_grounded_at_the_origin_and_later_ones_are_free() {
+    let dir = folder("place-grounds-first");
+    let leg = saved_leg(&dir);
+    let mut s = Session::default();
+    run(&mut s, "document.new_assembly", json!({"name": "porch"}));
+    let first = run(&mut s, "component.insert_design", json!({"path": leg}));
+    let second = run(&mut s, "component.insert_design", json!({"path": leg, "translate": [40, 0, 0]}));
+    let occ = |s: &Session, v: &Value| s.doc.occurrences.iter().find(|o| Some(o.id) == v["occurrence"].as_u64()).unwrap().clone();
+    let a = occ(&s, &first);
+    assert!(a.grounded, "the first placed part is grounded");
+    assert_eq!(a.transform, solidcraft_doc::IDENTITY, "grounded at the assembly origin");
+    let b = occ(&s, &second);
+    assert!(!b.grounded, "a later placement starts free");
+    assert_eq!(b.transform[3], [40.0, 0.0, 0.0, 1.0]);
+    // Ground toggles either, as one undo step each.
+    assert_eq!(run(&mut s, "occurrence.ground", json!({"occurrence": a.id}))["grounded"], false);
+    assert_eq!(run(&mut s, "occurrence.ground", json!({"occurrence": b.id}))["grounded"], true);
+    run(&mut s, "edit.undo", json!({}));
+    assert!(!occ(&s, &second).grounded);
+    run(&mut s, "edit.undo", json!({}));
+    assert!(occ(&s, &first).grounded);
+    let _ = std::fs::remove_dir_all(dir);
+}
