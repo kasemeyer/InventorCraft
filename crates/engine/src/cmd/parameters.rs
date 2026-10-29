@@ -18,7 +18,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("parameters.list", "List Parameters", list).icon("list").noundo().doc_only().params(
         "favorites?: bool (only favourites), filter?: all|user|sketch|feature|favorites → parameters (name, expression, unit, value in its unit, \
-         source, feature/input, comment, favorite, uses, used_by, error) and cycles",
+         source, feature/input, comment, favorite, uses, used_by, error; reference: true for a driven dimension's read-only parameter) and cycles",
     ),
     CommandSpec::new("parameters.add", "Add User Parameter", add).icon("new").params("name, expression, unit?, comment?, favorite?: bool"),
     CommandSpec::new("parameters.rename", "Rename Parameter", rename)

@@ -88,7 +88,14 @@ fn step_params(cmd: &str, v: Option<&Value>) -> Result<Vec<Param>> {
             text(p, "expression").filter(|e| !e.trim().is_empty()).ok_or_else(|| bad(cmd, format!("parameter `{name}` needs an `expression`")))?;
         let unit = text(p, "unit").ok_or_else(|| bad(cmd, format!("parameter `{name}`: `unit` must be text")))?;
         let comment = text(p, "comment").ok_or_else(|| bad(cmd, format!("parameter `{name}`: `comment` must be text")))?;
-        out.push(Param { name: name.trim().to_string(), expr: expr.trim().to_string(), unit: unit.trim().to_string(), comment, model: true });
+        out.push(Param {
+            name: name.trim().to_string(),
+            expr: expr.trim().to_string(),
+            unit: unit.trim().to_string(),
+            comment,
+            model: true,
+            reference: false,
+        });
     }
     Ok(out)
 }

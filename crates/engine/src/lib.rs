@@ -1004,6 +1004,11 @@ impl Session {
         let hidden = self.visibility != before.visibility;
         match r {
             Ok((v, live_edit)) => {
+                // Driven dimensions are reference parameters (R122): named, and holding what
+                // they measure, in the same undo step as the edit that changed them.
+                if changed && !self.doc.reference_params_in_sync() {
+                    Arc::make_mut(&mut self.doc).sync_reference_params();
+                }
                 let v = if changed { self.with_created(spec.id, params, &before, v) } else { v };
                 if changed || hidden {
                     let render_only = self.render_only_change(&before);

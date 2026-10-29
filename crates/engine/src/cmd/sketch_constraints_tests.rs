@@ -216,9 +216,12 @@ fn smart_constrain_and_driven_toggle() {
     let did = g["glyphs"].as_array().unwrap().iter().find(|x| x["param"] == d["param"]).unwrap()["id"].as_str().unwrap().to_string();
     let r = run(&mut s, "sketch.toggle_driven", json!({"constraint": did}));
     assert_eq!(r["driven"], true);
-    assert!(s.doc.param(d["param"].as_str().unwrap()).is_none(), "the parameter goes");
+    // R122: it keeps its name, as a reference parameter holding what it measures.
+    let name = d["param"].as_str().unwrap();
+    assert!(s.doc.param(name).is_some_and(|p| p.reference && p.expr == "10 mm"), "{:?}", s.doc.param(name));
     let r = run(&mut s, "sketch.toggle_driven", json!({"constraint": did}));
     assert_eq!(r["driven"], false);
+    assert!(s.doc.param(name).is_some_and(|p| !p.reference && p.expr == "10 mm"), "{:?}", s.doc.param(name));
 }
 
 /// #4691: a point put on a line's midpoint snap is held there (a MidPoint constraint), and one

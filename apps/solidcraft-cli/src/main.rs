@@ -728,6 +728,7 @@ fn cmd_save_stress(args: &[String]) -> Result<(), String> {
         unit: "mm".into(),
         comment: "filler to make the file large".into(),
         model: false,
+        reference: false,
     });
     s.doc_mut().params.extend(filler);
     for r in 0..rounds {

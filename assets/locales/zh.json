@@ -1134,7 +1134,7 @@
   "dialog.computing": "正在计算… {seconds} 秒",
   "dialog.could_not_be_checked": "无法检查",
   "dialog.custom_axis": "↖ 自定义轴",
-  "dialog.dimension_insert_hint": "单击其他驱动尺寸以插入其名称",
+  "dialog.dimension_insert_hint": "单击其他尺寸（驱动或从动）以插入其名称",
   "dialog.dimension_name": "尺寸：{name}",
   "dialog.edit_title": "编辑 {title}",
   "dialog.select": "↖ 选择",

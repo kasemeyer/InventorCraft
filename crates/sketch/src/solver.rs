@@ -668,10 +668,34 @@ pub fn measure_dimension(sk: &Sketch, k: &ConstraintKind) -> Option<f64> {
 /// One residual block: implicit arc radius equality, a user constraint, or a tangency at a known
 /// touch point (better conditioned than the distance form when an end point is on the curve).
 enum Block<'a> {
-    Closure { a: usize, b: usize },
-    Arc { c: usize, a: usize, b: usize },
+    Closure {
+        a: usize,
+        b: usize,
+    },
+    Arc {
+        c: usize,
+        a: usize,
+        b: usize,
+    },
     User(usize, &'a ConstraintKind),
     TangentAt(usize, &'a ConstraintKind, usize),
+    /// A driving dimension whose value follows driven ones ([`crate::DimEquation`]): its own
+    /// residual, with the value the driven dimensions' live measurements give.
+    Equate(usize, &'a ConstraintKind, Target),
+}
+
+/// `constant + Σ coefficient · measured(constraint index)`: the value an equated dimension
+/// holds.
+#[derive(Clone, Debug)]
+struct Target {
+    constant: f64,
+    terms: Vec<(usize, f64)>,
+}
+
+impl Target {
+    fn value(&self, s: &State) -> f64 {
+        self.terms.iter().fold(self.constant, |acc, (ci, k)| acc + k * s.sk.constraints.get(*ci).and_then(|c| measure(s, &c.kind)).unwrap_or(0.0))
+    }
 }
 
 fn copy_block<'a>(b: &Block<'a>) -> Block<'a> {
@@ -680,6 +704,7 @@ fn copy_block<'a>(b: &Block<'a>) -> Block<'a> {
         Block::Arc { c, a, b } => Block::Arc { c: *c, a: *a, b: *b },
         Block::User(i, k) => Block::User(*i, k),
         Block::TangentAt(i, k, p) => Block::TangentAt(*i, k, *p),
+        Block::Equate(i, k, t) => Block::Equate(*i, k, t.clone()),
     }
 }
 
@@ -696,6 +721,11 @@ fn block_residuals(s: &State, b: &Block, out: &mut Vec<f64>) {
             out.push(cc.dist(s.p(*b)) - cc.dist(s.p(*a)));
         }
         Block::User(_, k) => residuals(s, k, out),
+        Block::Equate(_, k, t) => {
+            let mut held = (*k).clone();
+            held.set_value(t.value(s));
+            residuals(s, &held, out);
+        }
         Block::TangentAt(_, k, p) => {
             let ConstraintKind::Tangent { a, b } = **k else { return };
             let pt = s.p(*p);
@@ -824,6 +854,16 @@ fn block_refs(sk: &Sketch, b: &Block) -> Vec<Ref> {
     match b {
         Block::Closure { a, b } => vec![P(*a), P(*b)],
         Block::Arc { c, a, b } => vec![P(*c), P(*a), P(*b)],
+        // The driving dimension's own references, and those of every driven one it follows.
+        Block::Equate(ci, k, t) => {
+            let mut refs = block_refs(sk, &Block::User(*ci, k));
+            for (di, _) in &t.terms {
+                if let Some(c) = sk.constraints.get(*di) {
+                    refs.extend(block_refs(sk, &Block::User(*di, &c.kind)));
+                }
+            }
+            refs
+        }
         Block::User(_, k) => match **k {
             PatternPoint { p, q, center, directions, .. } => {
                 vec![P(p), P(q)].into_iter().chain(center.map(P)).chain(directions.into_iter().flatten().map(|(l, _)| L(l))).collect()
@@ -1496,6 +1536,18 @@ fn initial_x(sk: &Sketch, lay: &Layout) -> Vec<f64> {
     x
 }
 
+/// The value the dimension `id` follows, when the sketch's equations equate it with driven
+/// dimensions that are all there (an equation naming a removed one is ignored).
+fn equation_target(sk: &Sketch, id: &str) -> Option<Target> {
+    let eq = sk.equations.0.iter().find(|e| e.driving == id)?;
+    let terms = eq
+        .terms
+        .iter()
+        .map(|(d, k)| sk.constraints.iter().position(|c| c.id == *d && c.driven && c.kind.value().is_some()).map(|i| (i, *k)))
+        .collect::<Option<Vec<_>>>()?;
+    Some(Target { constant: eq.constant, terms })
+}
+
 /// The solve's blocks in order (the curves' own relations, then the driving constraints in
 /// constraint order) with the variables each reads, and per block whether it reads a constant
 /// point.
@@ -1514,6 +1566,10 @@ fn build_blocks<'a>(sk: &'a Sketch, lay: &Layout, on_curve: &[(usize, usize)]) -
     }
     for (i, c) in sk.constraints.iter().enumerate() {
         if c.driven || matches!(c.kind, ConstraintKind::OffsetDistance { .. }) || sk.follows_its_source(&c.kind) {
+            continue;
+        }
+        if let Some(t) = equation_target(sk, &c.id) {
+            raw.push(Block::Equate(i, &c.kind, t));
             continue;
         }
         raw.push(match touch_point(sk, &c.kind, on_curve) {
@@ -2215,7 +2271,8 @@ fn solve_inner(
         max_residual = max_residual.max(max_abs(r));
         for (row, v) in r.iter().enumerate() {
             if !(v.abs() < ACCEPT)
-                && let Some((Block::User(ci, _) | Block::TangentAt(ci, _, _), _)) = owner.get(row).and_then(|bi| blocks.get(*bi))
+                && let Some((Block::User(ci, _) | Block::TangentAt(ci, _, _) | Block::Equate(ci, _, _), _)) =
+                    owner.get(row).and_then(|bi| blocks.get(*bi))
                 && let Some(c) = sk.constraints.get(*ci)
                 && !failing.contains(&c.id)
             {
@@ -2405,10 +2462,13 @@ fn solve_inner(
 
 /// Geometry can also be finalized by feasible cursor motion, without another solve.
 /// Both paths must measure reference dimensions from the pose they publish.
+/// Equated driving dimensions ([`crate::DimEquation`]) take the value they measure too: the
+/// one their driven dimensions gave them.
 fn refresh_driven_dimensions(sk: &mut Sketch) {
     let fixed_lay = Layout { pvar: vec![None; sk.points.len()], rvar: vec![None; sk.curves.len()], n: 0, points: 0, slide: Vec::new() };
+    let equated = |c: &crate::Constraint| sk.equations.0.iter().any(|e| e.driving == c.id) && equation_target(sk, &c.id).is_some();
     let measured: Vec<Option<f64>> =
-        sk.constraints.iter().map(|c| if c.driven { measure(&State { sk, lay: &fixed_lay, x: &[] }, &c.kind) } else { None }).collect();
+        sk.constraints.iter().map(|c| if c.driven || equated(c) { measure(&State { sk, lay: &fixed_lay, x: &[] }, &c.kind) } else { None }).collect();
     for (c, m) in sk.constraints.iter_mut().zip(measured) {
         if let Some(v) = m
             && v.is_finite()

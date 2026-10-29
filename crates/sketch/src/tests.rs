@@ -1052,3 +1052,42 @@ fn profiles_crossing_next_to_an_overshooting_end_keeps_the_corner_beside_it() {
     assert_eq!(areas.len(), 1, "{areas:?}");
     assert!(areas.iter().all(|a| (a - (2.0 - x)).abs() < 1e-4), "{areas:?}");
 }
+
+/// R122: a driving dimension equated with a driven one follows what the driven one measures,
+/// in the same solve: a slot dimensioned from the left (driving, `d1 = d2`) and from the right
+/// (driven `d2`) is centred, and stays centred when the width changes.
+#[test]
+fn a_driving_dimension_equated_with_a_driven_one_centres_the_slot() {
+    use ConstraintKind::*;
+    let mut sk = Sketch::new();
+    let r = sk.add_point(v(100.0, 0.0), None).unwrap();
+    let s1 = sk.add_point(v(10.0, 25.0), None).unwrap();
+    let s2 = sk.add_point(v(30.0, 25.0), None).unwrap();
+    sk.add_line_pts(s1, s2, None).unwrap();
+    let width = sk.add_constraint(DistanceX { p: 0, q: r, value: 100.0 }, None).unwrap();
+    sk.add_constraint(DistanceY { p: 0, q: r, value: 0.0 }, None).unwrap();
+    sk.add_constraint(DistanceX { p: s1, q: s2, value: 20.0 }, None).unwrap();
+    sk.add_constraint(DistanceY { p: 0, q: s1, value: 25.0 }, None).unwrap();
+    sk.add_constraint(DistanceY { p: 0, q: s2, value: 25.0 }, None).unwrap();
+    let d1 = sk.add_constraint(DistanceX { p: 0, q: s1, value: 10.0 }, None).unwrap();
+    let d2 = sk.add_constraint(DistanceX { p: s2, q: r, value: 70.0 }, None).unwrap();
+    sk.constraints.iter_mut().find(|c| c.id == d2).unwrap().driven = true;
+    let plain = solve(&mut sk);
+    assert!(plain.ok());
+    sk.equations = DimEquations(vec![DimEquation { driving: d1.clone(), constant: 0.0, terms: vec![(d2.clone(), 1.0)] }]);
+    let value = |sk: &Sketch, id: &str| sk.constraints.iter().find(|c| c.id == id).and_then(|c| c.kind.value()).unwrap();
+    for w in [100.0, 140.0, 61.0] {
+        sk.constraints.iter_mut().find(|c| c.id == width).unwrap().kind.set_value(w);
+        let rep = solve(&mut sk);
+        assert!(rep.ok(), "{rep:?}");
+        let half = (w - 20.0) / 2.0;
+        assert!((sk.points[s1].pos.x - half).abs() < 1e-6, "{w}: {:?}", sk.points[s1].pos);
+        assert!((value(&sk, &d1) - value(&sk, &d2)).abs() < 1e-6);
+        assert!((value(&sk, &d1) - half).abs() < 1e-6, "the driving value is written back");
+        assert_eq!(rep.dof, plain.dof, "the equation takes the driving dimension's place");
+    }
+    // `d1 = d2 + 4`.
+    sk.equations.0[0].constant = 4.0;
+    assert!(solve(&mut sk).ok());
+    assert!((value(&sk, &d1) - value(&sk, &d2) - 4.0).abs() < 1e-6);
+}

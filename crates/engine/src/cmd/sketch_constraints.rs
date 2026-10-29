@@ -390,9 +390,10 @@ fn toggle_driven(s: &mut Session, p: &Value) -> Result<Value> {
             return Ok(driven);
         }
         let slot = sk.constraints.iter_mut().find(|c| c.id == cid).ok_or_else(|| bad(cmd, "constraint"))?;
+        // A dimension keeps its parameter name either way (R122): driven, it is a reference
+        // parameter holding what it measures; driving, its value is what it measured.
         if driven {
             slot.driven = true;
-            slot.param = None;
         } else {
             let (unit, e) = if c.kind.is_angle() {
                 ("deg", format!("{} deg", (v.to_degrees() * 1e6).round() / 1e6))
@@ -400,7 +401,14 @@ fn toggle_driven(s: &mut Session, p: &Value) -> Result<Value> {
                 ("mm", format!("{} mm", (v * 1e6).round() / 1e6))
             };
             slot.driven = false;
-            slot.param = Some(doc.new_model_param(&e, unit));
+            match slot.param.as_deref().and_then(|n| doc.params.iter_mut().find(|p| p.name == n)) {
+                Some(p) => {
+                    p.expr = e;
+                    p.unit = unit.into();
+                    p.reference = false;
+                }
+                None => slot.param = Some(doc.new_model_param(&e, unit)),
+            }
             before = None;
         }
         Ok(driven)
@@ -562,3 +570,7 @@ mod fuzz;
 #[cfg(test)]
 #[path = "sketch_perf_tests.rs"]
 mod perf;
+
+#[cfg(test)]
+#[path = "sketch_reference_params_tests.rs"]
+mod reference_params_tests;

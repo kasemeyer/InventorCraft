@@ -1134,7 +1134,7 @@
   "dialog.computing": "Computing… {seconds} s",
   "dialog.could_not_be_checked": "could not be checked",
   "dialog.custom_axis": "↖ Custom Axis",
-  "dialog.dimension_insert_hint": "Click another driving dimension to insert its name",
+  "dialog.dimension_insert_hint": "Click another dimension, driving or driven, to insert its name",
   "dialog.dimension_name": "Dimension: {name}",
   "dialog.edit_title": "EDIT {title}",
   "dialog.select": "↖ Select",

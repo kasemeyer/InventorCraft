@@ -109,6 +109,8 @@ mod material_card_review;
 mod material_editor;
 #[cfg(test)]
 mod origin_auto_hide_tests;
+#[cfg(test)]
+mod sketch_dimension_reference_tests;
 
 #[cfg(test)]
 mod measurement_ui_tests;

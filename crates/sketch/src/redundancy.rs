@@ -34,7 +34,7 @@ pub const CONSISTENT: f64 = 1e-6;
 /// The constraint a block stands for.
 pub(super) fn block_constraint(b: &Block) -> Option<usize> {
     match b {
-        Block::User(ci, _) | Block::TangentAt(ci, _, _) => Some(*ci),
+        Block::User(ci, _) | Block::TangentAt(ci, _, _) | Block::Equate(ci, _, _) => Some(*ci),
         Block::Closure { .. } | Block::Arc { .. } => None,
     }
 }

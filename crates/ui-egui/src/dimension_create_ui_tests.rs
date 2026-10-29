@@ -561,13 +561,16 @@ fn an_over_constraining_dimension_is_placed_as_a_driven_one() {
     h.step(&json!({"click":{"world":[10,6,0]}})).unwrap();
     assert!(!crate::dim_view::editing(), "a driven dimension has no value to edit");
     assert_eq!(h.app.session.undo.len(), undo + 1);
-    assert_eq!(h.app.session.doc.params.len(), params, "a driven dimension adds no parameter");
+    // R122: a driven dimension adds a read-only reference parameter.
+    assert_eq!(h.app.session.doc.params.len(), params + 1, "a driven dimension adds its reference parameter");
     let state = h.app.session.world_state();
     let solved = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
     assert!(solved.report.ok());
     let dims: Vec<_> = solved.sketch.constraints.iter().filter(|c| c.kind.is_dimension()).collect();
     assert_eq!(dims.len(), 2);
-    assert_eq!(dims.iter().filter(|c| c.driven && c.param.is_none()).count(), 1, "{dims:?}");
+    let reference =
+        |c: &&&solidcraft_engine::sketch::Constraint| c.driven && c.param.as_deref().is_some_and(|p| h.app.session.doc.is_reference_param(p));
+    assert_eq!(dims.iter().filter(reference).count(), 1, "{dims:?}");
     h.app.run("edit.undo", json!({})).unwrap();
     assert_eq!(h.app.session.doc.to_json(), original);
 }

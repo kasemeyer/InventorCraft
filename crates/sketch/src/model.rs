@@ -646,6 +646,33 @@ pub struct Sketch {
     /// Display options (Sketch Palette).
     #[serde(default, skip_serializing_if = "is_default_view")]
     pub view: SketchView,
+    /// Driving dimensions whose value follows driven (reference) ones (R122): derived from the
+    /// parameter expressions before each solve, never saved.
+    #[serde(skip)]
+    pub equations: DimEquations,
+}
+
+/// A driving dimension held equal to an affine function of driven dimensions' live
+/// measurements: `value(driving) = constant + Σ coefficient · measured(driven)` (mm or radians).
+/// The document derives it from the driving dimension's expression (R122): `d1 = d2` with d2
+/// driven makes d1 follow what d2 measures, in the same solve.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DimEquation {
+    /// The driving dimension's constraint id.
+    pub driving: String,
+    pub constant: f64,
+    /// (driven dimension's constraint id, coefficient).
+    pub terms: Vec<(String, f64)>,
+}
+
+/// The sketch's [`DimEquation`]s. Derived state: two sketches that differ only here are equal.
+#[derive(Clone, Debug, Default)]
+pub struct DimEquations(pub Vec<DimEquation>);
+
+impl PartialEq for DimEquations {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
 }
 
 fn is_default_view(v: &SketchView) -> bool {
@@ -671,6 +698,7 @@ impl Sketch {
             wires: Vec::new(),
             counters: Default::default(),
             view: SketchView::default(),
+            equations: DimEquations::default(),
         }
     }
 

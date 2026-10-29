@@ -94,6 +94,9 @@ pub struct ParamRow {
     pub comment: String,
     /// "user", "sketch" (a dimension) or "feature".
     pub source: &'static str,
+    /// A reference parameter: a driven dimension's measured value (R122), read-only.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub reference: bool,
     /// For feature inputs: the feature and the input's label.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub feature: Option<String>,
@@ -295,6 +298,9 @@ impl Document {
             }
             if let Some(p) = next.params.iter_mut().find(|p| p.name == *name) {
                 if p.expr != expression.trim() {
+                    if p.reference {
+                        return self.refuse_reference_change(name);
+                    }
                     changed.insert(name.clone());
                 }
                 p.expr = expression.trim().to_string();
@@ -348,6 +354,7 @@ impl Document {
                 error: errs.get(&p.name).cloned(),
                 comment: p.comment.clone(),
                 source: if p.model { "sketch" } else { "user" },
+                reference: p.reference,
                 feature: None,
                 input: None,
                 favorite: self.favorites.contains(&p.name),
@@ -368,6 +375,7 @@ impl Document {
                     error: errs.get(name).cloned(),
                     comment: self.param_comments.get(name).cloned().unwrap_or_default(),
                     source: "feature",
+                    reference: false,
                     feature: Some(f.name.clone()),
                     input: Some(label),
                     favorite: self.favorites.contains(name),
@@ -540,6 +548,7 @@ impl Document {
                     unit,
                     comment: comment.unwrap_or_default().into(),
                     model: false,
+                    reference: false,
                 });
             }
         }
@@ -594,7 +603,7 @@ impl ParamUser {
 }
 
 /// Length unit of the document in mm (bare numbers of unit-less parameters next to lengths).
-fn doc_len(units: &str) -> f64 {
+pub(crate) fn doc_len(units: &str) -> f64 {
     match expr::unit_info(units) {
         Some((Kind::Length, s)) => s,
         _ => 1.0,

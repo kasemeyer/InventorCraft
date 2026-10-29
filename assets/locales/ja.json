@@ -1134,7 +1134,7 @@
   "dialog.computing": "計算中… {seconds} 秒",
   "dialog.could_not_be_checked": "チェックできません",
   "dialog.custom_axis": "↖ カスタム軸",
-  "dialog.dimension_insert_hint": "別の駆動寸法をクリックして名前を挿入",
+  "dialog.dimension_insert_hint": "別の寸法（駆動または従動）をクリックして名前を挿入",
   "dialog.dimension_name": "寸法: {name}",
   "dialog.edit_title": "{title}を編集",
   "dialog.select": "↖ 選択",

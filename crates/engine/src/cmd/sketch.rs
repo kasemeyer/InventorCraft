@@ -2465,6 +2465,7 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
             if let Some(c) = sk.constraints.iter_mut().find(|c| c.id == id) {
                 c.driven = true;
             }
+            new_id = id;
             before = None;
             return Ok((String::new(), name, measured(is_angle, cur)));
         }
@@ -2520,7 +2521,12 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
     // Report what the dimension measures once the sketch is solved, not the geometry before.
     let current = solved_measure(s, p, cmd).unwrap_or(current);
     if driven {
-        return Ok(json!({"param": Value::Null, "driven": true, "type": kind_name, "measured": current.0, "unit": current.1, "sketch": info}));
+        // Its reference parameter (R122).
+        s.doc_mut().sync_reference_params();
+        let param = s.active_sketch.and_then(|id| s.doc.sketch(id).ok()).and_then(|sk| sk.constraints.iter().find(|c| c.id == new_id)?.param.clone());
+        return Ok(
+            json!({"param": param, "reference": true, "driven": true, "type": kind_name, "measured": current.0, "unit": current.1, "sketch": info}),
+        );
     }
     // A dimension the sketch already determines cannot drive it: it is refused, or with
     // `if_redundant: "driven"` placed as a driven (reference) dimension instead.

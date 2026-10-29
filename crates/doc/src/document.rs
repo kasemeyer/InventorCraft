@@ -28,6 +28,11 @@ pub struct Param {
     /// Created by a dimension or feature (not by the user).
     #[serde(default)]
     pub model: bool,
+    /// A reference parameter (R122): a driven dimension's name. Its expression is the value the
+    /// dimension measured at its last solve, written back by [`Document::sync_reference_params`];
+    /// it cannot be changed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reference: bool,
 }
 
 impl Param {
@@ -3108,10 +3113,12 @@ impl Document {
     /// Read a design file's JSON (any format this build knows; older ones are upgraded).
     pub fn from_json(s: &str) -> Result<Document> {
         crate::render_resources::check_json_budget(s)?;
-        let d = crate::format::read(s)?;
+        let mut d = crate::format::read(s)?;
         if d.features.len() > MAX_FEATURES || d.params.len() > MAX_PARAMS {
             return Err(DocError::Invalid("document too large".into()));
         }
+        // A design saved before R122 has driven dimensions without names.
+        d.sync_reference_params();
         Ok(d)
     }
     pub fn to_json(&self) -> String {
@@ -3438,6 +3445,9 @@ impl Document {
     /// Add or change a parameter. Fails if the result would not evaluate. A new parameter
     /// without a unit takes the unit of its value (mm, deg or none).
     pub fn set_param(&mut self, name: &str, expr_s: &str, unit: Option<&str>, comment: Option<&str>) -> Result<()> {
+        if self.param(name).is_some_and(|p| p.reference && p.expr != expr_s.trim()) {
+            self.refuse_reference_change(name)?;
+        }
         if let Some(p) = Self::param_name_problem(name) {
             return Err(DocError::Invalid(p));
         }
@@ -3483,6 +3493,7 @@ impl Document {
                     unit: inferred,
                     comment: comment.unwrap_or_default().into(),
                     model: false,
+                    reference: false,
                 })
             }
         }
@@ -3497,7 +3508,7 @@ impl Document {
     /// Create the next free model parameter `dN` with the given expression and unit.
     pub fn new_model_param(&mut self, expr_s: &str, unit: &str) -> String {
         let name = self.next_d_name();
-        self.params.push(Param { name: name.clone(), expr: expr_s.into(), unit: unit.into(), comment: String::new(), model: true });
+        self.params.push(Param { name: name.clone(), expr: expr_s.into(), unit: unit.into(), comment: String::new(), model: true, reference: false });
         name
     }
 
@@ -3605,7 +3616,12 @@ impl Document {
     /// parameters (in place).
     pub fn apply_dimension_values(&self, vals: &std::collections::BTreeMap<String, expr::Value>, sk: &mut Sketch) -> Result<()> {
         self.apply_point_values(vals, sk)?;
+        sk.equations = self.dimension_equations(vals, sk);
         for c in &mut sk.constraints {
+            // A driven dimension's parameter reports what it measures (R122).
+            if c.driven {
+                continue;
+            }
             if let Some(p) = &c.param {
                 let kind = if c.kind.is_angle() { Kind::Angle } else { Kind::Length };
                 let v = vals.get(p).copied().ok_or_else(|| DocError::Unknown(format!("parameter `{p}`")))?.to_kind(kind)?;

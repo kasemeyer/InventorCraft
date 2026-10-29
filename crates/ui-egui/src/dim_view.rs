@@ -28,7 +28,9 @@ use crate::viewport::Proj;
 #[derive(Clone, Debug)]
 struct Drawn {
     id: String,
+    /// Its parameter: a driving dimension's, or a driven one's reference parameter (R122).
     param: Option<String>,
+    driven: bool,
     text: Rect,
     segs: Vec<[Pos2; 2]>,
     /// Text centre in sketch coordinates.
@@ -399,7 +401,7 @@ fn open_editor(app: &mut SolveApp, id: Option<String>) -> bool {
     let Some(d) = id.and_then(|id| DRAWN.with(|d| d.borrow().iter().find(|x| x.id == id).cloned())) else {
         return false;
     };
-    let Some(param) = d.param else {
+    let Some(param) = d.param.filter(|_| !d.driven) else {
         app.set_status("A driven dimension measures the sketch; it has no value to edit", false);
         return true;
     };
@@ -563,7 +565,8 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
             tk.dimension
         };
         let galley = painter.layout_no_wrap(
-            label(&c.kind, expr, c.driven, &app.session.doc.units, crate::prefs::shown_length_decimals(app)),
+            // A driven dimension's reference parameter is its measured value: no `fx:`.
+            label(&c.kind, expr.filter(|_| !c.driven), c.driven, &app.session.doc.units, crate::prefs::shown_length_decimals(app)),
             font.clone(),
             col,
         );
@@ -605,11 +608,27 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
                 }
             });
         } else if !is_draft {
-            drawn.push(Drawn { id: c.id.clone(), param: c.param.clone(), text: r, segs, at: lay.text });
+            drawn.push(Drawn { id: c.id.clone(), param: c.param.clone(), driven: c.driven, text: r, segs, at: lay.text });
         }
     }
     DRAWN.with(|d| *d.borrow_mut() = drawn);
+    // While a value is being edited, the dimension under the pointer names its parameter (the
+    // name a click inserts), as Inventor's tooltip does.
+    if let Some(name) = hover.as_deref().and_then(reference_tip) {
+        let tip = egui::Tooltip::always_open(ui.ctx().clone(), ui.layer_id(), egui::Id::new("sc_dim_reference_tip"), egui::PopupAnchor::Pointer);
+        let frame = Container::new(ui.ctx(), Surface::Toast).tooltip_frame(ui.ctx());
+        let mut tip = tip;
+        tip.popup = tip.popup.frame(frame);
+        tip.show(|ui| crate::ui_kit::text(ui, &name, crate::ui_kit::Text::Value("dimension_reference", false)));
+    }
     edit_box(app, ui.ctx());
+}
+
+/// The tooltip over dimension `id` while a value is being edited: its parameter name (the
+/// name a click inserts). None outside the edit, and over the edited dimension itself.
+pub fn reference_tip(id: &str) -> Option<String> {
+    let editing = EDIT.with(|e| e.borrow().as_ref().map(|e| e.param.clone()))?;
+    DRAWN.with(|d| d.borrow().iter().find(|x| x.id == id).and_then(|x| x.param.clone())).filter(|p| *p != editing)
 }
 
 /// A point a dimension measures (for the shape it belongs to).
@@ -684,16 +703,17 @@ fn insert_reference(ctx: &egui::Context, edit: &mut Edit, name: &str) {
     }
 }
 
-/// Consume dimension clicks while editing: a click on another driving dimension inserts its
-/// name at the cursor (replacing selected text), keeping what was typed. The second click of a
-/// double-click on the same dimension does not insert it again.
+/// Consume dimension clicks while editing: a click on another dimension, driving or driven
+/// (its reference parameter, R122), inserts its name at the cursor (replacing selected text),
+/// keeping what was typed. The click neither ends the edit nor starts a drag. The second click
+/// of a double-click on the same dimension does not insert it again.
 pub fn pick_reference(ctx: &egui::Context, pos: Pos2, double: bool) -> bool {
     EDIT.with(|editor| {
         let mut editor = editor.borrow_mut();
         let Some(edit) = editor.as_mut() else { return false };
         let Some(id) = hit(pos) else { return false };
         let param = DRAWN.with(|d| d.borrow().iter().find(|d| d.id == id).and_then(|d| d.param.clone()));
-        // Self references and driven dimensions cannot supply a reference.
+        // A dimension cannot reference itself.
         if let Some(param) = param.filter(|p| p != &edit.param) {
             let now = ctx.input(|i| i.time);
             let delay = ctx.options(|o| o.input_options.max_double_click_delay);
@@ -832,6 +852,19 @@ fn clear_picks(app: &mut SolveApp) {
         tool.picks.clear();
         tool.point_picks.clear();
     }
+}
+
+/// Where a dimension's text was drawn last frame (sketch coordinates), by id or parameter
+/// (tests).
+#[cfg(test)]
+pub fn drawn_at(key: &str) -> Option<Vec2> {
+    DRAWN.with(|d| d.borrow().iter().find(|x| x.id == key || x.param.as_deref() == Some(key)).map(|x| x.at))
+}
+
+/// The open editor's text (tests).
+#[cfg(test)]
+pub fn edit_text() -> Option<String> {
+    EDIT.with(|e| e.borrow().as_ref().map(|e| e.expr.clone()))
 }
 
 /// Is the inline editor open (it has the keyboard)?
@@ -1030,7 +1063,8 @@ mod tests {
         assert!(draft.driven);
         let sk = &draft.preview.sketch(draft.sketch).unwrap().sketch;
         let c = sk.constraints.iter().find(|c| c.id == id).unwrap();
-        assert!(c.driven && c.param.is_none(), "{c:?}");
+        // R122: a driven dimension is a reference parameter.
+        assert!(c.driven && c.param.as_deref().is_some_and(|p| draft.preview_doc.is_reference_param(p)), "{c:?}");
         assert!(matches!(c.kind, ConstraintKind::Length {value,..} if (value-20.).abs()<1e-6));
         assert_eq!(label(&c.kind, None, c.driven, "mm", 2), "(20.00)");
         assert!(!editing());

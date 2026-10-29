@@ -57,6 +57,7 @@ pub mod pipe_thread_catalog;
 mod points;
 mod profile_refs;
 pub mod progress;
+mod reference_params;
 mod thread_catalog;
 pub use thread_catalog::{TappedThread, TappedThreadFamily, parse_tapped_thread, tapped_thread_sizes};
 mod walk;
