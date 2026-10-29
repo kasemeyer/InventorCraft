@@ -79,12 +79,17 @@ fn dim_type_item(app: &SolveApp, rows: &[(&str, &str)], chosen: Option<&str>, di
 /// A placed dimension's Dimension Type rows and its type now.
 fn placed_types(app: &SolveApp, dim: u64) -> (&'static [(&'static str, &'static str)], Option<&'static str>) {
     use crate::drawing_dim_tool::{LINEAR_TYPES, RADIAL_TYPES};
-    match app.session.doc.drawing.as_deref().and_then(|m| solidcraft_engine::drawing::dimension_kind(m, dim)) {
-        Some("linear_h") => (&LINEAR_TYPES, Some("horizontal")),
-        Some("linear_v") => (&LINEAR_TYPES, Some("vertical")),
-        Some("aligned") => (&LINEAR_TYPES, Some("aligned")),
-        Some(k @ ("radius" | "diameter")) => (&RADIAL_TYPES, Some(k)),
-        _ => (&[], None),
+    match app
+        .session
+        .doc
+        .drawing
+        .as_deref()
+        .and_then(|m| solidcraft_engine::drawing::dimension_kind(m, dim))
+        .and_then(crate::drawing_dim_tool::type_of_kind)
+    {
+        Some(ty @ ("radius" | "diameter")) => (&RADIAL_TYPES, Some(ty)),
+        Some(ty) => (&LINEAR_TYPES, Some(ty)),
+        None => (&[], None),
     }
 }
 

@@ -30,7 +30,8 @@ pub static COMMANDS: &[CommandSpec] = &[
          view: a view id; picks: one or two of {edge, segment?, snap?} or {at: [x, y], snap?}; placement: [x, y] in inches → handle, kind, text",
     ),
     CommandSpec::new("drawing.dim.aligned", "Aligned Dimension", aligned).icon("dimension").params(
-        "A dimension along one straight edge or between two picks. view: a view id; picks: one or two of {edge, segment?, snap?} or {at: [x, y], snap?}; \
+        "A dimension along one straight edge or between two picks (two parallel lines: the distance across them; two lines that cross \
+         or are collinear are refused). view: a view id; picks: one or two of {edge, segment?, snap?} or {at: [x, y], snap?}; \
          placement: [x, y] in inches → handle, kind, text",
     ),
     CommandSpec::new("drawing.dim.diameter", "Diameter Dimension", diameter).icon("dimension").params(

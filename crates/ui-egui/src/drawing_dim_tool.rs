@@ -68,6 +68,9 @@ pub(crate) struct DimTool {
     pub kind: Option<String>,
     /// What the live dimension says now.
     pub live: Option<String>,
+    /// The live dimension's type as Dimension Type names it (`type_of_kind`), so the list checks
+    /// it while no type is chosen.
+    pub live_kind: Option<&'static str>,
     /// The cell (0.05 in steps) and pick count the live dimension was computed for.
     preview_key: Option<([i64; 2], usize)>,
 }
@@ -77,6 +80,18 @@ pub(crate) struct DimTool {
 pub(crate) const LINEAR_TYPES: [(&str, &str); 3] = [("aligned", "Aligned"), ("horizontal", "Horizontal"), ("vertical", "Vertical")];
 /// Dimension Type's rows for a circle or an arc.
 pub(crate) const RADIAL_TYPES: [(&str, &str); 2] = [("radius", "Radius"), ("diameter", "Diameter")];
+
+/// The Dimension Type row for an engine dimension kind (`drawing::dimension_kind`).
+pub(crate) fn type_of_kind(kind: &str) -> Option<&'static str> {
+    match kind {
+        "linear_h" => Some("horizontal"),
+        "linear_v" => Some("vertical"),
+        "aligned" => Some("aligned"),
+        "radius" => Some("radius"),
+        "diameter" => Some("diameter"),
+        _ => None,
+    }
+}
 
 /// The Edit Dimension panel (`DrawingPanel::Dimension`).
 #[derive(Clone, Debug, PartialEq)]
@@ -227,14 +242,15 @@ pub(crate) fn input(app: &mut SolveApp, rect: Rect, resp: &Response, input: &Cam
 }
 
 /// The Dimension Type rows the running tool's list shows now (the picks make a dimension with
-/// one more click), and the one chosen.
+/// one more click), and the one checked: the chosen type, or with none chosen the live
+/// dimension's type.
 pub(crate) fn type_choices(app: &SolveApp) -> Option<(&'static [(&'static str, &'static str)], Option<&str>)> {
     let t = tool(app).filter(|t| t.moving.is_none() && ready(t))?;
     let rows: &'static [(&str, &str)] = match t.picks.as_slice() {
         [(_, CurveKind::Circle | CurveKind::Arc)] => &RADIAL_TYPES,
         _ => &LINEAR_TYPES,
     };
-    Some((rows, t.kind.as_deref()))
+    Some((rows, t.kind.as_deref().or(t.live_kind)))
 }
 
 /// Dimension Type ▸ `ty` while the tool has its picks: the live dimension turns to it at once
@@ -320,6 +336,7 @@ fn place(app: &mut SolveApp, at: [f64; 2]) {
         t.picks.clear();
         t.kind = None;
         t.live = None;
+        t.live_kind = None;
         t.preview_key = None;
         t.last_sent = Some(params);
         t.placed.extend(handle);
@@ -344,10 +361,12 @@ fn refresh(app: &mut SolveApp, at: [f64; 2], make: impl FnOnce(&mut solidcraft_e
     let made = make(&mut scratch);
     let curves = made.map(|h| curves_of(&scratch, h)).unwrap_or_default();
     let live = made.and_then(|h| solidcraft_engine::drawing::dimension_text(scratch.doc.drawing.as_deref()?, h));
+    let live_kind = made.and_then(|h| solidcraft_engine::drawing::dimension_kind(scratch.doc.drawing.as_deref()?, h)).and_then(type_of_kind);
     app.drawing.preview = curves;
     if let Some(t) = tool_mut(app) {
         t.preview_key = Some(key);
         t.live = live;
+        t.live_kind = live_kind;
     }
 }
 
@@ -358,6 +377,7 @@ fn clear_preview(app: &mut SolveApp) {
     if let Some(t) = tool_mut(app) {
         t.preview_key = None;
         t.live = None;
+        t.live_kind = None;
     }
 }
 

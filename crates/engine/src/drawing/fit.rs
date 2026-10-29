@@ -38,6 +38,8 @@ pub fn printable_in(size: AnsiSize, landscape: bool) -> [f64; 2] {
 /// The extents (x, y, z, millimetres) of the part or assembly at `model` (a path, as a view's
 /// `model`), loaded as a view loads it; None when it cannot be loaded or shows nothing.
 pub fn model_extents_mm(s: &crate::Session, model: &str) -> Option<[f64; 3]> {
+    // `model_ref::load` finds the file by its path and reads whatever design is there; the ref's
+    // kind is not consulted, so an assembly measures too (fix wave 3 item 9).
     let r = ModelRef { path: model.to_string(), project_path: None, kind: ModelKind::Part };
     let loaded = super::model_ref::load(s, &r).ok()?;
     let b = crate::view::bounds(&loaded.session);

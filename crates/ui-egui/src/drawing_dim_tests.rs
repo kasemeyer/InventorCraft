@@ -560,6 +560,10 @@ fn dimension_type_in_the_tool_list_changes_the_live_dimension() {
     right_click_paper(&mut h, [12.5, 9.0]);
     let labels: Vec<String> = dim_types(&h).into_iter().map(|(l, _)| l).collect();
     assert_eq!(labels, ["Aligned", "Horizontal", "Vertical"]);
+    // No type chosen yet: the checked row is the live dimension's own type (aligned).
+    assert!(tool(&h).kind.is_none());
+    let checked: Vec<bool> = dim_types(&h).into_iter().map(|(_, c)| c).collect();
+    assert_eq!(checked, [true, false, false], "the live aligned dimension is checked");
     let undo = h.app.session.undo.len();
     crate::context_menu::pick(&mut h.app, "Horizontal").unwrap();
     h.frames(2);
@@ -592,6 +596,7 @@ fn dimension_type_turns_a_diameter_into_a_radius() {
     right_click_paper(&mut h, [11.0, 8.6]);
     let labels: Vec<String> = dim_types(&h).into_iter().map(|(l, _)| l).collect();
     assert_eq!(labels, ["Radius", "Diameter"]);
+    assert_eq!(dim_types(&h)[1], ("Diameter".to_string(), true), "the live diameter is checked before a choice");
     crate::context_menu::pick(&mut h.app, "Radius").unwrap();
     h.frames(2);
     hover(&mut h, [11.05, 8.6]);

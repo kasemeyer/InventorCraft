@@ -55,8 +55,8 @@ use solidcraft_geom::{Mesh, Vec3};
 pub const DESIGN_EXT: &str = "solidcraft";
 /// The design extension of earlier releases. Compatibility shim (docs/compatibility.md): such
 /// files still open everywhere a design opens. A new design is not given it: the engine saves a
-/// path without an extension under the document kind's own, and the UI's Save As still writes
-/// [`DESIGN_EXT`].
+/// path without an extension under the document kind's own, and the UI's Save As offers the
+/// kind's own (R102).
 pub const LEGACY_DESIGN_EXT: &str = "solvecraft";
 /// Every extension a design file may have: each kind's own, then the kind-less ones.
 pub const DESIGN_EXTS: [&str; 5] = {

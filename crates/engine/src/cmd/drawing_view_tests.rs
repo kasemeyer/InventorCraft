@@ -467,3 +467,24 @@ fn the_default_scale_measures_the_model_on_the_active_sheet() {
     assert_eq!(default_scale(&s, &block), Some(1.0));
     assert_eq!(default_scale(&s, "no/such/model.tcipart"), None);
 }
+
+/// Fix wave 3 item 9: `model_ref::load` finds a model by its path and reads whatever document is
+/// there (the ref's kind is not consulted), so an assembly (`.tciasm`) measures as its
+/// components do: the block inserted once, 4 × 1 × 3 in.
+#[test]
+fn the_default_scale_measures_an_assembly() {
+    use crate::drawing::{default_scale, model_extents_mm};
+    let dir = temp_dir("the_default_scale_measures_an_assembly");
+    let block = block_part(&dir);
+    let asm = dir.join("asm.tciasm").to_string_lossy().into_owned();
+    let mut a = Session::default();
+    run(&mut a, "component.insert_design", json!({"path": block}));
+    run(&mut a, "file.save", json!({"path": asm}));
+    let mut s = Session::default();
+    run(&mut s, "drawing.new", json!({"model": asm}));
+    let e = model_extents_mm(&s, &asm).expect("the assembly measures");
+    for (got, want) in e.iter().zip([4.0 * 25.4, 25.4, 3.0 * 25.4]) {
+        assert!((got - want).abs() < 1e-6, "{e:?}");
+    }
+    assert_eq!(default_scale(&s, &asm), Some(1.0));
+}
