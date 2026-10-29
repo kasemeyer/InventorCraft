@@ -1,6 +1,7 @@
-//! The default scale of a new base view (wave 3, R100; owner default, plan §8.8): the largest
-//! preset scale up to 1:1 at which the model's front, top and right views fit the sheet inside
-//! its border. Only ever down from 1:1: a small part is drawn full size, never enlarged. Every
+//! The default scale of a new base view (wave 3, R100 amended by R108; owner default, plan §8.8):
+//! the largest preset scale up to 1:1 at which the model's front, top and right views fit HALF the
+//! sheet's printable width and half its printable height, as Inventor's default leaves room for
+//! dimensions and further views (a 40 × 20 × 10 in part on a D sheet is 1:4, as Inventor draws it). Only ever down from 1:1: a small part is drawn full size, never enlarged. Every
 //! profile (SolidCraft's drawings too) gets the same default from this pure function.
 
 use solidcraft_doc::{AnsiSize, ModelKind, ModelRef, SCALE_PRESETS};
@@ -15,13 +16,13 @@ pub const FIT_GAP_IN: f64 = 1.0;
 
 /// The largest `SCALE_PRESETS` value at most 1.0 at which a model of `model_extents_mm` (its
 /// x, y, z extents: width, depth, height; the front view shows x by z, the top x by y above it,
-/// the right y by z beside it) fits `sheet_printable_in` ([width, height] in inches) as front,
-/// top and right views with `FIT_GAP_IN` between them: `(x + y)·s + gap ≤ width` and
-/// `(z + y)·s + gap ≤ height`. The smallest preset when none fits; 1.0 for an empty or unusable
+/// the right y by z beside it) fits half of `sheet_printable_in` ([width, height] in inches) as
+/// front, top and right views with `FIT_GAP_IN` between them: `(x + y)·s + gap ≤ width / 2` and
+/// `(z + y)·s + gap ≤ height / 2` (R108). The smallest preset when none fits; 1.0 for an empty or unusable
 /// model. (owner default; §8.8)
 pub fn fit_scale(model_extents_mm: [f64; 3], sheet_printable_in: [f64; 2]) -> f64 {
     let [x, y, z] = model_extents_mm.map(|v| if v.is_finite() { v.max(0.0) / MM_PER_IN } else { 0.0 });
-    let [w, h] = sheet_printable_in;
+    let [w, h] = sheet_printable_in.map(|v| v / 2.0);
     let fits = |s: f64| (x + y) * s + FIT_GAP_IN <= w + 1e-9 && (z + y) * s + FIT_GAP_IN <= h + 1e-9;
     let mut presets: Vec<f64> = SCALE_PRESETS.iter().map(|(_, v)| *v).filter(|v| *v <= 1.0).collect();
     presets.sort_by(|a, b| b.total_cmp(a));

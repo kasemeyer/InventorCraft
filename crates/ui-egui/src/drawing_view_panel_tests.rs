@@ -459,11 +459,11 @@ fn big_box(dir: &std::path::Path) -> String {
     absolute(&path)
 }
 
-/// Wave 3 item 3 (R100, owner default §8.8): a new base view's Scale is the largest preset up to
-/// 1:1 at which front, top and right fit the sheet inside its border. On the D sheet (printable
-/// 33 × 21 in): the 4 × 1 × 3 block fits at 1:1 ((4 + 1) + 1 = 6 across); the 40 × 20 × 10 box
-/// does not ((40 + 20) + 1 = 61 > 33) but does at 1:2 (60·0.5 + 1 = 31 ≤ 33, 30·0.5 + 1 = 16 ≤
-/// 21). Both the ribbon path and Create Drawing View's; Edit View keeps the view's own scale.
+/// Wave 3 item 3 (R100 amended by R108, owner default §8.8): a new base view's Scale is the
+/// largest preset up to 1:1 at which front, top and right fit half the sheet inside its border.
+/// On the D sheet (printable 33 × 21 in, half 16.5 × 10.5): the 4 × 1 × 3 block fits at 1:1
+/// ((4 + 1) + 1 = 6 across); the 40 × 20 × 10 box does not at 1:2 (60·0.5 + 1 = 31 > 16.5) but
+/// does at 1:4 (60·0.25 + 1 = 16 ≤ 16.5, 30·0.25 + 1 = 8.5 ≤ 10.5), as Inventor draws it. Both the ribbon path and Create Drawing View's; Edit View keeps the view's own scale.
 fn the_scale_defaults_to_the_fit(mut h: Harness) {
     h.app.home.open = false;
     let block = absolute(&block_part(&h.dir));
@@ -479,7 +479,7 @@ fn the_scale_defaults_to_the_fit(mut h: Harness) {
     for origin in [Origin::Ribbon, Origin::FromModel] {
         open(&mut h.app, Some(big.clone()), origin);
         h.frames(2);
-        assert_eq!(panel(&h).scale_text, "1:2", "{origin:?}");
+        assert_eq!(panel(&h).scale_text, "1:4", "{origin:?}");
         h.app.drawing.panel = None;
         crate::drawing_place::finish(&mut h.app);
         h.frames(2);
@@ -489,7 +489,7 @@ fn the_scale_defaults_to_the_fit(mut h: Harness) {
     h.frames(2);
     panel_mut(&mut h).model = Some(big.clone());
     h.frames(2);
-    assert_eq!(panel(&h).scale_text, "1:2");
+    assert_eq!(panel(&h).scale_text, "1:4");
     panel_mut(&mut h).scale_text = "3:1".into();
     panel_mut(&mut h).model = Some(block.clone());
     h.frames(2);

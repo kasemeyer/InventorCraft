@@ -450,8 +450,8 @@ fn a_dimension_on_a_tangent_edge_is_suppressed_when_they_turn_off() {
     assert_eq!(dimension_text(m, dim).as_deref(), Some("1.00"));
 }
 
-/// Wave 3 item 3 (R100): the default scale of a new base view measures the model (4 x 1 x 3 in,
-/// fitting at 1:1 on D and on an A portrait sheet) on the active sheet.
+/// Wave 3 item 3 (R100, R108): the default scale of a new base view measures the model (4 x 1 x 3
+/// in, fitting half a D sheet at 1:1 and half an A portrait sheet at 1:2) on the active sheet.
 #[test]
 fn the_default_scale_measures_the_model_on_the_active_sheet() {
     use crate::drawing::{default_scale, model_extents_mm};
@@ -462,9 +462,10 @@ fn the_default_scale_measures_the_model_on_the_active_sheet() {
         assert!((got - want).abs() < 1e-6, "{e:?}");
     }
     assert_eq!(default_scale(&s, &block), Some(1.0));
-    // An A portrait sheet (8.5 × 11, printable 7.5 × 10): across (4 + 1)·1 + 1 = 6 ≤ 7.5, up (3 + 1)·1 + 1 = 5 ≤ 10 → 1:1.
+    // An A portrait sheet (8.5 × 11, printable 7.5 × 10, half 3.75 × 5): 1:1 across (4 + 1)·1 + 1
+    // = 6 > 3.75; 1:2 across 5·0.5 + 1 = 3.5 ≤ 3.75, up (3 + 1)·0.5 + 1 = 3 ≤ 5 → 1:2.
     s.execute("drawing.sheet.set_size", &json!({"size": "A", "landscape": false})).unwrap();
-    assert_eq!(default_scale(&s, &block), Some(1.0));
+    assert_eq!(default_scale(&s, &block), Some(0.5));
     assert_eq!(default_scale(&s, "no/such/model.tcipart"), None);
 }
 
