@@ -321,7 +321,7 @@ fn a_redefined_gear_stays_in_mesh_where_it_is() {
     // Saved and opened again: the same link, the same pose.
     let back = solidcraft_doc::format::read(&s.doc.to_json()).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(back.assembly.links, s.doc.assembly.links);
-    let vals = solidcraft_doc::joints::joint_values(&back.assembly);
+    let vals = solidcraft_doc::joints::joint_values(&back.assembly, &solidcraft_doc::constraints::Compiled::default());
     let gb = back.assembly.joints.iter().find(|j| j.name == "GB").map(|j| j.id).unwrap_or(0);
     assert!(vals.get(&gb).and_then(|q| q.first()).is_some_and(|v| close_to(v.to_degrees(), 25.0)), "{vals:?}");
 }

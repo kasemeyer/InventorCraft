@@ -50,34 +50,56 @@ impl Session {
             };
             o.parent != 0 && doc.component_within(o.parent, top.component)
         };
-        let joints: Vec<_> = doc.assembly.joints.iter().filter(|j| !j.suppressed).collect();
+        // Joints and constraints alike tie two occurrences (a constraint: its first two picks'):
+        // (name, A, B, is a constraint).
+        let ties: Vec<(&str, u64, u64, bool)> = doc
+            .assembly
+            .joints
+            .iter()
+            .filter(|j| !j.suppressed)
+            .map(|j| (j.name.as_str(), j.a.occurrence, j.b.occurrence, false))
+            .chain(doc.assembly.constraints.iter().filter(|c| !c.suppressed).filter_map(|c| {
+                let (a, b) = (c.picks.first()?, c.picks.get(1)?);
+                Some((c.name.as_str(), a.occurrence, b.occurrence, true))
+            }))
+            .collect();
         let mut members = vec![dragged];
         // Grow the chain one joint at a time; each pass adds a member or stops.
         for _ in 0..MAX_MOVED {
             let inside = |o: u64| members.iter().any(|m| within(o, *m));
-            let next = joints.iter().find_map(|j| match (inside(j.a.occurrence), inside(j.b.occurrence)) {
-                (true, false) => Some((j, j.b.occurrence)),
-                (false, true) => Some((j, j.a.occurrence)),
+            let next = ties.iter().find_map(|t| match (inside(t.1), inside(t.2)) {
+                (true, false) => Some((t, t.2)),
+                (false, true) => Some((t, t.1)),
                 _ => None,
             });
-            let Some((joint, other)) = next else {
+            let Some((&(tie, _, _, constraint), other)) = next else {
                 break;
             };
+            let fixed = other == 0 || doc.occurrences.iter().any(|o| o.id == other && o.grounded);
+            if constraint && fixed {
+                // Every constraint that ties the chain to that fixed occurrence.
+                let names: Vec<&str> =
+                    ties.iter().filter(|t| t.3 && ((inside(t.1) && t.2 == other) || (inside(t.2) && t.1 == other))).map(|t| t.0).collect();
+                return Err(refused(format!(
+                    "{} is held by {} to something fixed: change or drive the constraint (constraint.edit, constraint.drive)",
+                    placement.name,
+                    names.join(", ")
+                )));
+            }
             if other == 0 {
-                return Err(refused(format!("{} holds {} to the design's origin", joint.name, placement.name)));
+                return Err(refused(format!("{tie} holds {} to the design's origin", placement.name)));
             }
             // Only this member's placement is edited. A grounded ancestor fixes its own
             // transform, while its free contents may still move inside that frame.
-            if doc.occurrences.iter().any(|o| o.id == other && o.grounded) {
+            if fixed {
                 return Err(refused(format!(
-                    "{} holds {} to grounded {}: it moves only as far as its joints allow (joint.reach)",
-                    joint.name,
+                    "{tie} holds {} to grounded {}: it moves only as far as its joints allow (joint.reach)",
                     placement.name,
                     name(other)
                 )));
             }
             if path.contains(&other) || within(dragged, other) {
-                return Err(refused(format!("{} holds {} to the assembly it is in: drag {}", joint.name, placement.name, name(other))));
+                return Err(refused(format!("{tie} holds {} to the assembly it is in: drag {}", placement.name, name(other))));
             }
             members.push(other);
             if members.len() > MAX_MOVED {

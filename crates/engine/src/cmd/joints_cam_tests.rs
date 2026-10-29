@@ -382,13 +382,13 @@ fn hostile_cams_are_refused() {
     assert!(s.doc.assembly.links.is_empty());
     // A table edited by hand: NaN leaves the follower where it is, any length reads.
     run(&mut s, "joint.cam", json!({"a": "Cam", "b": "Tappet", "profile": {"sketch": "CamSketch"}}));
-    let before = solidcraft_doc::joints::joint_values(&s.doc.assembly);
+    let before = solidcraft_doc::joints::joint_values(&s.doc.assembly, &solidcraft_doc::constraints::Compiled::default());
     for lift in [vec![f64::NAN; 360], vec![1.0, 2.0, 3.0], vec![f64::INFINITY]] {
         let mut d = (*s.doc).clone();
         if let Some(l) = d.assembly.links.first_mut() {
             l.lift = lift;
         }
-        let vals = solidcraft_doc::joints::joint_values(&d.assembly);
+        let vals = solidcraft_doc::joints::joint_values(&d.assembly, &solidcraft_doc::constraints::Compiled::default());
         assert!(vals.values().flatten().all(|v| v.is_finite()), "{vals:?}");
         // The follower keeps where it is.
         assert_eq!(vals.get(&joint_id(&s, "Tappet")), d.assembly.joints.iter().find(|j| j.name == "Tappet").map(|j| &j.values), "{before:?}");
@@ -398,7 +398,13 @@ fn hostile_cams_are_refused() {
     if let Some(l) = d.assembly.links.first_mut() {
         (l.coupling, l.ratio, l.offset) = (None, 0.0, 3.0);
     }
-    assert_eq!(solidcraft_doc::joints::joint_values(&d.assembly).get(&joint_id(&s, "Tappet")).and_then(|q| q.first()).copied(), Some(3.0));
+    assert_eq!(
+        solidcraft_doc::joints::joint_values(&d.assembly, &solidcraft_doc::constraints::Compiled::default())
+            .get(&joint_id(&s, "Tappet"))
+            .and_then(|q| q.first())
+            .copied(),
+        Some(3.0)
+    );
     // A roller's picked face must turn about an axis parallel to the cam's, a tip given or not.
     run(&mut s, "component.activate", json!({"component": "root"}));
     run(&mut s, "component.create", json!({"name": "Pin"}));

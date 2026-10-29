@@ -145,7 +145,10 @@ fn a_cylindrical_joint_is_a_screw_on_its_own() {
     assert_eq!(c[0], ("joint.screw".to_string(), json!({"joint": joint(&app, "Nut"), "pitch": "1.5 mm", "reverse": false})));
     app.run(&c[0].0, c[0].1.clone()).unwrap();
     app.run("joint.drive", json!({"joint": "Nut", "values": [360]})).unwrap();
-    let nut = solidcraft_engine::doc::joints::joint_values(&app.session.doc.assembly).get(&joint(&app, "Nut")).cloned().unwrap_or_default();
+    let nut = solidcraft_engine::doc::joints::joint_values(&app.session.doc.assembly, &solidcraft_engine::doc::constraints::Compiled::default())
+        .get(&joint(&app, "Nut"))
+        .cloned()
+        .unwrap_or_default();
     assert!((nut.get(1).copied().unwrap_or(f64::NAN) - 1.5).abs() < 1e-9, "{nut:?}");
 }
 

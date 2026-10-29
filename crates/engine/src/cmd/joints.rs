@@ -184,7 +184,11 @@ pub(super) fn place_holding(s: &mut Session, held: &joints::Held) -> joints::Sol
 fn solution(s: &Session, held: &joints::Held, analysis: joints::Analysis) -> joints::Solution {
     #[cfg(test)]
     solve_counts::record(analysis);
-    joints::solve_holding_with_analysis(&s.doc, &s.model.state(), held, analysis)
+    // The session's memo of loop degrees of freedom (R130); a poisoned lock solves without it.
+    match s.dof_memo.lock() {
+        Ok(mut memo) => joints::solve_memo(&s.doc, &s.model.state(), held, analysis, &mut memo),
+        Err(_) => joints::solve_holding_with_analysis(&s.doc, &s.model.state(), held, analysis),
+    }
 }
 
 fn resolve_with_analysis(s: &mut Session, held: &joints::Held, analysis: joints::Analysis) -> joints::Solution {
@@ -206,9 +210,11 @@ fn response_analysis(p: &Value) -> joints::Analysis {
 
 /// A solve's answer; `quiet: true` in the command's params leaves out the per-occurrence lists.
 fn sol_json(sol: &joints::Solution, p: &Value) -> Value {
+    // Joints only: what constraints compile to is never listed as a joint (owner Q1).
+    let saved = |id: &u64| solidcraft_doc::constraints::owner_of(*id).is_none();
     let mut out = json!({
-        "conflicts": sol.conflicts.iter().map(|(id, n, w)| json!({"joint": id, "name": n, "why": w})).collect::<Vec<_>>(),
-        "errors": sol.errors.iter().map(|(id, n, w)| json!({"joint": id, "name": n, "why": w})).collect::<Vec<_>>(),
+        "conflicts": sol.conflicts.iter().filter(|c| saved(&c.0)).map(|(id, n, w)| json!({"joint": id, "name": n, "why": w})).collect::<Vec<_>>(),
+        "errors": sol.errors.iter().filter(|e| saved(&e.0)).map(|(id, n, w)| json!({"joint": id, "name": n, "why": w})).collect::<Vec<_>>(),
     });
     if !bool_(p, "quiet").unwrap_or(false) {
         out["dof"] = sol.dof.iter().map(|(o, d)| json!({"occurrence": o, "dof": d})).collect();
@@ -236,7 +242,7 @@ pub(crate) fn named_values(j: &Joint, q: &[f64]) -> Vec<Value> {
 /// turn), named as `joint.list` gives them.
 pub(crate) fn effective_values(s: &Session, id: u64) -> Option<Vec<Value>> {
     let j = s.doc.assembly.joints.iter().find(|j| j.id == id)?;
-    let vals = joints::joint_values(&s.doc.assembly);
+    let vals = joints::joint_values(&s.doc.assembly, &solidcraft_doc::constraints::Compiled::default());
     Some(named_values(j, vals.get(&id).map(Vec::as_slice).unwrap_or(&j.values)))
 }
 
@@ -903,7 +909,7 @@ fn reach(s: &mut Session, p: &Value) -> Result<Value> {
     out["reached"] = json!(there);
     let name = |id: u64| s.doc.assembly.joints.iter().find(|j| j.id == id);
     // As joint.list gives them: with what motion links set.
-    let effective = joints::joint_values(&s.doc.assembly);
+    let effective = joints::joint_values(&s.doc.assembly, &solidcraft_doc::constraints::Compiled::default());
     out["values"] = reached
         .values
         .keys()
@@ -1192,7 +1198,7 @@ fn couple(s: &mut Session, p: &Value, cmd: &str, mut l: MotionLink) -> Result<Va
     }
     (l.ratio, l.lift) =
         joints::coupling_values(&s.doc, &s.model.state(), &l).unwrap_or(Ok((l.ratio, Vec::new()))).map_err(|e| bad(cmd, e.to_string()))?;
-    let vals = joints::joint_values(&s.doc.assembly);
+    let vals = joints::joint_values(&s.doc.assembly, &solidcraft_doc::constraints::Compiled::default());
     let value = |id: u64, i: usize| vals.get(&id).and_then(|q| q.get(i)).copied().unwrap_or(0.0);
     // New or put in place of another (turned the other way, a ring gear now), b keeps where it
     // is: the gears stay in mesh at the pose they are in. (A radius edited in the design keeps
@@ -1356,7 +1362,7 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
 fn list(s: &mut Session, p: &Value) -> Result<Value> {
     let st = s.model.state();
     let sol = joints::solve(&s.doc, &st);
-    let vals = joints::joint_values(&s.doc.assembly);
+    let vals = joints::joint_values(&s.doc.assembly, &solidcraft_doc::constraints::Compiled::default());
     let js: Vec<Value> = s
         .doc
         .assembly

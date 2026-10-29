@@ -246,8 +246,8 @@ impl ContactGeometry {
     }
 
     pub(super) fn samples(&self, start: &Session, end: &Session) -> Result<usize> {
-        let a = joints::joint_values(&start.doc.assembly);
-        let b = joints::joint_values(&end.doc.assembly);
+        let a = joints::joint_values(&start.doc.assembly, &solidcraft_doc::constraints::Compiled::default());
+        let b = joints::joint_values(&end.doc.assembly, &solidcraft_doc::constraints::Compiled::default());
         let bounds = self.bounds(start)?.union(&self.bounds(end)?);
         let state = start.model.state();
         let (mut linear, mut angular, mut radius) = (0.0, 0.0, 0.0_f64);

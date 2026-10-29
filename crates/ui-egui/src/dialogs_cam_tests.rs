@@ -97,7 +97,10 @@ fn a_picked_cam_edge_makes_the_cam() {
     assert_eq!(l.lift.len(), 360);
     // A quarter turn lowers the knife tappet from 40 to √(30² − 10²).
     app.run("joint.drive", json!({"joint": "Cam", "value": 90})).unwrap();
-    let v = solidcraft_engine::doc::joints::joint_values(&app.session.doc.assembly).get(&joint(&app, "Tappet")).cloned().unwrap_or_default();
+    let v = solidcraft_engine::doc::joints::joint_values(&app.session.doc.assembly, &solidcraft_engine::doc::constraints::Compiled::default())
+        .get(&joint(&app, "Tappet"))
+        .cloned()
+        .unwrap_or_default();
     assert!((v.first().copied().unwrap_or(f64::NAN) - (800f64.sqrt() - 40.0)).abs() < 1e-3, "{v:?}");
 }
 

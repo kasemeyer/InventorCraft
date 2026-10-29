@@ -19,7 +19,7 @@ pub(super) fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let st = s.model.state();
     let sol = joints::solve(&s.doc, &st);
-    let vals = joints::joint_values(&s.doc.assembly);
+    let vals = joints::joint_values(&s.doc.assembly, &solidcraft_doc::constraints::Compiled::default());
     let out: Vec<Value> = ids
         .iter()
         .filter_map(|id| s.doc.assembly.joints.iter().find(|j| j.id == *id))

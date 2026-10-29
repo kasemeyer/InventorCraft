@@ -7,7 +7,7 @@
 //! A relation is made where the parts are: its values start as the nearest that meet it, so B
 //! moves no further than the relation needs.
 
-use super::{Joint, component_bodies, component_of, least_squares, link_of, occurrence_world, resolve_origin};
+use super::{Joint, JointKind, component_bodies, component_of, least_squares, link_of, occurrence_world, resolve_origin};
 use crate::{Document, IDENTITY, Mat, ModelState, mat_inverse, mat_mul};
 
 /// Starting turns tried for each angle value: the nearest values may lie a half turn away.
@@ -24,6 +24,20 @@ pub fn relation_values(doc: &Document, st: &ModelState, j: &Joint) -> Option<Vec
     if !j.kind.is_relation() {
         return None;
     }
+    nearest(doc, st, j)
+}
+
+/// [`relation_values`] extended to planar, revolute, cylindrical and ball joints: the
+/// nearest-value start of a joint a constraint compiles to (spec §3.4), so a new Mate does not
+/// jump to the face centres. (Saved joints of those kinds keep their own starts.)
+pub fn nearest_values(doc: &Document, st: &ModelState, j: &Joint) -> Option<Vec<f64>> {
+    if !(j.kind.is_relation() || matches!(j.kind, JointKind::Planar | JointKind::Revolute | JointKind::Cylindrical | JointKind::Ball)) {
+        return None;
+    }
+    nearest(doc, st, j)
+}
+
+fn nearest(doc: &Document, st: &ModelState, j: &Joint) -> Option<Vec<f64>> {
     let world = |occ: u64| if occ == 0 { IDENTITY } else { occurrence_world(doc, occ) };
     let fa = mat_mul(&world(j.a.occurrence), &resolve_origin(doc, st, &j.a).ok()?);
     let fb = mat_mul(&world(j.b.occurrence), &resolve_origin(doc, st, &j.b).ok()?);
@@ -78,7 +92,7 @@ pub fn relation_values(doc: &Document, st: &ModelState, j: &Joint) -> Option<Vec
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
-    use crate::joints::{JointKind, JointOrigin, Snap};
+    use crate::joints::{JointOrigin, Snap};
     use solidcraft_geom::Vec3;
 
     fn joint(kind: JointKind) -> Joint {

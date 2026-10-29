@@ -293,6 +293,9 @@ pub struct Session {
     /// Occurrence moves not captured yet (Capture Position keeps them, a recompute drops them).
     pub pending_moves: std::collections::BTreeMap<u64, solidcraft_doc::Mat>,
     world_cache: std::sync::Mutex<Option<WorldCache>>,
+    /// Loop degrees of freedom the last joint solve worked out, with what each read: a re-solve
+    /// after an edit counts again only the occurrences whose loops the edit touched (R130).
+    pub(crate) dof_memo: std::sync::Mutex<solidcraft_doc::joints::DofMemo>,
     occurrence_visibility_cache: std::sync::Mutex<Option<occurrences::VisibilityCache>>,
     removed_later_cache: std::sync::Mutex<Option<occurrences::RemovedLaterCache>>,
     occurrence_bodies_cache: std::sync::Mutex<Option<occurrences::OccurrenceBodiesCache>>,
@@ -479,6 +482,7 @@ impl Session {
             active_occurrence_path: None,
             pending_moves: Default::default(),
             world_cache: Default::default(),
+            dof_memo: Default::default(),
             occurrence_visibility_cache: Default::default(),
             removed_later_cache: Default::default(),
             occurrence_bodies_cache: Default::default(),
@@ -732,7 +736,7 @@ impl Session {
         self.revision += 1;
         self.prune_occurrence_state();
         // Joints follow the geometry their origins snap to.
-        if !self.doc.assembly.joints.is_empty() {
+        if self.doc.assembly.solves() {
             cmd::joints::place(self);
         }
         cmd::motion::associative::refresh(self);
@@ -753,7 +757,7 @@ impl Session {
             && self.model.rename_body(&self.doc, &old, &new)
         {
             self.revision += 1;
-            if !self.doc.assembly.joints.is_empty() {
+            if self.doc.assembly.solves() {
                 cmd::joints::place(self);
             }
             return;
@@ -1151,6 +1155,7 @@ impl Session {
             active_occurrence_path: self.active_occurrence_path.clone(),
             pending_moves: self.pending_moves.clone(),
             world_cache: std::sync::Mutex::new(self.world_cache.lock().ok().and_then(|cache| cache.clone())),
+            dof_memo: std::sync::Mutex::new(self.dof_memo.lock().map(|m| m.clone()).unwrap_or_default()),
             occurrence_visibility_cache: Default::default(),
             removed_later_cache: Default::default(),
             occurrence_bodies_cache: Default::default(),

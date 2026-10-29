@@ -12,6 +12,7 @@ use super::{
     Assembly, Held, MAX_CLOSING, MAX_LOOP_VALUES, MAX_LOOP_WORK, MAX_LOOPS, Solution, Tree, Values, apply_links, build, close_within, jacobian,
     joint_values, largest, least_squares, limit_bounds, link_chains, loop_groups, loop_scale, loose_gap, unknowns,
 };
+use crate::constraints::Compiled;
 use crate::{Document, ModelState, apply_point, apply_vector, mat_mul};
 
 /// How close counts as reached: mm for the point, degrees for the axis.
@@ -62,8 +63,9 @@ const STEP_SHARE: f64 = 0.1;
 /// error says why nothing can move.
 pub fn reach(doc: &Document, st: &ModelState, r: &Reach) -> Result<Reached, String> {
     let asm = &doc.assembly;
-    let vals = joint_values(asm);
-    let built = build(doc, st, &vals, &mut Solution::default());
+    let vals = joint_values(asm, &Compiled::default());
+    let none = Compiled::default();
+    let built = build(doc, st, &vals, &none, &mut Solution::default());
     let tree = &built.tree;
     if tree.fixed.contains_key(&r.occurrence) {
         return Err("it is fixed in place (grounded, or the part its joints are placed from)".into());
@@ -480,7 +482,7 @@ mod tests {
         asm.joints[5].a.occurrence = 3;
         asm.joints[5].b.occurrence = 4;
         let tree = placement_tree(&asm);
-        let base = joint_values(&asm);
+        let base = joint_values(&asm, &Compiled::default());
         let mut workspace = super::super::PlacementWorkspace::new(&tree);
         let mut cold = true;
         for axis in [None, Some((Vec3::Y, Vec3::Z))] {

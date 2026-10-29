@@ -361,7 +361,7 @@ impl<'a> Tree<'a> {
 
     /// Breadth-first over the usable joints from the occurrences in `queue`.
     fn traverse(&mut self, queue: &mut VecDeque<u64>, usable: &[(&Joint, Mat)], taken: &mut HashSet<u64>) {
-        let values = joints::joint_values(&self.doc.assembly);
+        let values = joints::joint_values(&self.doc.assembly, &solidcraft_doc::constraints::Compiled::default());
         while let Some(p) = queue.pop_front() {
             for (j, fa) in usable {
                 if taken.contains(&j.id) || (j.a.occurrence != p && j.b.occurrence != p) {

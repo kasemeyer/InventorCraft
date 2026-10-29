@@ -289,3 +289,50 @@ pub(crate) fn blocks() -> crate::Session {
     }
     s
 }
+
+// Task 3 (assembly constraints): a constraint record pushed from world picks.
+
+/// Push a constraint of `kind` (`"mate"`, `"tangent"`, `"insert"`…) with `solution` built from
+/// world picks `(component, what, point)`, offset `offset` mm and `lock`, then re-solve once
+/// (`cmd::joints::resolve`; no `constraint.*` command yet). Returns its id.
+pub(crate) fn add(
+    s: &mut crate::Session,
+    kind: &str,
+    solution: &str,
+    picks: &[(&str, solidcraft_doc::constraints::PickWhat, [f64; 3])],
+    offset: f64,
+    lock: bool,
+) -> u64 {
+    use solidcraft_doc::constraints::{Constraint, ConstraintKind, ConstraintSolution, geo_at, next_name};
+    let kind = ConstraintKind::parse(kind).unwrap_or_else(|| panic!("no constraint kind {kind}"));
+    let solution = ConstraintSolution::parse(solution).unwrap_or_else(|| panic!("no solution {solution}"));
+    let st = s.model.state();
+    let picks = picks
+        .iter()
+        .map(|(name, what, p)| {
+            let p = Vec3::new(p[0], p[1], p[2]);
+            geo_at(&s.doc, &st, occ(s, name), *what, p).unwrap_or_else(|e| panic!("{name} {what:?} at {p:?}: {e}"))
+        })
+        .collect();
+    let doc = s.doc_mut();
+    let id = doc.allocate_id().unwrap();
+    let name = next_name(&doc.assembly, kind);
+    let c = Constraint {
+        id,
+        name,
+        kind,
+        solution,
+        picks,
+        offset,
+        limits: Default::default(),
+        exprs: Default::default(),
+        suppressed: false,
+        lock,
+        axis: None,
+        state: Vec::new(),
+    };
+    c.validate().unwrap();
+    doc.assembly.constraints.push(c);
+    crate::cmd::joints::resolve(s);
+    id
+}

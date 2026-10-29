@@ -508,7 +508,7 @@ fn collect_component_keys(s: &Session, prefix: &str, component: u64, root_extras
         if !s.doc.canvases.is_empty() {
             keys.open.insert("canvases".into());
         }
-        if !s.doc.assembly.joints.is_empty() {
+        if s.doc.assembly.solves() {
             keys.open.insert("c0/joints".into());
         }
         if s.section.is_some() {

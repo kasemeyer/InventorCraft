@@ -337,6 +337,10 @@ impl Assembly {
 pub mod geo;
 pub use geo::{PickWhat, Prim, PrimKind, geo_at, resolve, resolve_world};
 
+#[path = "constraints_compile.rs"]
+pub mod compile;
+pub use compile::{Compiled, compile, compiled_id, owner_of};
+
 #[cfg(test)]
 #[path = "constraints_tests.rs"]
 mod constraints_tests;

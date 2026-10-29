@@ -79,7 +79,7 @@ fn close(a: &Mat, b: &Mat) -> bool {
 /// Every placement's link, composed at the design's current joint values, sits where SolidCraft
 /// places it.
 fn assert_fk(m: &UrdfModel, s: &Session, what: &str) {
-    let vals = joints::joint_values(&s.doc.assembly);
+    let vals = joints::joint_values(&s.doc.assembly, &solidcraft_doc::constraints::Compiled::default());
     let frames = m.link_frames(|j| j.source.and_then(|(id, k)| vals.get(&id)?.get(k).copied()).unwrap_or(0.0));
     let placements = s.doc.placements();
     let mut seen = 0;

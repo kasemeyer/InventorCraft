@@ -123,7 +123,12 @@ fn spike_meets_spec_8_1() {
     s.doc_mut().assembly.joints.iter_mut().find(|j| j.id == carrier_z).unwrap().offset = 0.0;
     conflicts += crate::cmd::joints::resolve(&mut s).conflicts.len();
     let resolve = median(&mut times);
-    rows.push(("2 re-solve after an offset edit (median of 5)".into(), format!("{resolve:.1} ms {times:.1?}"), "<= 100 ms".into(), resolve <= 100.0));
+    rows.push((
+        "2 re-solve after an offset edit (median of 5)".into(),
+        format!("{resolve:.1} ms {times:.1?}"),
+        "<= 50 ms (R130)".into(),
+        resolve <= 50.0,
+    ));
 
     // 3. Drag frames: module 4's jaw tip B turned about A from 90° to 100° in 60 steps.
     let jaw = t.modules[4].jaw;
@@ -263,6 +268,34 @@ fn pin_to_performance_cores() -> String {
         Ok(o) => format!("affinity: unchanged (powershell: {})", String::from_utf8_lossy(&o.stderr).trim()),
         Err(e) => format!("affinity: unchanged ({e})"),
     }
+}
+
+/// R130: a session re-solve takes the loop degrees of freedom its last solve counted where an
+/// occurrence's loops and values are unchanged, and counts again where an edit touched them; the
+/// counts equal a fresh solve's either way.
+#[test]
+fn a_memo_re_solve_counts_as_a_fresh_one() {
+    let mut t = tong(3);
+    let fresh = |s: &Session| joints::solve(&s.doc, &s.model.state()).dof;
+    let first = crate::cmd::joints::resolve(&mut t.session);
+    assert_eq!(dof_misses(&first, &t.hand_dof), vec![]);
+    // An offset edit in module 1: its loops move, the others' are taken from the memo.
+    let carrier_z = t.modules[1].carrier_z;
+    t.session.doc_mut().assembly.joints.iter_mut().find(|j| j.id == carrier_z).unwrap().offset = 0.5;
+    let edited = crate::cmd::joints::resolve(&mut t.session);
+    assert_eq!(edited.conflicts, vec![]);
+    assert_eq!(edited.dof, fresh(&t.session));
+    assert_eq!(dof_misses(&edited, &t.hand_dof), vec![]);
+    // A joint that locks module 0's four-bar: its members' counts change and are not taken
+    // from the memo.
+    let crank = t.session.doc.assembly.joints.iter().find(|j| j.id == t.modules[0].crank).unwrap().clone();
+    let doc = t.session.doc_mut();
+    let lock = joints::Joint { id: doc.allocate_id().unwrap(), name: "Lock".into(), kind: joints::JointKind::Rigid, values: Vec::new(), ..crank };
+    doc.assembly.joints.push(lock);
+    let locked = crate::cmd::joints::resolve(&mut t.session);
+    assert_eq!(locked.dof, fresh(&t.session));
+    assert_eq!(locked.dof.get(&t.modules[0].jaw), Some(&0));
+    assert_eq!(locked.dof.get(&t.modules[1].jaw), Some(&1));
 }
 
 /// The reach mitigation (spec §8.1 row 3): tong(4) has 116 closing joints, over the old

@@ -185,7 +185,7 @@ pub(super) fn plot(s: &mut Session, p: &Value) -> Result<Value> {
     let mut taken = 0;
     let stop = play(s, &m, n, true, |t, _| {
         taken += 1;
-        let now = joints::joint_values(&t.doc.assembly);
+        let now = joints::joint_values(&t.doc.assembly, &solidcraft_doc::constraints::Compiled::default());
         for ((id, i), out) in series.iter().zip(values.iter_mut()) {
             out.push(now.get(id).and_then(|q| q.get(*i)).copied().unwrap_or(0.0));
         }

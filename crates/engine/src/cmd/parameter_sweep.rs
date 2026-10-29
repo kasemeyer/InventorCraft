@@ -61,7 +61,7 @@ fn look(s: &Session) -> Look {
         Ok((Vec3::new(f[3][0], f[3][1], f[3][2]), Vec3::new(f[2][0], f[2][1], f[2][2])))
     };
     let joints = s.doc.assembly.joints.iter().filter(|j| !j.suppressed).map(|j| (j.id, (j.name.clone(), frame(&j.a), frame(&j.b)))).collect();
-    let unsolved = if s.doc.assembly.joints.is_empty() {
+    let unsolved = if !s.doc.assembly.solves() {
         BTreeMap::new()
     } else {
         solidcraft_doc::joints::solve(&s.doc, &st).errors.into_iter().map(|(id, _, why)| (id, why)).collect()
