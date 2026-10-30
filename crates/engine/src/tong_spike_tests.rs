@@ -145,18 +145,6 @@ fn crank_turn(crank: u64) -> (u64, usize) {
     (solidcraft_doc::constraints::compiled_id(crank, 0), 0)
 }
 
-/// One placement frame with `held` (what a drag frame over the compiled chain does: place the
-/// design with the dragged value held, then the constraint statuses).
-fn place_held(s: &mut Session, held: &Held) -> joints::Solution {
-    let sol = crate::cmd::joints::solution(s, held, Analysis::Placement);
-    let mut next = (*s.doc).clone();
-    if next.apply_joint_solution(&sol) {
-        *s.doc_mut() = next;
-    }
-    crate::constraints::rebuild(s, &sol, Analysis::Placement);
-    sol
-}
-
 type Row = (String, String, String, bool);
 
 /// The seven rows on one build of tong(9).
@@ -179,13 +167,15 @@ fn spike(compiled: bool) -> Vec<Row> {
     let mut rows: Vec<Row> = Vec::new();
     let mut conflicts = 0usize;
 
-    // 1. Full solve from file open (placement + DOF).
+    // 1. Full solve from file open (placement + DOF, no memo), each with an empty pick cache
+    // (R156: what the first solve of a session pays; later ones read the session's cache).
     let st = s.model.state();
     let mut times = Vec::new();
     let mut sol = joints::Solution::default();
     for _ in 0..5 {
+        let cache = solidcraft_doc::constraints::PickCache::default();
         let at = Instant::now();
-        sol = joints::solve_holding_with_analysis(&s.doc, &st, &Held::new(), Analysis::DegreesOfFreedom);
+        sol = joints::solve_cached(&s.doc, &st, &Held::new(), Analysis::DegreesOfFreedom, None, &cache);
         times.push(ms(at));
     }
     conflicts += sol.conflicts.len();
@@ -242,55 +232,27 @@ fn spike(compiled: bool) -> Vec<Row> {
         warm <= 50.0,
     ));
 
-    // 3. Drag frames: module 4's jaw tip B turned about A from 90° to 100° in 60 steps. The joints
-    // build drags with `joint.reach`; `joint.reach` over compiled chains is a follow-up (plan "Not
-    // in this plan"), so the records build places each frame with the crank's turn held, as a
-    // reach frame places with the values it found.
+    // 3. Drag frames: module 4's jaw tip B turned about A from 90° to 100° in 60 steps, by
+    // `joint.reach` on both builds (R157: it chains through the joints constraints compile to).
     let jaw = t.modules[4].jaw;
     let a = Vec3::new(0.0, 0.0, 160.0);
     let tip_deg = |s: &Session| {
         let tip = solidcraft_doc::apply_point(&joints::occurrence_world(&s.doc, jaw), Vec3::new(20.0, 0.0, 0.0)) - a;
         tip.y.atan2(tip.x).to_degrees()
     };
-    let turn = crank_turn(t.modules[4].crank);
-    if compiled {
-        let closing = sol.groups.iter().any(|g| g.members.contains(&turn.0));
-        println!("drag: the crank's compiled joint {} closes a loop: {closing}; its values {:?}", turn.0, sol.compiled.get(&turn.0));
-    }
-    let start = if compiled { s.doc.assembly.constraints.iter().find(|c| c.id == t.modules[4].crank).unwrap().state[0] } else { 0.0 };
     let mut frames = Vec::new();
     let mut last = json!(null);
     let mut reached = 0usize;
-    let mut sense = 0.0f64;
     for k in 1..=60 {
-        if compiled {
-            let held: Held = [(turn, start + 10f64.to_radians() * k as f64 / 60.0)].into_iter().collect();
-            let at = Instant::now();
-            let sol = place_held(&mut s, &held);
-            frames.push(ms(at));
-            conflicts += sol.conflicts.len();
-            // The turn's sense in the world is the Mate's frame's: the tip turns 10° k / 60 one way.
-            let moved = tip_deg(&s) - 90.0;
-            if k == 1 {
-                sense = moved.signum();
-                println!(
-                    "drag frame 1: tip turned {moved:.6}° (held {:.6} rad), {} conflicts",
-                    start + 10f64.to_radians() / 60.0,
-                    sol.conflicts.len()
-                );
-            }
-            reached += usize::from((moved - sense * 10.0 * k as f64 / 60.0).abs() <= 1e-6);
-        } else {
-            let tip = solidcraft_doc::apply_point(&joints::occurrence_world(&s.doc, jaw), Vec3::new(20.0, 0.0, 0.0));
-            let deg = (90.0 + 10.0 * k as f64 / 60.0).to_radians();
-            let to = a + Vec3::new(20.0 * deg.cos(), 20.0 * deg.sin(), 0.0);
-            let p = json!({"occurrence": jaw, "at": [tip.x, tip.y, tip.z], "point": [to.x, to.y, to.z], "continuous": true, "quiet": true});
-            let at = Instant::now();
-            last = run(&mut s, "joint.reach", p);
-            frames.push(ms(at));
-            reached += usize::from(last["reached"] == json!(true));
-            conflicts += last["conflicts"].as_array().map_or(0, Vec::len);
-        }
+        let tip = solidcraft_doc::apply_point(&joints::occurrence_world(&s.doc, jaw), Vec3::new(20.0, 0.0, 0.0));
+        let deg = (90.0 + 10.0 * k as f64 / 60.0).to_radians();
+        let to = a + Vec3::new(20.0 * deg.cos(), 20.0 * deg.sin(), 0.0);
+        let p = json!({"occurrence": jaw, "at": [tip.x, tip.y, tip.z], "point": [to.x, to.y, to.z], "continuous": true, "quiet": true});
+        let at = Instant::now();
+        last = run(&mut s, "joint.reach", p);
+        frames.push(ms(at));
+        reached += usize::from(last["reached"] == json!(true));
+        conflicts += last["conflicts"].as_array().map_or(0, Vec::len);
     }
     if reached < 60 {
         if let Some(o) = last.as_object_mut() {
@@ -301,7 +263,7 @@ fn spike(compiled: bool) -> Vec<Row> {
     let (med, p) = (median(&mut frames.clone()), p95(&mut frames.clone()));
     let end = tip_deg(&s);
     rows.push((
-        format!("3 drag frame (60 {})", if compiled { "placements, crank turn held" } else { "joint.reach" }),
+        "3 drag frame (60 joint.reach)".into(),
         format!(
             "median {med:.1} ms, p95 {p:.1} ms, max {:.1} ms; {reached}/60 frames reached, tip ends at {end:.4}°",
             frames.iter().fold(0.0f64, |m, v| m.max(*v))
@@ -420,14 +382,38 @@ fn command_costs(s: &mut Session, carrier_z: u64, record: &Value) {
     run(s, "constraint.delete", json!({"constraint": r["id"]}));
 }
 
-/// Where a solve of the records build spends its time: `compile` of the 414 records, and the
-/// world resolution of their picks by kind (recorded, not rows).
+/// Where a solve of the records build spends its time: `compile` of the 414 records with no
+/// cache (every pick found by name, indexed), then twice through one pick cache (R156: cold,
+/// then warm), and the session's own (warmed by the open); the world resolution of their picks
+/// by kind, uncached (recorded, not rows).
 fn compile_cost(s: &Session) {
-    use solidcraft_doc::constraints::{Geo, compile, resolve_world};
+    use solidcraft_doc::constraints::{Geo, PickCache, compile, compile_with, resolve_world};
     let st = s.model.state();
     let at = Instant::now();
     let compiled = compile(&s.doc, &st, &s.doc.assembly);
-    println!("compile: {:.1} ms ({} joints, {} equations, {} lost)", ms(at), compiled.joints.len(), compiled.equations.len(), compiled.lost.len());
+    println!(
+        "compile (no cache): {:.1} ms ({} joints, {} equations, {} lost)",
+        ms(at),
+        compiled.joints.len(),
+        compiled.equations.len(),
+        compiled.lost.len()
+    );
+    let cache = PickCache::default();
+    for pass in ["cold", "warm"] {
+        let at = Instant::now();
+        let c = compile_with(&cache.picks(&s.doc, &st), &s.doc.assembly);
+        println!(
+            "compile through a pick cache ({pass}): {:.2} ms ({} joints, {} lost; {} entries, {} misses)",
+            ms(at),
+            c.joints.len(),
+            c.lost.len(),
+            cache.len(),
+            cache.misses()
+        );
+    }
+    let at = Instant::now();
+    compile_with(&s.pick_cache.picks(&s.doc, &st), &s.doc.assembly);
+    println!("compile through the session's cache: {:.2} ms", ms(at));
     let mut by_kind: std::collections::BTreeMap<&str, (usize, f64)> = Default::default();
     for g in s.doc.assembly.constraints.iter().flat_map(|c| &c.picks) {
         let kind = match g.geo {
@@ -442,7 +428,7 @@ fn compile_cost(s: &Session) {
         *e = (e.0 + 1, e.1 + ms(at));
     }
     for (kind, (n, total)) in by_kind {
-        println!("resolve_world {kind}: {n} picks in {total:.1} ms ({:.3} ms each)", total / n as f64);
+        println!("resolve_world (uncached) {kind}: {n} picks in {total:.1} ms ({:.3} ms each)", total / n as f64);
     }
 }
 
@@ -458,8 +444,23 @@ fn spike_drive_stops_on_contact_r155() {
     let m = &t.modules[0];
     run(s, "contact.create", json!({"occurrences": m.parts, "name": "Module 0"}));
     let home = s.doc.assembly.constraints.iter().find(|c| c.id == m.carrier_z).unwrap().offset;
-    for (contact, steps) in [(true, 99), (false, 9)] {
-        let p = json!({"constraint": m.carrier_z, "start": home, "end": home + 10.0, "steps": steps, "stop_on_contact": contact});
+    // R158: what the drive's contact check costs on its own: made once (the meshes), the first
+    // test of every pair, then again with nothing moved (every pair's answer kept).
+    let at = Instant::now();
+    let check = crate::cmd::motion::ContactCheck::new(s);
+    let made = ms(at);
+    let at = Instant::now();
+    let again = check.hit(s);
+    println!(
+        "R158 contact check (cached geometry: {}): made with its start test in {made:.1} ms ({} member pairs pass through each other at the start); a check with nothing moved {:.2} ms ({again:?})",
+        check.cached(),
+        check.at_start().len(),
+        ms(at)
+    );
+    // Up 10 mm off the jaw (no stop), down into it (a contact stop at the first frame, then the
+    // bisection to 1e-4 mm), and up without contact.
+    for (contact, end, steps) in [(true, 10.0, 99), (true, -10.0, 99), (false, 10.0, 9)] {
+        let p = json!({"constraint": m.carrier_z, "start": home, "end": home + end, "steps": steps, "stop_on_contact": contact});
         let at = Instant::now();
         let r = run(s, "constraint.drive", p);
         let total = ms(at);
@@ -467,9 +468,26 @@ fn spike_drive_stops_on_contact_r155() {
         let stops: Vec<&str> =
             ["stopped_by_contact", "stopped_by_limit", "stopped_by_loop"].into_iter().filter(|k| r.get(*k).is_some_and(|v| !v.is_null())).collect();
         println!(
-            "R155 drive (stop_on_contact {contact}, contact set of {} parts): {frames} frames in {total:.0} ms = {:.1} ms/frame; stops {stops:?}",
+            "R155 drive {end:+} mm (stop_on_contact {contact}, contact set of {} parts): {frames} frames in {total:.0} ms = {:.1} ms/frame; stops {stops:?} {}",
             m.parts.len(),
-            total / frames.max(1) as f64
+            total / frames.max(1) as f64,
+            r.get("stopped_by_contact").map_or(String::new(), |v| v.to_string())
+        );
+    }
+    // A stop: module 0's jaw die (moving with its carrier) against module 1's jaw 33 mm above it,
+    // a second contact set; up and down 40 mm (the stop, then the bisection to 1e-4 mm).
+    let die = s.doc.find_component("Die 0.0").and_then(|c| s.doc.occurrence_of(c)).unwrap().id;
+    run(s, "contact.create", json!({"occurrences": [die, t.modules[1].jaw], "name": "Die on the next jaw"}));
+    for end in [40.0, -40.0] {
+        let p = json!({"constraint": m.carrier_z, "start": home, "end": home + end, "steps": 99, "stop_on_contact": true});
+        let at = Instant::now();
+        let r = run(s, "constraint.drive", p);
+        let total = ms(at);
+        let frames = r["frames"].as_array().map_or(0, Vec::len);
+        println!(
+            "R158 drive {end:+} mm into the next jaw: {frames} frames in {total:.0} ms = {:.1} ms/frame; stopped_by_contact {}",
+            total / frames.max(1) as f64,
+            r["stopped_by_contact"]
         );
     }
 }
