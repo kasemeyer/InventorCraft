@@ -18,7 +18,7 @@ use solidcraft_geom::Vec3;
 use super::CommandSpec;
 use super::joints::{occurrence_id, typed, value};
 use crate::constraints::{gaps, is_axis, pick_json, predict_prims, prim_json, word};
-use crate::params::{bad, bool_, str_, vec3};
+use crate::params::{bad, vec3};
 use crate::{Result, Session};
 
 /// A pick, as every command that takes one reads it.
@@ -63,6 +63,17 @@ fn occurrence_name(s: &Session, id: u64) -> String {
     s.doc.occurrences.iter().find(|o| o.id == id).map(|o| o.name.clone()).unwrap_or_else(|| id.to_string())
 }
 
+/// A point of a pick: [x,y,z] within ±1e7 mm (`MAX_OFFSET_MM`), the size a design can have.
+fn point(v: &Value, cmd: &str, what: &str, key: &str) -> Result<Vec3> {
+    let cap = solidcraft_doc::constraints::MAX_OFFSET_MM;
+    let xyz: Option<Vec<f64>> = v.as_array().filter(|a| a.len() == 3).and_then(|a| a.iter().map(Value::as_f64).collect());
+    match xyz {
+        Some(c) if c.iter().all(|c| c.abs() <= cap) => vec3(v).ok_or_else(|| bad(cmd, format!("`{what}`: {key} must be a point [x,y,z]"))),
+        Some(_) => Err(bad(cmd, format!("`{what}`: {key} must be within ±{cap} mm"))),
+        None => Err(bad(cmd, format!("`{what}`: {key} must be a name or a point [x,y,z]"))),
+    }
+}
+
 /// A pick parameter (`what` names it in errors), checked to resolve.
 fn pick(s: &Session, v: Option<&Value>, what: &str, cmd: &str) -> Result<GeoRef> {
     let Some(v) = v.filter(|v| v.is_object()) else { return Err(bad(cmd, format!("`{what}` must be a pick: {PICK}"))) };
@@ -93,16 +104,17 @@ fn pick(s: &Session, v: Option<&Value>, what: &str, cmd: &str) -> Result<GeoRef>
             Some(Value::String(name)) => {
                 let pick = match v.get("near") {
                     None | Some(Value::Null) => Vec3::ZERO,
-                    Some(n) => vec3(n).ok_or_else(|| bad(cmd, format!("`{what}`: near must be [x,y,z]")))?,
+                    Some(n) => point(n, cmd, what, "near")?,
                 };
                 let name = name.clone();
                 let geo = match kind {
                     PickWhat::Face => Geo::Face { name, pick },
                     PickWhat::Edge => Geo::Edge { name, pick },
                     PickWhat::Vertex => {
-                        let end = match str_(v, "end") {
-                            None | Some("start") => EdgeEnd::Start,
-                            Some("end") => EdgeEnd::End,
+                        let end = match v.get("end") {
+                            None | Some(Value::Null) => EdgeEnd::Start,
+                            Some(Value::String(e)) if e == "start" => EdgeEnd::Start,
+                            Some(Value::String(e)) if e == "end" => EdgeEnd::End,
                             Some(_) => return Err(bad(cmd, format!("`{what}`: end must be start or end"))),
                         };
                         Geo::Vertex { edge: name, end, pick }
@@ -111,7 +123,7 @@ fn pick(s: &Session, v: Option<&Value>, what: &str, cmd: &str) -> Result<GeoRef>
                 GeoRef { occurrence, geo }
             }
             Some(x) => {
-                let p = vec3(x).ok_or_else(|| bad(cmd, format!("`{what}`: {key} must be a name or a point [x,y,z]")))?;
+                let p = point(x, cmd, what, key)?;
                 geo_at(&s.doc, &st, occurrence, kind, p).map_err(|e| bad(cmd, format!("`{what}`: {e}")))?
             }
             None => return Err(bad(cmd, format!("`{what}` needs a face, edge, vertex or origin"))),
@@ -123,9 +135,27 @@ fn pick(s: &Session, v: Option<&Value>, what: &str, cmd: &str) -> Result<GeoRef>
 
 /// A number-or-text value in its unit (degrees for an Angle), with the expression it was typed
 /// as (kept, so the constraint follows the parameters it names).
-fn amount(s: &Session, v: &Value, angle: bool, cmd: &str) -> Result<(f64, Option<String>)> {
+fn amount(s: &Session, v: &Value, angle: bool, key: &str, cmd: &str) -> Result<(f64, Option<String>)> {
+    use solidcraft_doc::constraints::{MAX_OFFSET_DEG, MAX_OFFSET_MM};
+    let (cap, unit) = if angle { (MAX_OFFSET_DEG, "deg") } else { (MAX_OFFSET_MM, "mm") };
+    // A number out of range says so in the constraint's terms (the joint check would say only
+    // that it is not a number).
+    if let Some(x) = v.as_f64()
+        && x.abs() > cap
+    {
+        return Err(bad(cmd, format!("{key} {x} is not a number within ±{cap} {unit}")));
+    }
     let x = value(s, v, angle, cmd)?;
     Ok((if angle { x.to_degrees() } else { x }, typed(Some(v))))
+}
+
+/// A true/false parameter: absent or null is `None`; anything but a boolean is refused.
+fn flag(p: &Value, key: &str, cmd: &str) -> Result<Option<bool>> {
+    match p.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Bool(x)) => Ok(Some(*x)),
+        Some(_) => Err(bad(cmd, format!("`{key}` must be true or false"))),
+    }
 }
 
 fn kind_param(p: &Value, cmd: &str) -> Result<Option<ConstraintKind>> {
@@ -200,29 +230,42 @@ fn build(s: &Session, p: &Value, base: Option<&Constraint>, cmd: &str) -> Result
     let counted = given.or(base.filter(|b| b.kind == kind).map(|b| b.solution)).unwrap_or(kind.default_solution(false));
     let want = kind.picks(counted);
     let present = slots.iter().flatten().count();
-    let picks: Vec<GeoRef> = slots.iter().map_while(Clone::clone).collect();
-    if present != want || picks.len() != present {
+    if let Some(missing) = ["a", "b", "ref"].into_iter().take(want).zip(&slots).find_map(|(k, g)| g.is_none().then_some(k)) {
+        return Err(bad(cmd, format!("`{missing}` is missing: {} takes {want} picks", kind.word())));
+    }
+    if present != want {
         return Err(bad(cmd, format!("{} takes {want} picks, not {present}", kind.word())));
     }
+    let picks: Vec<GeoRef> = slots.iter().flatten().cloned().collect();
     let (Some(ga), Some(gb)) = (picks.first(), picks.get(1)) else { return Err(bad(cmd, format!("{} takes {want} picks", kind.word()))) };
     if ga.occurrence == gb.occurrence {
         return Err(bad(cmd, format!("both picks are on {}: pick another component", occurrence_name(s, ga.occurrence))));
     }
-    let st = s.model.state();
-    let world = |g: &GeoRef, what: &str| resolve_world(&s.doc, &st, g).map_err(|e| bad(cmd, format!("`{what}`: {e}")));
-    let (wa, wb) = (world(ga, "a")?, world(gb, "b")?);
-    let prediction = if bool_(p, "predict").unwrap_or(false) { predict_prims(kind, &wa, &wb) } else { None };
-    let solution = match (given, prediction, base) {
-        (Some(g), ..) => g,
-        (None, Some(pr), _) => pr.solution,
-        (None, None, Some(b)) if b.kind == kind && fits_picks(kind, b.solution, &wa, &wb, cmd).is_ok() => b.solution,
-        _ => kind.default_solution(is_axis(&wa) && is_axis(&wb)),
+    let predict = flag(p, "predict", cmd)?.unwrap_or(false);
+    // An edit that keeps the picks, type and solution does not look at the geometry again (R134):
+    // a Lost constraint can still be renamed, given another offset, limits, lock or suppressed.
+    let same_geometry = base.is_some_and(|b| b.picks == picks && b.kind == kind && given.is_none_or(|g| g == b.solution)) && !predict;
+    let (solution, prediction) = match base {
+        Some(b) if same_geometry => (b.solution, None),
+        _ => {
+            let st = s.model.state();
+            let world = |g: &GeoRef, what: &str| resolve_world(&s.doc, &st, g).map_err(|e| bad(cmd, format!("`{what}`: {e}")));
+            let (wa, wb) = (world(ga, "a")?, world(gb, "b")?);
+            let prediction = if predict { predict_prims(kind, &wa, &wb) } else { None };
+            let solution = match (given, prediction, base) {
+                (Some(g), ..) => g,
+                (None, Some(pr), _) => pr.solution,
+                (None, None, Some(b)) if b.kind == kind && fits_picks(kind, b.solution, &wa, &wb, cmd).is_ok() => b.solution,
+                _ => kind.default_solution(is_axis(&wa) && is_axis(&wb)),
+            };
+            fits_picks(kind, solution, &wa, &wb, cmd)?;
+            (solution, prediction)
+        }
     };
-    fits_picks(kind, solution, &wa, &wb, cmd)?;
     let angle = kind.is_angle();
     let (offset, offset_expr) = match p.get("offset") {
         Some(Value::Null) => return Err(bad(cmd, "`offset` must be a number or an expression")),
-        Some(v) => amount(s, v, angle, cmd)?,
+        Some(v) => amount(s, v, angle, "offset", cmd)?,
         None => match (prediction, base) {
             (Some(pr), _) => (pr.offset, None),
             (None, Some(b)) => (b.offset, b.exprs.offset.clone()),
@@ -233,7 +276,7 @@ fn build(s: &Session, p: &Value, base: Option<&Constraint>, cmd: &str) -> Result
         match p.get(key) {
             None => Ok(was),
             Some(Value::Null) => Ok((None, None)),
-            Some(v) => amount(s, v, angle, cmd).map(|(x, e)| (Some(x), e)),
+            Some(v) => amount(s, v, angle, key, cmd).map(|(x, e)| (Some(x), e)),
         }
     };
     let (min, min_expr) = limit("min", base.map_or((None, None), |b| (b.limits.min, b.exprs.min.clone())))?;
@@ -244,11 +287,7 @@ fn build(s: &Session, p: &Value, base: Option<&Constraint>, cmd: &str) -> Result
         Some(Value::Bool(l)) => *l,
         Some(_) => return Err(bad(cmd, "`lock` must be true or false")),
     };
-    let suppressed = match p.get("suppressed") {
-        None | Some(Value::Null) => base.is_some_and(|b| b.suppressed),
-        Some(Value::Bool(x)) => *x,
-        Some(_) => return Err(bad(cmd, "`suppressed` must be true or false")),
-    };
+    let suppressed = flag(p, "suppressed", cmd)?.unwrap_or(base.is_some_and(|b| b.suppressed));
     let name = match p.get("name") {
         None | Some(Value::Null) => base.map_or_else(|| next_name(&s.doc.assembly, kind), |b| b.name.clone()),
         Some(Value::String(n)) => {
@@ -325,7 +364,7 @@ fn constraint_id(s: &Session, v: &Value, cmd: &str) -> Result<u64> {
     let key = match v {
         Value::String(k) => k.clone(),
         Value::Number(n) => n.to_string(),
-        _ => return Err(bad(cmd, "`constraint` must be an id, a name or a list of them")),
+        _ => return Err(bad(cmd, "`constraint` must be an id or a name")),
     };
     s.doc.assembly.constraint(&key).map(|c| c.id).ok_or_else(|| bad(cmd, format!("no constraint `{key}`")))
 }
@@ -337,6 +376,9 @@ fn constraint_ids(s: &Session, p: &Value, cmd: &str) -> Result<Vec<u64>> {
         Some(v @ (Value::String(_) | Value::Number(_))) => vec![constraint_id(s, v, cmd)?],
         _ => return Err(bad(cmd, "`constraint` must be an id, a name or a list of them")),
     };
+    if ids.is_empty() {
+        return Err(bad(cmd, format!("nothing to {}: `constraint` lists no constraints", cmd.trim_start_matches("constraint."))));
+    }
     let mut seen = std::collections::BTreeSet::new();
     ids.retain(|id| seen.insert(*id));
     Ok(ids)
@@ -366,11 +408,7 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
 fn suppress(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "constraint.suppress";
     let ids = constraint_ids(s, p, cmd)?;
-    let to = match p.get("suppressed") {
-        None | Some(Value::Null) => None,
-        Some(Value::Bool(x)) => Some(*x),
-        Some(_) => return Err(bad(cmd, "`suppressed` must be true or false")),
-    };
+    let to = flag(p, "suppressed", cmd)?;
     if s.doc.assembly.constraints.iter().any(|c| ids.contains(&c.id) && to != Some(c.suppressed)) {
         for c in s.doc_mut().assembly.constraints.iter_mut().filter(|c| ids.contains(&c.id)) {
             c.suppressed = to.unwrap_or(!c.suppressed);
@@ -501,6 +539,10 @@ mod constraints_compile_tests;
 #[cfg(test)]
 #[path = "constraints_create_tests.rs"]
 mod constraints_create_tests;
+
+#[cfg(test)]
+#[path = "constraints_copy_tests.rs"]
+mod constraints_copy_tests;
 
 #[cfg(test)]
 #[path = "constraints_hostile_tests.rs"]

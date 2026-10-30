@@ -41,31 +41,58 @@ fn hostile_constraint_params_are_refused() {
     let create = "constraint.create";
     // Numbers out of range, as numbers and as text.
     // A NaN number reaches a command as null: an offset refuses it (a limit's null clears it, spec §5).
-    refused(&mut s, create, with(mate(), json!({"offset": f64::NAN})), "offset");
-    for v in [json!("NaN"), json!("inf"), json!("-inf"), json!(1e300), json!(-1e300), json!("1e300 mm")] {
-        for key in ["offset", "min", "max"] {
-            refused(&mut s, create, with(mate(), json!({key: v.clone()})), "");
+    refused(&mut s, create, with(mate(), json!({"offset": f64::NAN})), "`offset` must be a number or an expression");
+    for key in ["offset", "min", "max"] {
+        refused(&mut s, create, with(mate(), json!({key: "NaN"})), "unknown parameter `NaN`");
+        refused(&mut s, create, with(mate(), json!({key: "inf"})), "unknown parameter `inf`");
+        refused(&mut s, create, with(mate(), json!({key: "-inf"})), "unknown parameter `inf`");
+        // f64 Display writes 1e300 in full: its digits, then the reason.
+        for v in [json!(1e300), json!(-1e300), json!("1e300 mm")] {
+            let sign = if v.as_f64().is_some_and(|x| x < 0.0) { "-" } else { "" };
+            refused(&mut s, create, with(mate(), json!({key: v.clone()})), &format!("{key} {sign}1000000000"));
+            refused(&mut s, create, with(mate(), json!({key: v})), "0 is not a number within ±10000000 mm");
         }
     }
-    refused(&mut s, create, with(mate(), json!({"offset": "1e300 mm"})), "not a number within");
     refused(&mut s, create, with(mate(), json!({"min": 5, "max": 1})), "min 5 is above max 1");
-    // An expression cycle, and a parameter that is gone.
-    let _ = s.execute("parameters.add", &json!({"name": "a", "expression": "b + 1 mm"}));
+    // An expression cycle: the parameter table refuses to hold one (`a = b + 1` names a `b` that
+    // isn't there yet), so the offset names a parameter that does not exist.
+    assert!(s.execute("parameters.add", &json!({"name": "a", "expression": "b + 1 mm"})).is_err());
     let _ = s.execute("parameters.add", &json!({"name": "b", "expression": "a"}));
-    refused(&mut s, create, with(mate(), json!({"offset": "a"})), "");
+    refused(&mut s, create, with(mate(), json!({"offset": "a"})), "unknown parameter `a`");
     run(&mut s, "parameters.add", json!({"name": "gone", "expression": "2 mm"}));
     run(&mut s, "parameters.delete", json!({"name": "gone"}));
-    refused(&mut s, create, with(mate(), json!({"offset": "gone * 2"})), "gone");
+    refused(&mut s, create, with(mate(), json!({"offset": "gone * 2"})), "unknown parameter `gone`");
     // Picks.
-    refused(&mut s, create, json!({"type": "mate", "a": face("B", [50.0, 25.0, 60.0]), "b": face("B", [50.0, 25.0, 40.0])}), "both picks are on B");
-    refused(&mut s, create, with(mate(), json!({"a": {"occurrence": 0, "face": [50.0, 25.0, 20.0]}})), "origin");
-    refused(&mut s, create, with(mate(), json!({"a": {"occurrence": "A", "face": "NoSuchFace"}})), "NoSuchFace");
+    refused(
+        &mut s,
+        create,
+        json!({"type": "mate", "a": face("B", [50.0, 25.0, 60.0]), "b": face("B", [50.0, 25.0, 40.0])}),
+        "both picks are on B:1: pick another component",
+    );
+    refused(
+        &mut s,
+        create,
+        with(mate(), json!({"a": {"occurrence": 0, "face": [50.0, 25.0, 20.0]}})),
+        "the assembly itself has no faces, edges or vertices to pick",
+    );
+    refused(&mut s, create, with(mate(), json!({"a": {"occurrence": "A", "face": "NoSuchFace"}})), "the face `NoSuchFace` no longer exists");
     refused(&mut s, create, with(mate(), json!({"a": {"occurrence": "A"}})), "face, edge, vertex or origin");
-    refused(&mut s, create, with(mate(), json!({"a": {"occurrence": "A", "face": [1e300, 0, 0]}})), "");
+    refused(&mut s, create, with(mate(), json!({"a": {"occurrence": "A", "face": [1e300, 0, 0]}})), "face must be within ±10000000 mm");
+    refused(&mut s, create, with(mate(), json!({"a": {"occurrence": "A", "face": "x", "near": [0, 1e300, 0]}})), "near must be within ±10000000 mm");
+    refused(&mut s, create, with(mate(), json!({"a": {"occurrence": "A", "vertex": "x", "end": 1}})), "end must be start or end");
+    refused(&mut s, create, with(mate(), json!({"predict": "yes"})), "`predict` must be true or false");
+    refused(&mut s, create, with(mate(), json!({"suppressed": 1})), "`suppressed` must be true or false");
+    refused(&mut s, create, with(mate(), json!({"lock": "no"})), "`lock` must be true or false");
     refused(&mut s, create, with(mate(), json!({"a": "A"})), "pick");
     refused(&mut s, create, with(mate(), json!({"b": {"occurrence": "B", "origin": "w"}})), "origin");
-    refused(&mut s, create, json!({"type": "mate", "a": face("A", [50.0, 25.0, 20.0])}), "Mate takes 2 picks");
-    refused(&mut s, create, with(mate(), json!({"ref": {"origin": "z"}})), "Mate takes 2 picks");
+    refused(&mut s, create, json!({"type": "mate", "a": face("A", [50.0, 25.0, 20.0])}), "`b` is missing: Mate takes 2 picks");
+    refused(
+        &mut s,
+        create,
+        json!({"type": "mate", "b": face("B", [50.0, 25.0, 40.0]), "ref": {"origin": "z"}}),
+        "`a` is missing: Mate takes 2 picks",
+    );
+    refused(&mut s, create, with(mate(), json!({"ref": {"origin": "z"}})), "Mate takes 2 picks, not 3");
     refused(&mut s, create, with(mate(), json!({"type": "symmetry"})), "Symmetry comes in a later version");
     refused(&mut s, create, with(mate(), json!({"type": "weld"})), "`type`");
     refused(&mut s, create, with(mate(), json!({"solution": "inside"})), "Mate has no `inside` solution");
@@ -82,7 +109,7 @@ fn hostile_constraint_params_are_refused() {
     // Names.
     refused(&mut s, create, with(mate(), json!({"name": "x".repeat(10 << 20)})), "at most 128");
     refused(&mut s, create, with(mate(), json!({"name": ""})), "can't be empty");
-    refused(&mut s, create, with(mate(), json!({"name": 7})), "name");
+    refused(&mut s, create, with(mate(), json!({"name": 7})), "`name` must be text");
     let joint = s.doc_mut().allocate_id().unwrap();
     let frame = |o: u64| JointOrigin { occurrence: o, snap: Snap::Frame { origin: Vec3::ZERO, z: Vec3::Z, x: None } };
     let (drum, ball) = (frame(occ(&s, "Drum")), frame(occ(&s, "Ball")));
@@ -100,7 +127,7 @@ fn hostile_constraint_params_are_refused() {
         suppressed: true,
         exprs: JointExprs::default(),
     });
-    refused(&mut s, create, with(mate(), json!({"name": "Hinge"})), "already a joint's name");
+    refused(&mut s, create, with(mate(), json!({"name": "Hinge"})), "`Hinge` is already a joint's name");
     // A suppressed occurrence (its only feature suppressed: nothing left to pick) and a deleted one.
     let mut gone = blocks();
     let bottom = {
@@ -110,8 +137,8 @@ fn hostile_constraint_params_are_refused() {
     };
     let feature = gone.doc.features.iter().find(|f| Some(f.component) == gone.doc.find_component("B")).unwrap().id;
     run(&mut gone, "timeline.suppress", json!({"feature": feature, "suppressed": true}));
-    refused(&mut gone, create, mate(), "");
-    refused(&mut gone, create, with(mate(), json!({"b": bottom})), "no longer exists");
+    refused(&mut gone, create, mate(), "`b`: no named face of that component there");
+    refused(&mut gone, create, with(mate(), json!({"b": bottom})), "`b`: the face `F6:-z` no longer exists");
     let mut deleted = blocks();
     let ball = occ(&deleted, "Ball");
     run(&mut deleted, "component.delete", json!({"component": "Ball"}));
@@ -119,19 +146,34 @@ fn hostile_constraint_params_are_refused() {
     // Edit: the same checks on an existing constraint.
     run(&mut s, create, mate());
     let edit = "constraint.edit";
-    refused(&mut s, edit, json!({"constraint": "Mate:1", "offset": 1e300}), "");
+    refused(&mut s, edit, json!({"constraint": "Mate:1", "offset": 1e300}), "0 is not a number within ±10000000 mm");
     refused(&mut s, edit, json!({"constraint": "Mate:1", "offset": "1e300 mm"}), "not a number within");
     refused(&mut s, edit, json!({"constraint": "Mate:1", "min": 5, "max": 1}), "min 5 is above max 1");
-    refused(&mut s, edit, json!({"constraint": "Mate:1", "b": face("A", [50.0, 25.0, 0.0])}), "both picks are on A");
+    refused(&mut s, edit, json!({"constraint": "Mate:1", "b": face("A", [50.0, 25.0, 0.0])}), "both picks are on A:1: pick another component");
     refused(&mut s, edit, json!({"constraint": "Mate:1", "type": "symmetry"}), "Symmetry comes in a later version");
-    refused(&mut s, edit, json!({"constraint": "Mate:1", "ref": {"origin": "z"}}), "Mate takes 2 picks");
+    refused(&mut s, edit, json!({"constraint": "Mate:1", "ref": {"origin": "z"}}), "Mate takes 2 picks, not 3");
     refused(&mut s, edit, json!({"constraint": "Mate:1", "name": "Hinge"}), "already a joint's name");
     refused(&mut s, edit, json!({"constraint": "Mate:1", "name": ""}), "can't be empty");
-    refused(&mut s, edit, json!({"constraint": "Mate:1", "lock": true}), "lock");
+    refused(&mut s, edit, json!({"constraint": "Mate:1", "lock": true}), "lock is for Insert only, not Mate");
+    refused(&mut s, edit, json!({"constraint": "Mate:1", "lock": 1}), "`lock` must be true or false");
+    refused(&mut s, edit, json!({"constraint": "Mate:1", "suppressed": "yes"}), "`suppressed` must be true or false");
+    refused(&mut s, edit, json!({"constraint": "Mate:1", "predict": 1}), "`predict` must be true or false");
+    refused(
+        &mut s,
+        edit,
+        json!({"constraint": "Mate:1", "a": {"occurrence": "A", "face": "x", "near": [1e300, 0, 0]}}),
+        "near must be within ±10000000 mm",
+    );
     refused(&mut s, edit, json!({"constraint": "Mate:9"}), "no constraint `Mate:9`");
-    refused(&mut s, edit, json!({"constraint": [1, 2]}), "constraint");
+    refused(&mut s, edit, json!({"constraint": [1, 2]}), "`constraint` must be an id or a name");
     refused(&mut s, "constraint.delete", json!({"constraint": ["Mate:1", "Mate:9"]}), "no constraint `Mate:9`");
-    refused(&mut s, "constraint.suppress", json!({"constraint": {"x": 1}}), "constraint");
+    refused(&mut s, "constraint.suppress", json!({"constraint": {"x": 1}}), "`constraint` must be an id, a name or a list of them");
+    refused(&mut s, "constraint.suppress", json!({"constraint": "Mate:1", "suppressed": "yes"}), "`suppressed` must be true or false");
+    refused(&mut s, "constraint.suppress", json!({"constraint": []}), "nothing to suppress");
+    refused(&mut s, "constraint.delete", json!({"constraint": []}), "nothing to delete");
+    refused(&mut s, "constraint.list", json!({"occurrence": "Nobody"}), "no occurrence `Nobody`");
+    refused(&mut s, "constraint.list", json!({"occurrence": [1]}), "an occurrence must be an id or a name");
+    refused(&mut s, "constraint.inspect", json!({"constraint": ["Mate:1"]}), "`constraint` must be an id or a name");
     refused(&mut s, "constraint.inspect", json!({"constraint": "Mate:9"}), "no constraint `Mate:9`");
     // The 10,001st constraint.
     let record = s.doc.assembly.constraints[0].clone();

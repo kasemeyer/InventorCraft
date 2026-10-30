@@ -365,3 +365,27 @@ fn joint_inspect_skips_compiled_joints() {
     let id = solidcraft_doc::constraints::compiled_id(s.doc.assembly.constraints[0].id, 0);
     assert!(s.execute("joint.inspect", &json!({"joint": id})).is_err());
 }
+
+/// R134: an edit that keeps the picks, type and solution does not resolve them again, so a Lost
+/// constraint (its face's feature deleted) can still be renamed and given another offset.
+#[test]
+fn a_lost_constraint_can_be_renamed_and_given_an_offset() {
+    let mut s = blocks();
+    run(&mut s, "constraint.create", mate_a_b());
+    let b = s.doc.find_component("B").unwrap();
+    let feature = s.doc.features.iter().find(|f| f.component == b).unwrap().id;
+    run(&mut s, "timeline.delete", json!({"features": [feature.to_string()]}));
+    let i = run(&mut s, "constraint.inspect", json!({"constraint": "Mate:1"}));
+    assert!(i["constraints"][0]["lost"].is_string(), "{i}");
+    let steps = s.undo.len();
+    let r = run(&mut s, "constraint.edit", json!({"constraint": "Mate:1", "name": "Seat"}));
+    assert_eq!(r["name"], "Seat", "{r}");
+    assert_eq!(s.undo.len(), steps + 1);
+    run(&mut s, "constraint.edit", json!({"constraint": "Seat", "offset": 3}));
+    assert_eq!(s.undo.len(), steps + 2);
+    assert_eq!(s.doc.assembly.constraints[0].offset, 3.0);
+    // A new solution looks at the picks again, and they are gone.
+    let e = s.execute("constraint.edit", &json!({"constraint": "Seat", "solution": "flush"})).unwrap_err().to_string();
+    assert!(e.contains("`b`:"), "{e}");
+    assert_eq!(s.undo.len(), steps + 2);
+}
