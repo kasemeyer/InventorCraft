@@ -10,7 +10,10 @@ use solidcraft_doc::joints::occurrence_world;
 use solidcraft_doc::{Mat, apply_point, apply_vector};
 use solidcraft_geom::Vec3;
 
+use solidcraft_doc::constraints::{ConstraintKind, ConstraintSolution, PickWhat, geo_at};
+
 use crate::Session;
+use crate::constraints::{Draft, preview};
 use crate::test_support::{blocks, occ, run};
 
 const TOL: f64 = 1e-9;
@@ -164,6 +167,52 @@ fn a_limited_angle_starts_at_its_offset() {
     let r = run(&mut s, "constraint.edit", json!({"constraint": "Angle:1", "offset": 50}));
     assert!((fronts_angle(&s) - 40.0).abs() <= ANG, "{}", fronts_angle(&s));
     let w = r["warnings"][0].as_str().unwrap_or_else(|| panic!("no warning: {r}"));
+    assert!(w.contains("Angle:1") && w.contains("40 deg") && w.contains("50 deg"), "{w}");
+}
+
+/// The angle between A's and B's front normals under the placements `world`.
+fn fronts_angle_in(s: &Session, world: &std::collections::BTreeMap<u64, Mat>) -> f64 {
+    let front = |name: &str| apply_vector(&world[&occ(s, name)], Vec3::new(0.0, -1.0, 0.0));
+    let (a, b) = (front("A"), front("B"));
+    a.cross(b).len().atan2(a.dot(b)).to_degrees()
+}
+
+/// R160: the preview of a limited Angle takes R153's start step, so it shows the pose the
+/// command makes, and carries the command's clamp warning.
+#[test]
+fn a_limited_angle_previews_where_it_commits() {
+    let mut s = blocks();
+    let st = s.model.state();
+    let pick = |name: &str, p: Vec3| geo_at(&s.doc, &st, occ(&s, name), PickWhat::Face, p).unwrap();
+    let draft = Draft {
+        kind: ConstraintKind::Angle,
+        solution: Some(ConstraintSolution::Undirected),
+        a: Some(pick("A", Vec3::new(50.0, 0.0, 10.0))),
+        b: Some(pick("B", Vec3::new(50.0, 0.0, 50.0))),
+        offset: Some("30".into()),
+        min: Some("10".into()),
+        max: Some("40".into()),
+        ..Draft::default()
+    };
+    drop(st);
+    let pv = preview(&s, &draft);
+    assert_eq!(pv.refused, None);
+    assert!((fronts_angle_in(&s, &pv.world) - 30.0).abs() <= ANG, "{}", fronts_angle_in(&s, &pv.world));
+    assert_eq!(pv.warning, None);
+    // Past the max: the preview starts at the max and says what the command says.
+    let past = preview(&s, &Draft { offset: Some("50".into()), ..draft.clone() });
+    assert!((fronts_angle_in(&s, &past.world) - 40.0).abs() <= ANG, "{}", fronts_angle_in(&s, &past.world));
+    assert_eq!(past.warning.as_deref(), Some("Angle:1 starts at 40 deg, inside its limits [10, 40], not at its offset 50 deg: the part moved there"));
+    // The command makes the pose the preview showed.
+    let r = run(&mut s, "constraint.create", draft.params());
+    assert_eq!(r["status"], "ok", "{r}");
+    assert!((fronts_angle(&s) - 30.0).abs() <= ANG, "{}", fronts_angle(&s));
+    // An offset edit previews the same way.
+    let id = r["id"].as_u64().unwrap();
+    let record = s.doc.assembly.constraints.iter().find(|c| c.id == id).unwrap().clone();
+    let edit = preview(&s, &Draft { offset: Some("50".into()), ..Draft::edit(&record) });
+    assert!((fronts_angle_in(&s, &edit.world) - 40.0).abs() <= ANG, "{}", fronts_angle_in(&s, &edit.world));
+    let w = edit.warning.unwrap_or_default();
     assert!(w.contains("Angle:1") && w.contains("40 deg") && w.contains("50 deg"), "{w}");
 }
 

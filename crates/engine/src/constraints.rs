@@ -671,6 +671,9 @@ pub struct Preview {
     pub status: Option<ConstraintStatus>,
     pub predicted: Option<Prediction>,
     pub refused: Option<String>,
+    /// What the command would warn (R160): a limited constraint whose offset, its start, is
+    /// outside its limits starts at the nearer one.
+    pub warning: Option<String>,
 }
 
 /// A dry solve of the design with draft `d`, through every check its command makes (the
@@ -700,8 +703,23 @@ pub fn preview(s: &Session, d: &Draft) -> Preview {
         return refused(why);
     }
     let predicted = if d.offset.is_none() { predict(s, &c).ok() } else { None };
-    let (sol, map) = dry_solve(s, all, Analysis::DegreesOfFreedom);
-    Preview { world: sol.world, dof: sol.dof, status: map.get(&c.id).cloned(), predicted, refused: None }
+    // R160: a limited Angle made, or its offset edited, starts at its offset first (R153), as
+    // the command does, so the preview shows the pose the command makes.
+    let starts = c.kind == ConstraintKind::Angle
+        && !c.suppressed
+        && !c.limits.is_empty()
+        && base.as_ref().is_none_or(|b| b.offset != c.offset || b.exprs.offset != c.exprs.offset);
+    let (sol, map) = if starts {
+        let mut t = s.scratch();
+        t.doc_mut().assembly.constraints = all;
+        crate::cmd::constraints::start_angle(&mut t, c.id);
+        let all = t.doc.assembly.constraints.clone();
+        dry_solve(&t, all, Analysis::DegreesOfFreedom)
+    } else {
+        dry_solve(s, all, Analysis::DegreesOfFreedom)
+    };
+    let warning = crate::cmd::constraints::clamped(s, &c);
+    Preview { world: sol.world, dof: sol.dof, status: map.get(&c.id).cloned(), predicted, refused: None, warning }
 }
 
 /// What a pick is (`None` when it does not resolve).

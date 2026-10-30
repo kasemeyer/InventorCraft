@@ -473,7 +473,7 @@ fn answer(s: &Session, id: u64, sol: &joints::Solution, before: &BTreeMap<u64, M
 /// What a limited Mate between planes, Insert or Angle says when its offset, the start of its
 /// bounded value (R153 for the Angle), is outside its limits: it starts at the nearer one (as
 /// `joint.create` clamps a joint's values).
-fn clamped(s: &Session, c: &Constraint) -> Option<String> {
+pub(crate) fn clamped(s: &Session, c: &Constraint) -> Option<String> {
     if c.suppressed || c.lock || c.limits.is_empty() {
         return None;
     }
@@ -502,7 +502,7 @@ fn clamped(s: &Session, c: &Constraint) -> Option<String> {
 /// A limited Angle's offset is a start, as a Mate's (R153): one placement solve of the design
 /// with the constraint `id` unlimited at its offset clamped into the limits, so the part turns
 /// there; the bounded solve that follows keeps it (any value inside meets the limits).
-fn start_angle(s: &mut Session, id: u64) {
+pub(crate) fn start_angle(s: &mut Session, id: u64) {
     let Some(c) = s.doc.assembly.constraints.iter().find(|c| c.id == id).cloned() else { return };
     if c.kind != ConstraintKind::Angle || c.suppressed || c.limits.is_empty() {
         return;
