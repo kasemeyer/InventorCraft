@@ -15,7 +15,7 @@ use serde::Serialize;
 use solidcraft_geom::Vec3;
 
 use super::geo::{Prim, PrimKind, resolve};
-use super::{COMPILED_BASE, Constraint, ConstraintKind, ConstraintSolution, PARALLEL_SIN, StateSignature};
+use super::{COMPILED_BASE, Constraint, ConstraintKind, ConstraintSolution, MAX_OFFSET_MM, PARALLEL_SIN, StateSignature};
 use crate::joints::{self, Assembly, Joint, JointKind, JointOrigin, Snap, Solution, nearest_values, occurrence_world};
 use crate::{Document, ModelState, apply_vector};
 
@@ -123,6 +123,12 @@ fn bounds_of(doc: &Document, c: &Constraint) -> Result<Option<(f64, f64)>, Strin
     Ok(Some((lo.min(hi), hi.max(lo))))
 }
 
+/// A Mate's or an Insert's limits as a joint value's (mm): a missing side is the largest offset
+/// (spec §4 caps), `None` without any.
+fn limits(doc: &Document, c: &Constraint) -> Result<Option<(f64, f64)>, String> {
+    Ok(bounds_of(doc, c)?.map(|(lo, hi)| (lo.max(-MAX_OFFSET_MM), hi.min(MAX_OFFSET_MM))))
+}
+
 /// An undirected angle within 0..π: 330° is 30°.
 fn unsigned(a: f64) -> f64 {
     let w = a.rem_euclid(std::f64::consts::TAU);
@@ -208,7 +214,15 @@ fn one(doc: &Document, st: &ModelState, c: &Constraint) -> Result<(Vec<Joint>, V
     // (kind, A side, B side, flip, offset)
     let (kind, a, b, flip, offset): (JointKind, Side, Side, bool, f64) = match c.kind {
         ConstraintKind::Mate => match (mate_role(&ga), mate_role(&gb)) {
-            (Role::Plane(p, n), Role::Plane(q, m)) => (JointKind::Planar, (oa, p, n), (ob, q, m), aligned, offset),
+            (Role::Plane(p, n), Role::Plane(q, m)) => match limits(doc, c)? {
+                // Limits: B's gap along A's normal is a value (z) within them; the offset is its
+                // start (spec §3.4).
+                Some(lim) => {
+                    let j = seeded(doc, st, c, 0, JointKind::Parallel, (oa, p, n), (ob, q, m), aligned, 0.0, 0.0, Some((2, lim, offset)));
+                    return Ok((vec![j], Vec::new()));
+                }
+                None => (JointKind::Planar, (oa, p, n), (ob, q, m), aligned, offset),
+            },
             (Role::Line(p, d), Role::Line(q, e)) => {
                 // Undirected: the sense the axes have now, chosen again on every compile.
                 let flip = if c.solution == S::Undirected { world_dir(doc, oa, d).dot(world_dir(doc, ob, e)) > 0.0 } else { aligned };
@@ -232,7 +246,7 @@ fn one(doc: &Document, st: &ModelState, c: &Constraint) -> Result<(Vec<Joint>, V
             let (wd, we) = (world_dir(doc, oa, d), world_dir(doc, ob, e));
             let target = if c.solution == S::Inside { (ra - rb).abs() } else { ra + rb } + offset;
             let bounds = bounds_of(doc, c)?.map(|(lo, hi)| (target - offset + lo, target - offset + hi));
-            let parallel = seeded(doc, st, c, 0, JointKind::Parallel, (oa, p, d), (ob, q, e), wd.dot(we) > 0.0, 0.0, 0.0);
+            let parallel = seeded(doc, st, c, 0, JointKind::Parallel, (oa, p, d), (ob, q, e), wd.dot(we) > 0.0, 0.0, 0.0, None);
             let apart = eq(1, joints::Equation::AxisDistance { a: side(oa, ga), b: side(ob, gb), target, bounds });
             return Ok((vec![parallel], vec![apart]));
         }
@@ -261,10 +275,20 @@ fn one(doc: &Document, st: &ModelState, c: &Constraint) -> Result<(Vec<Joint>, V
                 unsigned(offset)
             };
             if axis.is_none() && bounds.is_none() {
-                let j = seeded(doc, st, c, 0, JointKind::Angle, (oa, prim_point(&ga), da), (ob, prim_point(&gb), db), true, 0.0, folded);
+                let j = seeded(doc, st, c, 0, JointKind::Angle, (oa, prim_point(&ga), da), (ob, prim_point(&gb), db), true, 0.0, folded, None);
                 return Ok((vec![j], Vec::new()));
             }
             let target = if axis.is_none() { folded } else { offset };
+            // Limits from outside them: this solve holds the nearer bound exactly (any inside
+            // value meets a bounded equation, so the solver would stop just short of it); the
+            // next, from the bound, is bounded again (Task 7: it rests at the bound).
+            let world = |o: u64| Some(if o == 0 { crate::IDENTITY } else { occurrence_world(doc, o) });
+            let probe = joints::Equation::Angle { a: side(oa, ga), b: side(ob, gb), axis, target, bounds };
+            let (target, bounds) = match (bounds, probe.residual(&world)) {
+                (Some((lo, _)), Some(r)) if r < 0.0 => (lo, None),
+                (Some((_, hi)), Some(r)) if r > 0.0 => (hi, None),
+                _ => (target, bounds),
+            };
             return Ok((Vec::new(), vec![eq(0, joints::Equation::Angle { a: side(oa, ga), b: side(ob, gb), axis, target, bounds })]));
         }
         ConstraintKind::Tangent => {
@@ -283,14 +307,20 @@ fn one(doc: &Document, st: &ModelState, c: &Constraint) -> Result<(Vec<Joint>, V
             }
         }
         ConstraintKind::Insert => match (ga, gb) {
-            (Prim::Circle { c: p, axis: n, .. }, Prim::Circle { c: q, axis: m, .. }) => {
-                (JointKind::Revolute, (oa, p, n), (ob, q, m), aligned, offset)
-            }
+            (Prim::Circle { c: p, axis: n, .. }, Prim::Circle { c: q, axis: m, .. }) => match limits(doc, c)? {
+                // Limits (not locked): the distance along the axis is a value within them, the
+                // offset its start; the turn stays free.
+                Some(lim) if !c.lock => {
+                    let j = seeded(doc, st, c, 0, JointKind::Cylindrical, (oa, p, n), (ob, q, m), aligned, 0.0, 0.0, Some((1, lim, offset)));
+                    return Ok((vec![j], Vec::new()));
+                }
+                _ => (JointKind::Revolute, (oa, p, n), (ob, q, m), aligned, offset),
+            },
             _ => return Err(cant()),
         },
         ConstraintKind::Symmetry => return Err(format!("{} compiles in a later wave", c.kind.word())),
     };
-    Ok((vec![seeded(doc, st, c, 0, kind, a, b, flip, offset, 0.0)], Vec::new()))
+    Ok((vec![seeded(doc, st, c, 0, kind, a, b, flip, offset, 0.0, None)], Vec::new()))
 }
 
 /// A point on the pick for a joint frame: a plane's or line's point, a circle's centre.
@@ -303,8 +333,22 @@ fn prim_point(p: &Prim) -> Vec3 {
 
 /// Constraint `c`'s `k`-th compiled member, a joint of `kind` between frames `a` and `b`
 /// (its first joint member when `k` is 0), seeded from its state or the nearest values.
+/// `bound` (value index, its limits, its start) bounds one value: a fresh seed starts it at the
+/// start, and every seed is clamped into the limits (a limit's parameter may have moved).
 #[allow(clippy::too_many_arguments)]
-fn seeded(doc: &Document, st: &ModelState, c: &Constraint, k: u64, kind: JointKind, a: Side, b: Side, flip: bool, offset: f64, angle: f64) -> Joint {
+fn seeded(
+    doc: &Document,
+    st: &ModelState,
+    c: &Constraint,
+    k: u64,
+    kind: JointKind,
+    a: Side,
+    b: Side,
+    flip: bool,
+    offset: f64,
+    angle: f64,
+    bound: Option<(usize, (f64, f64), f64)>,
+) -> Joint {
     let side = |(occurrence, origin, z): Side| JointOrigin { occurrence, snap: Snap::Frame { origin, z, x: None } };
     let mut j = Joint {
         id: compiled_id(c.id, k),
@@ -328,10 +372,23 @@ fn seeded(doc: &Document, st: &ModelState, c: &Constraint, k: u64, kind: JointKi
     let sig = StateSignature { kind: if locked { JointKind::Rigid } else { kind }, flip };
     // Every joint member so far is the constraint's first (`k` 0): a Tangent between cylinders
     // adds an equation, not a joint.
-    j.values = match c.state_for(0, n, sig) {
+    let mut values = match c.state_for(0, n, sig) {
         Some(q) => q.to_vec(),
-        None => nearest_values(doc, st, &j).unwrap_or_else(|| vec![0.0; n]),
+        None => {
+            let mut q = nearest_values(doc, st, &j).unwrap_or_else(|| vec![0.0; n]);
+            if let Some((i, _, start)) = bound
+                && let Some(v) = q.get_mut(i)
+            {
+                *v = start;
+            }
+            q
+        }
     };
+    if let Some((i, lim, _)) = bound {
+        j.limits = (0..n).map(|k| (k == i).then_some(lim)).collect();
+        joints::clamp(&j, &mut values);
+    }
+    j.values = values;
     if locked {
         // Locked at the turn it holds (new: the turn it has now): a rigid joint at that turn.
         j.angle = j.values.first().copied().unwrap_or(0.0);

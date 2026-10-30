@@ -1089,6 +1089,8 @@ pub fn joint_values(asm: &Assembly, compiled: &Compiled) -> BTreeMap<u64, Vec<f6
             let state = owner.zip(member).and_then(|(c, m)| c.state_for(m, n, crate::constraints::StateSignature::of(j)));
             let mut q = state.map_or_else(|| j.values.clone(), <[f64]>::to_vec);
             q.resize(n, 0.0);
+            // A limited constraint's value inside its limits (a limit's parameter may move).
+            clamp(j, &mut q);
             vals.insert(j.id, q);
         }
     }

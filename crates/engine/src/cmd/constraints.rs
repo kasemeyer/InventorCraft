@@ -19,7 +19,7 @@ use solidcraft_geom::Vec3;
 use super::CommandSpec;
 use super::joints::{occurrence_id, typed, value};
 use crate::constraints::{
-    Prediction, gaps, is_axis, offset_now, over_constrains, over_constrains_all, pick_json, predict_prims, prim_json, status_map, word,
+    Prediction, gaps, is_axis, limits_now, offset_now, over_constrains, over_constrains_all, pick_json, predict_prims, prim_json, status_map, word,
 };
 use crate::params::{bad, vec3};
 use crate::{Result, Session};
@@ -374,8 +374,13 @@ pub(crate) fn build(s: &Session, p: &Value, base: Option<&Constraint>, cmd: &str
     // from where the parts are. A new solution keeps them: the state's signature (R132) tells the
     // solve they were solved for another compile (Mate to Flush, Opposed to Aligned), which then
     // re-seeds them.
+    // A limited Mate's or Insert's offset is where its bounded value starts (Task 7): a new
+    // offset starts it there again.
+    let restart = matches!(kind, ConstraintKind::Mate | ConstraintKind::Insert)
+        && (min.is_some() || max.is_some())
+        && base.is_some_and(|b| b.offset != offset || b.exprs.offset != offset_expr);
     let (state, signatures) = match base {
-        Some(b) if b.picks == picks && b.kind == kind => (b.state.clone(), b.signatures.clone()),
+        Some(b) if b.picks == picks && b.kind == kind && !restart => (b.state.clone(), b.signatures.clone()),
         _ => (Vec::new(), Vec::new()),
     };
     let c = Constraint {
@@ -453,7 +458,38 @@ fn answer(s: &Session, id: u64, sol: &joints::Solution, before: &BTreeMap<u64, M
     let c = s.doc.assembly.constraints.iter().find(|c| c.id == id);
     let mut v = json!({"id": id, "name": c.map(|c| c.name.clone()), "dof": dof_json(sol), "moved": moved});
     put_status(&mut v, status_map(s, sol).get(&id));
+    if let Some(w) = c.and_then(|c| clamped(s, c)) {
+        v["warnings"] = json!([w]);
+    }
     v
+}
+
+/// What a limited Mate between planes or a limited Insert says when its offset, the start of
+/// its bounded value, is outside its limits: it starts at the nearer one (as `joint.create`
+/// clamps a joint's values).
+fn clamped(s: &Session, c: &Constraint) -> Option<String> {
+    if c.suppressed || c.lock || c.limits.is_empty() {
+        return None;
+    }
+    let st = s.model.state();
+    let planes = || c.picks.iter().take(2).all(|g| matches!(resolve_world(&s.doc, &st, g), Ok(Prim::Plane { .. })));
+    if !(c.kind == ConstraintKind::Insert || c.kind == ConstraintKind::Mate && planes()) {
+        return None;
+    }
+    let (offset, (min, max)) = (offset_now(s, c), limits_now(s, c));
+    let at = offset.clamp(min.unwrap_or(f64::NEG_INFINITY), max.unwrap_or(f64::INFINITY));
+    let round = |v: f64| (v * 1e6).round() / 1e6;
+    let side = |v: Option<f64>| v.map_or("none".to_string(), |v| round(v).to_string());
+    (at != offset).then(|| {
+        format!(
+            "{} starts at {} mm, inside its limits [{}, {}], not at its offset {} mm: the part moved there",
+            c.name,
+            round(at),
+            side(min),
+            side(max),
+            round(offset)
+        )
+    })
 }
 
 fn create(s: &mut Session, p: &Value) -> Result<Value> {
@@ -757,3 +793,7 @@ mod constraints_status_tests;
 #[cfg(test)]
 #[path = "constraints_angle_tests.rs"]
 mod constraints_angle_tests;
+
+#[cfg(test)]
+#[path = "constraints_limits_tests.rs"]
+mod constraints_limits_tests;

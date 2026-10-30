@@ -340,17 +340,28 @@ fn anchor(p: &Prim) -> Vec3 {
 
 /// The offset in its unit: its expression's value when it has one that works out.
 pub(crate) fn offset_now(s: &Session, c: &Constraint) -> f64 {
+    in_unit(s, c, c.exprs.offset.as_deref(), c.offset)
+}
+
+/// The limits in the constraint's unit (min, max), each its expression's value when it has one
+/// that works out.
+pub(crate) fn limits_now(s: &Session, c: &Constraint) -> (Option<f64>, Option<f64>) {
+    (c.limits.min.map(|v| in_unit(s, c, c.exprs.min.as_deref(), v)), c.limits.max.map(|v| in_unit(s, c, c.exprs.max.as_deref(), v)))
+}
+
+/// A value of `c` typed as `expr` (else the number `v`), in its unit: mm, or degrees for an Angle.
+fn in_unit(s: &Session, c: &Constraint, expr: Option<&str>, v: f64) -> f64 {
     let angle = c.kind.is_angle();
     let kind = if angle { solidcraft_doc::expr::Kind::Angle } else { solidcraft_doc::expr::Kind::Length };
-    match c.exprs.offset.as_deref().map(|e| s.doc.eval(e, kind)) {
-        Some(Ok(v)) if v.is_finite() => {
+    match expr.map(|e| s.doc.eval(e, kind)) {
+        Some(Ok(x)) if x.is_finite() => {
             if angle {
-                v.to_degrees()
+                x.to_degrees()
             } else {
-                v
+                x
             }
         }
-        _ => c.offset,
+        _ => v,
     }
 }
 
