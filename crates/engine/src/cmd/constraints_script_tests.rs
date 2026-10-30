@@ -56,6 +56,10 @@ fn the_first_minute_script_places_five_constraints() {
     let names: Vec<&str> = rows.iter().map(|c| c["name"].as_str().unwrap()).collect();
     assert_eq!(names, ["Mate:1", "Mate:2", "Insert:1", "Mate:3", "Angle:1"], "{list}");
     assert!(rows.iter().all(|c| c["status"] == "ok"), "{list}");
+    // The script's Angle names no solution: it gets the type's default (ANGLE_DEFAULT).
+    let angle = s.doc.assembly.constraint("Angle:1").unwrap();
+    assert_eq!(angle.solution, solidcraft_doc::constraints::ANGLE_DEFAULT);
+    assert_eq!(angle.solution, solidcraft_doc::constraints::ConstraintSolution::ExplicitVector);
     let sol = crate::cmd::joints::solution(&s, &Held::new(), Analysis::DegreesOfFreedom);
     assert_eq!(sol.conflicts, vec![]);
     assert_eq!(sol.errors, vec![]);

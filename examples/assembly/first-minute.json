@@ -22,7 +22,7 @@
   {"command": "constraint.create", "params": {"type": "mate", "solution": "flush", "a": {"occurrence": "A", "face": [50, 25, 0]}, "b": {"occurrence": "Plate", "face": [160, 30, 0]}, "offset": 0}},
   {"command": "constraint.create", "params": {"type": "insert", "solution": "opposed", "a": {"occurrence": "Plate", "edge": [200, 0, 10]}, "b": {"occurrence": "Pin", "edge": [310, 0, 50]}}},
   {"command": "constraint.create", "params": {"type": "mate", "solution": "opposed", "a": {"occurrence": "Pin", "face": [200, 0, 40]}, "b": {"occurrence": "Drum", "face": [415, 0, 20]}}},
-  {"command": "constraint.create", "params": {"type": "angle", "solution": "explicit_vector", "a": {"occurrence": "A", "face": [50, 0, 10]}, "b": {"occurrence": "B", "face": [50, 0, 30]}, "ref": {"occurrence": "A", "edge": [0, 0, 10]}, "offset": 30}},
+  {"command": "constraint.create", "params": {"type": "angle", "a": {"occurrence": "A", "face": [50, 0, 10]}, "b": {"occurrence": "B", "face": [50, 0, 30]}, "ref": {"occurrence": "A", "edge": [0, 0, 10]}, "offset": 30}},
   {"command": "constraint.list", "params": {}},
   {"command": "file.save", "params": {"path": "first-minute.tciasm"}}
 ]}
