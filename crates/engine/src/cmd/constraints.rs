@@ -10,8 +10,7 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 use solidcraft_doc::constraints::{
     Constraint, ConstraintExprs, ConstraintKind, ConstraintLimits, ConstraintSolution, ConstraintStatus, EdgeEnd, Geo, GeoRef, MAX_CONSTRAINTS,
-    OriginItem, PARALLEL_SIN, PickWhat, Prim, TANGENT_PARALLEL_SIN, angle_reference, check_name, compile, geo_at, next_name, owner_of, resolve,
-    resolve_world,
+    OriginItem, PARALLEL_SIN, PickWhat, Prim, TANGENT_PARALLEL_SIN, angle_reference, check_name, compile_with, geo_at, next_name, owner_of, resolve,
 };
 use solidcraft_doc::joints::{self, Analysis, occurrence_world};
 use solidcraft_doc::{Document, DocumentKind, Mat};
@@ -294,7 +293,7 @@ pub(crate) fn build(s: &Session, p: &Value, base: Option<&Constraint>, cmd: &str
         Some(b) if same_geometry => (b.solution, None),
         _ => {
             let st = s.model.state();
-            let world = |g: &GeoRef, what: &str| resolve_world(&s.doc, &st, g).map_err(|e| bad(cmd, format!("`{what}`: {e}")));
+            let world = |g: &GeoRef, what: &str| s.pick_cache.picks(&s.doc, &st).resolve_world(g).map_err(|e| bad(cmd, format!("`{what}`: {e}")));
             let (wa, wb) = (world(ga, "a")?, world(gb, "b")?);
             looked = Some((wa, wb));
             let prediction = if predict { predict_prims(kind, &wa, &wb, None) } else { None };
@@ -314,7 +313,7 @@ pub(crate) fn build(s: &Session, p: &Value, base: Option<&Constraint>, cmd: &str
         && !same_geometry
         && let Some(r) = picks.get(2)
     {
-        let w = resolve_world(&s.doc, &s.model.state(), r).map_err(|e| bad(cmd, format!("`ref`: {e}")))?;
+        let w = s.pick_cache.picks(&s.doc, &s.model.state()).resolve_world(r).map_err(|e| bad(cmd, format!("`ref`: {e}")))?;
         if w.direction().is_none() {
             return Err(bad(cmd, format!("`ref` must be a plane, a line or an axis to measure about, not a {}", word(&w))));
         }
@@ -425,7 +424,10 @@ fn directed_axis(s: &Session, a: &GeoRef, b: &GeoRef, given: Option<Vec3>, looke
         Some(l) => l,
         None => {
             let st = s.model.state();
-            (resolve_world(&s.doc, &st, a).ok()?, resolve_world(&s.doc, &st, b).ok()?)
+            {
+                let picks = s.pick_cache.picks(&s.doc, &st);
+                (picks.resolve_world(a).ok()?, picks.resolve_world(b).ok()?)
+            }
         }
     };
     let (da, db) = (wa.direction()?, wb.direction()?);
@@ -476,7 +478,7 @@ fn clamped(s: &Session, c: &Constraint) -> Option<String> {
         return None;
     }
     let st = s.model.state();
-    let planes = || c.picks.iter().take(2).all(|g| matches!(resolve_world(&s.doc, &st, g), Ok(Prim::Plane { .. })));
+    let planes = || c.picks.iter().take(2).all(|g| matches!(s.pick_cache.picks(&s.doc, &st).resolve_world(g), Ok(Prim::Plane { .. })));
     if !(matches!(c.kind, ConstraintKind::Insert | ConstraintKind::Angle) || c.kind == ConstraintKind::Mate && planes()) {
         return None;
     }
@@ -731,7 +733,7 @@ fn drive(s: &mut Session, p: &Value) -> Result<Value> {
     if c.suppressed {
         return Err(bad(cmd, format!("{} is suppressed: unsuppress it to drive it", c.name)));
     }
-    if let Some((_, why)) = compile(&s.doc, &s.model.state(), &s.doc.assembly).lost.into_iter().find(|(x, _)| *x == id) {
+    if let Some((_, why)) = compile_with(&s.pick_cache.picks(&s.doc, &s.model.state()), &s.doc.assembly).lost.into_iter().find(|(x, _)| *x == id) {
         return Err(bad(cmd, format!("{} is lost ({why}): edit it to drive it", c.name)));
     }
     let values = drive_values(s, &c, p, cmd)?;
@@ -865,7 +867,8 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
         Some(v) => vec![constraint_id(s, v, cmd)?],
     };
     let st = s.model.state();
-    let compiled = compile(&s.doc, &st, &s.doc.assembly);
+    let picks = s.pick_cache.picks(&s.doc, &st);
+    let compiled = compile_with(&picks, &s.doc.assembly);
     let sol = super::joints::solution(s, &joints::Held::new(), Analysis::DegreesOfFreedom);
     let map = status_map(s, &sol);
     let total: usize = sol.dof.values().sum();
@@ -879,8 +882,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
                 other => other.cloned(),
             };
             let mut v = row(s, c, status.as_ref());
-            let world: Vec<std::result::Result<Prim, String>> =
-                c.picks.iter().map(|g| resolve_world(&s.doc, &st, g).map_err(|e| e.to_string())).collect();
+            let world: Vec<std::result::Result<Prim, String>> = c.picks.iter().map(|g| picks.resolve_world(g).map_err(|e| e.to_string())).collect();
             v["picks"] = c
                 .picks
                 .iter()
@@ -931,7 +933,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
 fn redundant(s: &Session, st: &solidcraft_doc::ModelState, id: u64, total: usize) -> bool {
     let mut doc = (*s.doc).clone();
     doc.assembly.constraints.retain(|c| c.id != id);
-    let without = joints::solve_holding_with_analysis(&doc, st, &joints::Held::new(), Analysis::DegreesOfFreedom);
+    let without = joints::solve_cached(&doc, st, &joints::Held::new(), Analysis::DegreesOfFreedom, None, &s.pick_cache);
     without.dof.values().sum::<usize>() == total
 }
 
@@ -1018,3 +1020,7 @@ mod constraints_drive_tests;
 #[cfg(test)]
 #[path = "constraints_script_tests.rs"]
 mod constraints_script_tests;
+
+#[cfg(test)]
+#[path = "constraints_cache_tests.rs"]
+mod constraints_cache_tests;

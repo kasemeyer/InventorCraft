@@ -4,13 +4,16 @@
 //! A pick that no longer resolves is an error, which makes its constraint Lost. [`geo_at`] makes
 //! a pick from a world point.
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use serde::Serialize;
 use solidcraft_geom::Vec3;
 use solidcraft_kernel::FaceSurface;
 
 use super::{EdgeEnd, Geo, GeoRef, OriginItem};
 use crate::joints::edge::{edge_index, planar_face_beside};
-use crate::joints::face::named_face_in;
+use crate::joints::face::{NamedFace, named_face_in};
 use crate::joints::{component_bodies, component_of, occurrence_world};
 use crate::{DocError, Document, IDENTITY, Mat, ModelBody, ModelState, Result, apply_point, apply_vector, mat_inverse};
 
@@ -161,19 +164,103 @@ pub fn resolve(doc: &Document, st: &ModelState, g: &GeoRef) -> Result<Prim> {
         }
         Geo::Vertex { edge, end, pick } => {
             let (b, i, offset) = named_edge(doc, st, comp, edge, *pick)?;
-            let m = b.mesh();
-            let e = m.edges.get(i).ok_or_else(|| lost("edge", edge))?;
-            let (Some(first), Some(last)) = (e.first(), e.last()) else { return Err(lost("edge", edge)) };
-            let (first, last) = (apply_point(&offset, *first), apply_point(&offset, *last));
-            let (kept, other) = match end {
-                EdgeEnd::Start => (first, last),
-                EdgeEnd::End => (last, first),
-            };
-            // The stored pick is the end as it was picked: an edge whose polyline runs the other
-            // way after a rebuild has that end at its other end.
-            Ok(Prim::Point { p: if other.dist(*pick) < 0.5 * kept.dist(*pick) { other } else { kept } })
+            vertex(b, i, &offset, *end, *pick, edge)
         }
     }
+}
+
+/// A body's faces and edges by their exact persistent names (R156), made once per body geometry
+/// ([`crate::ModelBody::geometry_key`]) by the session's pick cache: a pick whose name is there
+/// is found without the nearest-match scan.
+#[derive(Debug, Default)]
+pub(crate) struct NameIndex {
+    /// Face name → the faces with it (a mesh body has none: faces are not picked on it).
+    faces: HashMap<String, Vec<usize>>,
+    /// Edge name → the first edge with it (as [`crate::name_lookup::locate_edge`] takes it).
+    edges: HashMap<String, usize>,
+}
+
+impl NameIndex {
+    pub(crate) fn of(b: &ModelBody) -> Self {
+        let mut faces: HashMap<String, Vec<usize>> = HashMap::new();
+        if !b.body.is_mesh() {
+            for (i, n) in crate::naming::face_names(b).iter().enumerate() {
+                faces.entry(n.clone()).or_default().push(i);
+            }
+        }
+        let mut edges = HashMap::new();
+        for (i, n) in crate::naming::edge_names(b).into_iter().enumerate() {
+            edges.entry(n).or_insert(i);
+        }
+        NameIndex { faces, edges }
+    }
+}
+
+/// [`resolve`] on component `comp` whose bodies are `bodies` (indices into `st.bodies`, in its
+/// order), names looked up in `index` (a body's [`NameIndex`], `None` when it has none): a face
+/// name that one face of the component has exactly, or an edge name its first body has exactly,
+/// is taken from the index; any other pick (a split or merged face, a name from an older file, a
+/// sheet face, an edge on another body) is found as [`resolve`] finds it.
+pub(crate) fn resolve_indexed(
+    doc: &Document,
+    st: &ModelState,
+    comp: u64,
+    bodies: &[usize],
+    g: &GeoRef,
+    index: &dyn Fn(usize) -> Option<Arc<NameIndex>>,
+) -> Result<Prim> {
+    let plain = |name: &str| crate::name_lookup::legacy_name(name).is_none() && crate::sheet::split_sheet_face_name(name).is_none();
+    // The first body's edge with that very name: what `named_edge` finds first.
+    let exact_edge = |name: &str| {
+        let bi = *bodies.first()?;
+        let i = *index(bi)?.edges.get(name)?;
+        Some((st.bodies.get(bi)?, i))
+    };
+    match &g.geo {
+        Geo::Origin { item } => Ok(origin(*item)),
+        Geo::Face { name, pick } => {
+            let mut hits = Vec::new();
+            if plain(name) {
+                for bi in bodies.iter().copied().filter(|bi| st.bodies.get(*bi).is_some_and(|b| !b.body.is_mesh())) {
+                    let Some(ix) = index(bi) else { return face(doc, st, comp, name, *pick) };
+                    hits.extend(ix.faces.get(name.as_str()).into_iter().flatten().map(|f| (bi, *f)));
+                }
+            }
+            match (hits.as_slice(), hits.first().and_then(|(bi, _)| st.bodies.get(*bi))) {
+                ([(_, f)], Some(body)) => face_prim(&NamedFace { body, face: *f, point: *pick, offset: offset_of(doc, body) }),
+                _ => face(doc, st, comp, name, *pick),
+            }
+        }
+        Geo::Edge { name, pick } => match exact_edge(name).filter(|_| plain(name)) {
+            Some((b, i)) => edge(b, i, &offset_of(doc, b)),
+            None => {
+                let (b, i, offset) = named_edge(doc, st, comp, name, *pick)?;
+                edge(b, i, &offset)
+            }
+        },
+        Geo::Vertex { edge: name, end, pick } => {
+            let (b, i, offset) = match exact_edge(name).filter(|_| plain(name)) {
+                Some((b, i)) => (b, i, offset_of(doc, b)),
+                None => named_edge(doc, st, comp, name, *pick)?,
+            };
+            vertex(b, i, &offset, *end, *pick, name)
+        }
+    }
+}
+
+/// The end of edge `i` of `b` (placed by `offset`) a vertex pick names.
+fn vertex(b: &ModelBody, i: usize, offset: &Mat, end: EdgeEnd, pick: Vec3, name: &str) -> Result<Prim> {
+    let m = b.mesh();
+    let e = m.edges.get(i).ok_or_else(|| lost("edge", name))?;
+    let (Some(first), Some(last)) = (e.first(), e.last()) else { return Err(lost("edge", name)) };
+    let (first, last) = (apply_point(offset, *first), apply_point(offset, *last));
+    let (kept, other) = match end {
+        EdgeEnd::Start => (first, last),
+        EdgeEnd::End => (last, first),
+    };
+    // The stored pick is the end as it was picked: an edge whose polyline runs the other
+    // way after a rebuild has that end at its other end.
+    Ok(Prim::Point { p: if other.dist(pick) < 0.5 * kept.dist(pick) { other } else { kept } })
 }
 
 /// The same in the world (occurrence 0 and origin items included).
@@ -243,6 +330,11 @@ fn own(doc: &Document, b: &ModelBody, p: Vec3) -> Vec3 {
 fn face(doc: &Document, st: &ModelState, comp: u64, name: &str, pick: Vec3) -> Result<Prim> {
     // Only the picked occurrence's own bodies: another part's like-named face is not this pick.
     let nf = named_face_in(doc, st, comp, pick, name).map_err(|_| lost("face", name))?;
+    face_prim(&nf)
+}
+
+/// The primitive a found face gives (see [`face`]).
+fn face_prim(nf: &NamedFace) -> Result<Prim> {
     if let Some((p, n)) = nf.plane()? {
         return Ok(Prim::Plane { p, n });
     }

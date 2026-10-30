@@ -413,7 +413,11 @@ pub use geo::{PickWhat, Prim, PrimKind, geo_at, resolve, resolve_world};
 
 #[path = "constraints_compile.rs"]
 pub mod compile;
-pub use compile::{Compiled, ConstraintStatus, angle_reference, compile, compiled_id, owner_of, statuses};
+pub use compile::{Compiled, ConstraintStatus, angle_reference, compile, compile_with, compiled_id, owner_of, statuses};
+
+#[path = "constraints_cache.rs"]
+pub mod cache;
+pub use cache::{PickCache, Picks};
 
 #[cfg(test)]
 #[path = "constraints_tests.rs"]

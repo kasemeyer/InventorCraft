@@ -42,7 +42,8 @@ pub(crate) fn edge_index(b: &ModelBody, name: Option<&str>, pick: Vec3) -> Optio
 pub(crate) fn face_of(b: &ModelBody, i: usize, name: Option<&str>, pick: Vec3) -> Result<(usize, Vec3, Vec3)> {
     let m = b.mesh();
     let beside: Vec<usize> = m.edge_faces.get(i).map(|fs| fs.iter().map(|f| *f as usize).collect()).unwrap_or_default();
-    let infos = b.body.faces(tol(b))?;
+    // Measured once per body geometry, at this same tolerance (R156).
+    let infos = b.joint_faces()?;
     let planar = |f: usize| infos.iter().find(|x| x.index == f).and_then(|x| x.plane_normal.map(|n| (x.index, n, x.centroid, x.area)));
     let chosen = match name {
         Some(n) => {
@@ -63,7 +64,8 @@ pub(crate) fn face_of(b: &ModelBody, i: usize, name: Option<&str>, pick: Vec3) -
 pub(crate) fn planar_face_beside(b: &ModelBody, i: usize) -> Result<Option<(usize, Vec3, Vec3)>> {
     let m = b.mesh();
     let beside: Vec<usize> = m.edge_faces.get(i).map(|fs| fs.iter().map(|f| *f as usize).collect()).unwrap_or_default();
-    let infos = b.body.faces(tol(b))?;
+    // Measured once per body geometry, at this same tolerance (R156).
+    let infos = b.joint_faces()?;
     Ok(beside
         .iter()
         .filter_map(|f| infos.iter().find(|x| x.index == *f).and_then(|x| x.plane_normal.map(|n| (x.index, n, x.centroid, x.area))))

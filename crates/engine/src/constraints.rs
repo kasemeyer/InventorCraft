@@ -10,8 +10,7 @@ use serde::Serialize;
 use serde_json::{Value, json};
 use solidcraft_doc::Mat;
 use solidcraft_doc::constraints::{
-    Compiled, Constraint, ConstraintKind, ConstraintSolution, ConstraintStatus, EdgeEnd, Geo, GeoRef, Prim, PrimKind, resolve, resolve_world,
-    statuses,
+    Compiled, Constraint, ConstraintKind, ConstraintSolution, ConstraintStatus, EdgeEnd, Geo, GeoRef, Prim, PrimKind, resolve, statuses,
 };
 use solidcraft_doc::joints::{self, Analysis, Solution};
 use solidcraft_geom::Vec3;
@@ -37,8 +36,9 @@ pub fn predict(s: &Session, c: &Constraint) -> Result<Prediction> {
     let kind = c.kind;
     let (Some(a), Some(b)) = (c.picks.first(), c.picks.get(1)) else { return Err(EngineError::Other(format!("{} takes 2 picks", kind.word()))) };
     let st = s.model.state();
-    let ga = resolve_world(&s.doc, &st, a)?;
-    let gb = resolve_world(&s.doc, &st, b)?;
+    let picks = s.pick_cache.picks(&s.doc, &st);
+    let ga = picks.resolve_world(a)?;
+    let gb = picks.resolve_world(b)?;
     let about = if kind == ConstraintKind::Angle {
         solidcraft_doc::constraints::angle_reference(&s.doc, &st, c.solution, &c.picks, c.axis).ok().flatten()
     } else {
@@ -375,13 +375,14 @@ pub(crate) fn status_map(s: &Session, sol: &Solution) -> BTreeMap<u64, Constrain
 pub(crate) fn rebuild(s: &mut Session, sol: &Solution, analysis: Analysis) {
     let map = status_map(s, sol);
     let st = s.model.state();
+    let picks = s.pick_cache.picks(&s.doc, &st);
     let rows: Vec<Row> = s
         .doc
         .assembly
         .constraints
         .iter()
         .map(|c| {
-            let point = |i: usize| c.picks.get(i).and_then(|g| resolve_world(&s.doc, &st, g).ok()).map(|p| anchor(&p));
+            let point = |i: usize| c.picks.get(i).and_then(|g| picks.resolve_world(g).ok()).map(|p| anchor(&p));
             Row {
                 id: c.id,
                 name: c.name.clone(),
@@ -443,8 +444,8 @@ fn dry_solve(s: &Session, constraints: Vec<Constraint>, analysis: Analysis) -> (
     let held = joints::Held::new();
     let memo = if analysis == Analysis::DegreesOfFreedom { s.dof_memo.lock().ok().map(|m| m.clone()) } else { None };
     let sol = match memo {
-        Some(mut memo) => joints::solve_memo(&doc, &st, &held, analysis, &mut memo),
-        None => joints::solve_holding_with_analysis(&doc, &st, &held, analysis),
+        Some(mut memo) => joints::solve_cached(&doc, &st, &held, analysis, Some(&mut memo), &s.pick_cache),
+        None => joints::solve_cached(&doc, &st, &held, analysis, None, &s.pick_cache),
     };
     let map = statuses(&doc.assembly, &Compiled::default(), &sol);
     (sol, map)

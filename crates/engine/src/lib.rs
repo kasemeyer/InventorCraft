@@ -297,6 +297,11 @@ pub struct Session {
     /// Loop degrees of freedom the last joint solve worked out, with what each read: a re-solve
     /// after an edit counts again only the occurrences whose loops the edit touched (R130).
     pub(crate) dof_memo: std::sync::Mutex<solidcraft_doc::joints::DofMemo>,
+    /// What each constraint pick resolves to in its component's coordinates, by the component's
+    /// geometry (R156): solves read it instead of finding every named face and edge again; a
+    /// geometry change (an edit, undo, redo) re-keys a component, so nothing invalidates it by
+    /// hand. View state, not saved; a scratch copy clones it.
+    pub(crate) pick_cache: solidcraft_doc::constraints::PickCache,
     /// Every constraint's status after the last solve, with the DOF counts (Plan E-1 Task 5):
     /// view state, not saved, not undone.
     pub constraint_report: constraints::Report,
@@ -493,6 +498,7 @@ impl Session {
             pending_moves: Default::default(),
             world_cache: Default::default(),
             dof_memo: Default::default(),
+            pick_cache: Default::default(),
             constraint_report: Default::default(),
             shown_constraints: Default::default(),
             dof_stale: false,
@@ -1182,6 +1188,7 @@ impl Session {
             pending_moves: self.pending_moves.clone(),
             world_cache: std::sync::Mutex::new(self.world_cache.lock().ok().and_then(|cache| cache.clone())),
             dof_memo: std::sync::Mutex::new(self.dof_memo.lock().map(|m| m.clone()).unwrap_or_default()),
+            pick_cache: self.pick_cache.clone(),
             constraint_report: self.constraint_report.clone(),
             shown_constraints: self.shown_constraints.clone(),
             dof_stale: self.dof_stale,

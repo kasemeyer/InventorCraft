@@ -194,9 +194,11 @@ pub(crate) fn solution(s: &Session, held: &joints::Held, analysis: joints::Analy
     #[cfg(test)]
     solve_counts::record(analysis);
     // The session's memo of loop degrees of freedom (R130); a poisoned lock solves without it.
+    // The constraints' picks through the session's cache (R156).
+    let st = s.model.state();
     match s.dof_memo.lock() {
-        Ok(mut memo) => joints::solve_memo(&s.doc, &s.model.state(), held, analysis, &mut memo),
-        Err(_) => joints::solve_holding_with_analysis(&s.doc, &s.model.state(), held, analysis),
+        Ok(mut memo) => joints::solve_cached(&s.doc, &st, held, analysis, Some(&mut memo), &s.pick_cache),
+        Err(_) => joints::solve_cached(&s.doc, &st, held, analysis, None, &s.pick_cache),
     }
 }
 

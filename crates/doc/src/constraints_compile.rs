@@ -14,7 +14,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::Serialize;
 use solidcraft_geom::Vec3;
 
-use super::geo::{Prim, PrimKind, resolve};
+use super::cache::{PickCache, Picks};
+use super::geo::{Prim, PrimKind};
 use super::{COMPILED_BASE, Constraint, ConstraintKind, ConstraintSolution, MAX_OFFSET_MM, PARALLEL_SIN, StateSignature};
 use crate::joints::{self, Assembly, Joint, JointKind, JointOrigin, Snap, Solution, nearest_values, occurrence_world};
 use crate::{Document, ModelState, apply_vector};
@@ -44,14 +45,20 @@ pub fn owner_of(id: u64) -> Option<u64> {
     id.checked_sub(COMPILED_BASE).map(|k| k / 4)
 }
 
-/// Compile every unsuppressed constraint of `asm` (Symmetry waits for the second wave).
+/// Compile every unsuppressed constraint of `asm` (Symmetry waits for the second wave), its picks
+/// resolved afresh (a session compiles with its cache: [`compile_with`]).
 pub fn compile(doc: &Document, st: &ModelState, asm: &Assembly) -> Compiled {
+    compile_with(&PickCache::default().picks(doc, st), asm)
+}
+
+/// [`compile`] with the picks resolved through a [`PickCache`] (R156).
+pub fn compile_with(picks: &Picks, asm: &Assembly) -> Compiled {
     let mut out = Compiled::default();
     for c in asm.constraints.iter().filter(|c| !c.suppressed) {
         if c.kind == ConstraintKind::Symmetry {
             continue;
         }
-        match one(doc, st, c) {
+        match one(picks, c) {
             Ok((js, eqs)) => {
                 out.joints.extend(js);
                 out.equations.extend(eqs);
@@ -146,8 +153,7 @@ fn canonical(d: Vec3) -> Vec3 {
 /// frozen a × b in A's frame (set when it became Directed); the reference pick's direction, an
 /// edge's sense canonical. `None` for any other solution.
 fn reference_side(
-    doc: &Document,
-    st: &ModelState,
+    resolver: &Picks,
     solution: ConstraintSolution,
     picks: &[super::GeoRef],
     axis: Option<Vec3>,
@@ -160,7 +166,7 @@ fn reference_side(
         }
         ConstraintSolution::ExplicitVector => {
             let r = picks.get(2).ok_or_else(|| "an Explicit vector Angle takes a third pick".to_string())?;
-            let g = resolve(doc, st, r).map_err(|e| e.to_string())?;
+            let g = resolver.resolve(r).map_err(|e| e.to_string())?;
             if g.direction().is_none() {
                 return Err(format!("Angle can't measure about a {}", word(g.kind())));
             }
@@ -187,7 +193,8 @@ pub fn angle_reference(
     picks: &[super::GeoRef],
     axis: Option<Vec3>,
 ) -> Result<Option<Vec3>, String> {
-    Ok(reference_side(doc, st, solution, picks, axis)?.and_then(|r| r.prim.direction().and_then(|d| world_dir(doc, r.occurrence, d).normalized())))
+    Ok(reference_side(&PickCache::default().picks(doc, st), solution, picks, axis)?
+        .and_then(|r| r.prim.direction().and_then(|d| world_dir(doc, r.occurrence, d).normalized())))
 }
 
 /// A direction of occurrence `occ` in the world.
@@ -197,14 +204,15 @@ fn world_dir(doc: &Document, occ: u64, d: Vec3) -> Vec3 {
 
 /// The joints and equations one constraint compiles to (the compile table, spec §3.4, §3.5),
 /// the joints seeded.
-fn one(doc: &Document, st: &ModelState, c: &Constraint) -> Result<(Vec<Joint>, Vec<joints::Eq>), String> {
+fn one(picks: &Picks, c: &Constraint) -> Result<(Vec<Joint>, Vec<joints::Eq>), String> {
     use ConstraintSolution as S;
+    let (doc, st) = (picks.doc, picks.st);
     let (Some(pa), Some(pb)) = (c.picks.first(), c.picks.get(1)) else { return Err(format!("{} takes 2 picks", c.kind.word())) };
     if pa.occurrence == pb.occurrence {
         return Err("both picks are on one occurrence".into());
     }
-    let ga = resolve(doc, st, pa).map_err(|e| e.to_string())?;
-    let gb = resolve(doc, st, pb).map_err(|e| e.to_string())?;
+    let ga = picks.resolve(pa).map_err(|e| e.to_string())?;
+    let gb = picks.resolve(pb).map_err(|e| e.to_string())?;
     let offset = offset_of(doc, c)?;
     let (oa, ob) = (pa.occurrence, pb.occurrence);
     let cant = || format!("{} can't join a {} and a {}", c.kind.word(), word(ga.kind()), word(gb.kind()));
@@ -254,7 +262,7 @@ fn one(doc: &Document, st: &ModelState, c: &Constraint) -> Result<(Vec<Joint>, V
             let (Some(da), Some(db)) = (ga.direction(), gb.direction()) else { return Err(cant()) };
             let bounds = bounds_of(doc, c)?;
             let axis = match c.solution {
-                S::Directed | S::ExplicitVector => reference_side(doc, st, c.solution, &c.picks, c.axis)?,
+                S::Directed | S::ExplicitVector => reference_side(picks, c.solution, &c.picks, c.axis)?,
                 // Undirected with limits, from two directions parallel now: the unsigned angle
                 // has no slope at 0, so this solve turns b about a fixed direction square to a
                 // (the next, from where it lands, measures unsigned again).

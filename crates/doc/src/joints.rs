@@ -2268,9 +2268,28 @@ pub fn solve_memo(doc: &Document, st: &ModelState, held: &Held, analysis: Analys
     solve_core(doc, st, held, analysis, &compiled(doc, st), Some(memo))
 }
 
+/// [`solve_memo`] (or, without a memo, [`solve_holding_with_analysis`]) with the constraints'
+/// picks resolved through the session's [`crate::constraints::PickCache`] (R156): a re-solve
+/// finds no named face or edge again whose component's geometry is as it was.
+pub fn solve_cached(
+    doc: &Document,
+    st: &ModelState,
+    held: &Held,
+    analysis: Analysis,
+    memo: Option<&mut DofMemo>,
+    cache: &crate::constraints::PickCache,
+) -> Solution {
+    solve_core(doc, st, held, analysis, &compiled_with(doc, st, cache), memo)
+}
+
 /// The design's constraints compiled (nothing to do without any).
 fn compiled(doc: &Document, st: &ModelState) -> Compiled {
     if doc.assembly.constraints.is_empty() { Compiled::default() } else { compile(doc, st, &doc.assembly) }
+}
+
+/// The design's constraints compiled through `cache` (nothing to do without any).
+pub fn compiled_with(doc: &Document, st: &ModelState, cache: &crate::constraints::PickCache) -> Compiled {
+    if doc.assembly.constraints.is_empty() { Compiled::default() } else { crate::constraints::compile_with(&cache.picks(doc, st), &doc.assembly) }
 }
 
 /// Solve with `extra` (constraints compiled by the caller, a candidate among them) chained after
