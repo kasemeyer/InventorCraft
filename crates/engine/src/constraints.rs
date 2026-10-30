@@ -304,6 +304,8 @@ fn occurrence_rows(s: &Session, rows: &[Row], dof: &BTreeMap<u64, usize>) -> Vec
 pub(crate) fn rebuild_idle(s: &mut Session) {
     let occurrences = occurrence_rows(s, &[], &BTreeMap::new());
     s.constraint_report = Report { occurrences, ..Report::default() };
+    // Held by nothing: the rows' counts are exact.
+    s.dof_stale = false;
     prune_shown(s);
 }
 
@@ -374,6 +376,18 @@ pub(crate) fn rebuild(s: &mut Session, sol: &Solution, analysis: Analysis) {
     let dof = if analysis == Analysis::DegreesOfFreedom { sol.dof.clone() } else { std::mem::take(&mut s.constraint_report.dof) };
     let occurrences = occurrence_rows(s, &rows, &dof);
     let any_sick = rows.iter().any(|r| matches!(r.status, ConstraintStatus::Sick { .. } | ConstraintStatus::Lost { .. }));
+    if analysis == Analysis::DegreesOfFreedom {
+        s.dof_stale = false;
+    } else {
+        // A placement solve keeps the last counts; they are stale when what holds the parts
+        // changed (a status, a grounding): the session's refresh counts again (R144).
+        let was = &s.constraint_report;
+        let statuses = |rows: &[Row]| rows.iter().map(|r| (r.id, r.status.clone())).collect::<Vec<_>>();
+        let grounding = |o: &[OccurrenceRow]| o.iter().map(|o| (o.id, o.grounded)).collect::<Vec<_>>();
+        if statuses(&was.rows) != statuses(&rows) || grounding(&was.occurrences) != grounding(&occurrences) {
+            s.dof_stale = true;
+        }
+    }
     s.constraint_report = Report { rows, occurrences, dof, any_sick };
     prune_shown(s);
 }
@@ -384,13 +398,13 @@ fn prune_shown(s: &mut Session) {
     s.shown_constraints.retain(|id| ids.contains(id));
 }
 
-/// After undo, redo or a restored checkpoint put the design back from `previous`: shown glyphs of
-/// constraints that are gone are dropped; when the assembly changed, the DOF counts go (the next
-/// counting solve gives them) and, with nothing left to solve, the rows too (no solve follows to
-/// rebuild them). Otherwise the session's refresh that follows rebuilds the rows.
-pub(crate) fn after_history(s: &mut Session, previous: &solidcraft_doc::Document) {
-    if previous.assembly != s.doc.assembly {
-        s.constraint_report.dof.clear();
+/// After undo, redo or a restored checkpoint changed the design (`changed`): shown glyphs of
+/// constraints that are gone are dropped; the DOF counts are marked stale, so the session's
+/// refresh that follows counts them again (R144) as it rebuilds the rows; with nothing left to
+/// solve the report is rebuilt here (no solve follows).
+pub(crate) fn after_history(s: &mut Session, changed: bool) {
+    if changed {
+        s.dof_stale = true;
     }
     if !s.doc.assembly.solves() {
         rebuild_idle(s);
@@ -496,6 +510,9 @@ pub struct Draft {
     pub name: Option<String>,
     /// The constraint being edited (`None`: a new one).
     pub editing: Option<u64>,
+    /// The record as the edit began ([`Draft::edit`]): `params` then sends only what differs
+    /// from it (R147), so an unchanged pick or type is not looked at again (R134).
+    pub record: Option<Box<Constraint>>,
 }
 
 /// By hand (R116): a Mate with its type's default solution and nothing picked.
@@ -514,14 +531,44 @@ impl Default for Draft {
             suppressed: false,
             name: None,
             editing: None,
+            record: None,
         }
     }
 }
 
+/// A value as a draft holds it: its expression, else the number.
+fn text(expr: &Option<String>, v: Option<f64>) -> Option<String> {
+    expr.clone().or_else(|| v.map(|v| v.to_string()))
+}
+
 impl Draft {
+    /// The draft of an edit of `c`: its kind, solution, picks, offset, limits, lock, suppressed
+    /// and name as they are (R147).
+    pub fn edit(c: &Constraint) -> Draft {
+        Draft {
+            kind: c.kind,
+            solution: Some(c.solution),
+            a: c.picks.first().cloned(),
+            b: c.picks.get(1).cloned(),
+            reference: c.picks.get(2).cloned(),
+            offset: text(&c.exprs.offset, Some(c.offset)),
+            min: text(&c.exprs.min, c.limits.min),
+            max: text(&c.exprs.max, c.limits.max),
+            lock: c.lock,
+            suppressed: c.suppressed,
+            name: Some(c.name.clone()),
+            editing: Some(c.id),
+            record: Some(Box::new(c.clone())),
+        }
+    }
+
     /// The parameters of the command that makes it: `constraint.create`, or `constraint.edit`
-    /// when `editing` (a pick left out then keeps the constraint's).
+    /// when `editing` (a pick left out then keeps the constraint's). An edit begun with
+    /// [`Draft::edit`] sends only the fields that differ from the record (R147).
     pub fn params(&self) -> Value {
+        if let Some(r) = self.record.as_deref() {
+            return self.changes(r);
+        }
         let mut p = json!({"type": self.kind, "suppressed": self.suppressed});
         for (key, g) in [("a", &self.a), ("b", &self.b), ("ref", &self.reference)] {
             if let Some(g) = g {
@@ -548,6 +595,44 @@ impl Draft {
         }
         if let Some(id) = self.editing {
             p["constraint"] = json!(id);
+        }
+        p
+    }
+
+    /// `constraint.edit`'s parameters for what differs from `r`.
+    fn changes(&self, r: &Constraint) -> Value {
+        let mut p = json!({"constraint": self.editing.unwrap_or(r.id)});
+        if self.kind != r.kind {
+            p["type"] = json!(self.kind);
+        }
+        if let Some(sol) = self.solution.filter(|s| *s != r.solution) {
+            p["solution"] = json!(sol);
+        }
+        for (i, (key, g)) in [("a", &self.a), ("b", &self.b), ("ref", &self.reference)].into_iter().enumerate() {
+            match (g, r.picks.get(i)) {
+                (Some(g), was) if was != Some(g) => p[key] = pick_json(g),
+                (None, Some(_)) if key == "ref" => p[key] = Value::Null,
+                _ => {}
+            }
+        }
+        match &self.offset {
+            None => p["predict"] = json!(true),
+            Some(o) if Some(o) != text(&r.exprs.offset, Some(r.offset)).as_ref() => p["offset"] = json!(o),
+            Some(_) => {}
+        }
+        for (key, v, was) in [("min", &self.min, text(&r.exprs.min, r.limits.min)), ("max", &self.max, text(&r.exprs.max, r.limits.max))] {
+            if *v != was {
+                p[key] = v.as_ref().map_or(Value::Null, |v| json!(v));
+            }
+        }
+        if self.lock != r.lock {
+            p["lock"] = json!(self.lock);
+        }
+        if self.suppressed != r.suppressed {
+            p["suppressed"] = json!(self.suppressed);
+        }
+        if let Some(n) = self.name.as_ref().filter(|n| **n != r.name) {
+            p["name"] = json!(n);
         }
         p
     }

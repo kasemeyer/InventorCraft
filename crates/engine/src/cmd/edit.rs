@@ -112,7 +112,7 @@ fn go_to(s: &mut Session, snap: Snapshot) -> Snapshot {
     s.visibility = snap.visibility;
     s.selection.clear();
     // The constraint report and its shown glyphs follow (the refresh rebuilds the rows).
-    crate::constraints::after_history(s, &was.doc);
+    crate::constraints::after_history(s, !same);
     // A new document is evaluated by `execute`.
     if same {
         if display_only {

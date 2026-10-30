@@ -303,6 +303,9 @@ pub struct Session {
     /// The constraints whose glyphs are shown (`constraint.show`, `show_sick`, `hide_all`): view
     /// state, not saved, not undone; a constraint that no longer exists is dropped.
     pub shown_constraints: std::collections::BTreeSet<u64>,
+    /// `constraint_report.dof` no longer counts the design (undo, redo, a status or grounding
+    /// change after a placement-only solve): the next refresh counts again (R144).
+    pub(crate) dof_stale: bool,
     occurrence_visibility_cache: std::sync::Mutex<Option<occurrences::VisibilityCache>>,
     removed_later_cache: std::sync::Mutex<Option<occurrences::RemovedLaterCache>>,
     occurrence_bodies_cache: std::sync::Mutex<Option<occurrences::OccurrenceBodiesCache>>,
@@ -492,6 +495,7 @@ impl Session {
             dof_memo: Default::default(),
             constraint_report: Default::default(),
             shown_constraints: Default::default(),
+            dof_stale: false,
             occurrence_visibility_cache: Default::default(),
             removed_later_cache: Default::default(),
             occurrence_bodies_cache: Default::default(),
@@ -747,6 +751,12 @@ impl Session {
         // Joints follow the geometry their origins snap to.
         if self.doc.assembly.solves() {
             cmd::joints::place(self);
+            // The report's DOF counts went stale (R144): one warm count (the memo, R130).
+            if self.dof_stale {
+                let dof = solidcraft_doc::joints::Analysis::DegreesOfFreedom;
+                let sol = cmd::joints::solution(self, &solidcraft_doc::joints::Held::new(), dof);
+                constraints::rebuild(self, &sol, dof);
+            }
         } else {
             // Nothing solves: every occurrence still has its status row (R141).
             constraints::rebuild_idle(self);
@@ -1129,7 +1139,7 @@ impl Session {
         self.redo = c.redo;
         self.selection.clear();
         // The constraint report and its shown glyphs follow (the refresh rebuilds the rows).
-        constraints::after_history(self, &before.doc);
+        constraints::after_history(self, !Arc::ptr_eq(&self.doc, &before.doc));
         if self.render_only_change(&before) {
             self.refresh_render(&before.doc);
         } else if self.visibility_only_change(&before) {
@@ -1174,6 +1184,7 @@ impl Session {
             dof_memo: std::sync::Mutex::new(self.dof_memo.lock().map(|m| m.clone()).unwrap_or_default()),
             constraint_report: self.constraint_report.clone(),
             shown_constraints: self.shown_constraints.clone(),
+            dof_stale: self.dof_stale,
             occurrence_visibility_cache: Default::default(),
             removed_later_cache: Default::default(),
             occurrence_bodies_cache: Default::default(),

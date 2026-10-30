@@ -391,3 +391,105 @@ fn an_opened_assembly_has_a_warm_memo_and_its_report() {
     assert!(report(&s).rows.iter().all(|r| r.status == ConstraintStatus::Ok), "{:?}", report(&s).rows);
     assert_eq!(report(&s).occurrences.len(), s.doc.occurrences.len());
 }
+
+/// Fix round 1 (R144): the occurrence row of `name`.
+fn occ_row(s: &Session, name: &str) -> crate::constraints::OccurrenceRow {
+    report(s).occurrences.iter().find(|o| o.id == occ(s, name)).cloned().unwrap()
+}
+
+#[test]
+fn dof_counts_follow_undo_part_edits_and_grounding() {
+    // Two Mates, then undo the second: counted again (R144), not blank or stale.
+    let mut s = blocks();
+    let b = occ(&s, "B");
+    let p = mate_top_bottom(&s, 50.0, 25.0, json!(0));
+    run(&mut s, "constraint.create", p);
+    let p = json!({"type": "mate", "solution": "flush", "a": on(&s, "A", v(50.0, 0.0, 10.0)), "b": on(&s, "B", v(50.0, 0.0, 50.0))});
+    run(&mut s, "constraint.create", p);
+    assert_eq!(occ_row(&s, "B").missing, Some(1));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(occ_row(&s, "B").missing, Some(3));
+    assert_eq!(report(&s).dof.get(&b), Some(&3));
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(report(&s).dof.get(&b), Some(&1));
+    // Grounding B, and undoing it.
+    run(&mut s, "occurrence.ground", json!({"occurrence": b, "grounded": true}));
+    assert_eq!(occ_row(&s, "B").missing, Some(0));
+    assert_eq!(report(&s).dof.get(&b), Some(&0));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(occ_row(&s, "B").missing, Some(1));
+    assert_eq!(report(&s).dof.get(&b), Some(&1));
+
+    // A part edit that loses the Insert: the pin is free again.
+    let mut s = blocks();
+    run(&mut s, "constraint.create", insert_plate_pin());
+    assert_eq!(occ_row(&s, "Pin").missing, Some(1));
+    cut_the_plate_short(&mut s);
+    assert!(matches!(status(&s, "Insert:1"), ConstraintStatus::Lost { .. }));
+    assert_eq!(occ_row(&s, "Pin").missing, Some(6));
+    assert_eq!(report(&s).dof.get(&occ(&s, "Pin")), Some(&6));
+}
+
+#[test]
+fn a_small_conflict_reports_its_gap() {
+    // R145: 2e-5 mm is a conflict (above 1e-6 mm); the message's 4 decimals would read 0.
+    let mut s = blocks();
+    run(&mut s, "parameters.add", json!({"name": "t", "expression": "0 mm"}));
+    let p = mate_top_bottom(&s, 50.0, 25.0, json!("t"));
+    run(&mut s, "constraint.create", p);
+    let p = mate_top_bottom(&s, 20.0, 10.0, json!(0));
+    run(&mut s, "constraint.create", p);
+    run(&mut s, "parameters.change", json!({"name": "t", "expression": "0.00002 mm"}));
+    match status(&s, "Mate:2") {
+        ConstraintStatus::Sick { gap_mm, .. } => assert!((gap_mm - 2e-5).abs() <= 1e-6, "{gap_mm}"),
+        other => panic!("Mate:2 is {other:?}"),
+    }
+}
+
+#[test]
+fn a_capped_loop_group_is_unsolved_not_sick() {
+    // 101 copies of Mate:1 close 101 loops through B's one tree member: one group, over
+    // MAX_LOOPS (100), so it is checked, not solved.
+    let mut s = blocks();
+    let p = mate_top_bottom(&s, 50.0, 25.0, json!(0));
+    run(&mut s, "constraint.create", p);
+    let first = s.doc.assembly.constraints[0].clone();
+    for _ in 0..101 {
+        let doc = s.doc_mut();
+        let mut c = first.clone();
+        c.id = doc.allocate_id().unwrap();
+        c.name = solidcraft_doc::constraints::next_name(&doc.assembly, ConstraintKind::Mate);
+        c.state.clear();
+        c.signatures = Default::default();
+        doc.assembly.constraints.push(c);
+    }
+    s.refresh();
+    let sol = crate::cmd::joints::solution(&s, &solidcraft_doc::joints::Held::new(), solidcraft_doc::joints::Analysis::Placement);
+    assert_eq!(sol.groups.len(), 1, "the loops merge into one group");
+    assert!(sol.groups[0].capped && sol.groups[0].members.len() == 101, "{:?}", sol.groups[0]);
+    assert_eq!(status(&s, "Mate:1"), ConstraintStatus::Ok, "the tree member");
+    let unsolved = report(&s).rows.iter().filter(|r| r.status == ConstraintStatus::Unsolved).count();
+    assert_eq!(unsolved, 101);
+    assert_eq!(status(&s, "Mate:2"), ConstraintStatus::Unsolved);
+    assert!(!report(&s).any_sick);
+}
+
+#[test]
+fn an_edit_draft_sends_only_what_changed() {
+    // R147: a Lost constraint's offset-only preview is not refused.
+    let mut s = blocks();
+    run(&mut s, "constraint.create", insert_plate_pin());
+    cut_the_plate_short(&mut s);
+    let record = s.doc.assembly.constraint("Insert:1").unwrap().clone();
+    let draft = Draft::edit(&record);
+    assert_eq!((draft.kind, draft.suppressed, draft.offset.as_deref()), (ConstraintKind::Insert, false, Some("0")));
+    assert_eq!(draft.params(), json!({"constraint": record.id}), "an unchanged draft sends nothing");
+    let moved = Draft { offset: Some("3".into()), ..draft.clone() };
+    assert_eq!(moved.params(), json!({"constraint": record.id, "offset": "3"}));
+    let pv = preview(&s, &moved);
+    assert_eq!(pv.refused, None, "{pv:?}");
+    assert!(matches!(pv.status, Some(ConstraintStatus::Lost { .. })), "{pv:?}");
+    // Asking it to predict again reads the picks, which are gone: refused.
+    let pv = preview(&s, &Draft { offset: None, ..draft });
+    assert!(pv.refused.as_deref().is_some_and(|r| r.contains("no longer exists")), "{pv:?}");
+}
