@@ -113,7 +113,7 @@ fn validate_refuses_hostile_numbers() {
         assert!(c.validate().is_err(), "offset {offset} accepted");
     }
     Constraint { offset: -1e7, ..ok.clone() }.validate().unwrap();
-    let angle = Constraint { offset: 1.000_000_1e6, ..record(2, "Angle:1", ConstraintKind::Angle, vec![face(1, "a"), face(2, "b")]) };
+    let angle = Constraint { offset: 1.000_000_1e6, ..record(2, "Angle:1", ConstraintKind::Angle, vec![face(1, "a"), face(2, "b"), face(3, "c")]) };
     assert!(angle.validate().is_err());
     Constraint { offset: 1e6, ..angle.clone() }.validate().unwrap();
     let crossed = Constraint { limits: ConstraintLimits { min: Some(5.0), max: Some(1.0) }, ..ok.clone() };
@@ -149,7 +149,8 @@ fn solution_rules() {
     assert_eq!(Mate.default_solution(false), MateFace);
     assert_eq!(Mate.default_solution(true), Opposed);
     assert_eq!(Angle.default_solution(false), ANGLE_DEFAULT);
-    assert_eq!(ANGLE_DEFAULT, Undirected);
+    // Owner Q5, flipped in Plan E-1 Task 6 once the equations hold (updated by design).
+    assert_eq!(ANGLE_DEFAULT, ExplicitVector);
     assert_eq!(Tangent.default_solution(false), Outside);
     assert_eq!(Insert.default_solution(false), Opposed);
     assert_eq!(Symmetry.default_solution(false), Opposed);
@@ -344,4 +345,14 @@ fn the_state_signatures_round_trip() {
     assert_eq!(c.state_for(0, 4, two[0]), Some(&[1.0, 2.0, 3.0, 4.0][..]));
     let short = Constraint { state: vec![1.0, 2.0, 3.0, 4.0], ..c };
     assert_eq!(short.state_for(0, 4, two[0]), None, "a state shorter than its signatures say");
+}
+
+/// Owner Q5 (Plan E-1 Task 6 step 6): an Angle with no solution given measures about an explicit
+/// reference vector, Inventor's default, and so takes a third pick.
+#[test]
+fn angle_defaults_to_the_reference_vector() {
+    use ConstraintKind::Angle;
+    assert_eq!(Angle.default_solution(false), ConstraintSolution::ExplicitVector);
+    assert_eq!(Angle.picks(Angle.default_solution(false)), 3);
+    assert_eq!(Angle.picks(ConstraintSolution::ExplicitVector), 3);
 }

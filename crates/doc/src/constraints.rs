@@ -22,8 +22,9 @@ pub const MAX_OFFSET_DEG: f64 = 1e6;
 /// above it); never saved, never listed as joints.
 pub const COMPILED_BASE: u64 = 1 << 48;
 
-/// An Angle constraint's solution when none is asked for (owner Q5).
-pub const ANGLE_DEFAULT: ConstraintSolution = ConstraintSolution::Undirected;
+/// An Angle constraint's solution when none is asked for (owner Q5): Inventor's Explicit
+/// Reference Vector, now that its equation holds (Plan E-1 Task 6).
+pub const ANGLE_DEFAULT: ConstraintSolution = ConstraintSolution::ExplicitVector;
 
 /// One assembly constraint.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
