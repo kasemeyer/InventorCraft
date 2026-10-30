@@ -483,11 +483,12 @@ pub(crate) fn clamped(s: &Session, c: &Constraint) -> Option<String> {
         return None;
     }
     let (offset, (min, max)) = (offset_now(s, c), limits_now(s, c));
-    let at = offset.clamp(min.unwrap_or(f64::NEG_INFINITY), max.unwrap_or(f64::INFINITY));
+    let start = folded(c, offset);
+    let at = start.clamp(min.unwrap_or(f64::NEG_INFINITY), max.unwrap_or(f64::INFINITY));
     let round = |v: f64| (v * 1e6).round() / 1e6;
     let side = |v: Option<f64>| v.map_or("none".to_string(), |v| round(v).to_string());
     let unit = if c.kind.is_angle() { "deg" } else { "mm" };
-    (at != offset).then(|| {
+    (at != start).then(|| {
         format!(
             "{} starts at {} {unit}, inside its limits [{}, {}], not at its offset {} {unit}: the part moved there",
             c.name,
@@ -499,6 +500,16 @@ pub(crate) fn clamped(s: &Session, c: &Constraint) -> Option<String> {
     })
 }
 
+/// An Undirected Angle's offset as the unsigned angle it measures (0..180: 350 is 10), so it is
+/// clamped into its limits from there; any other offset as it is.
+fn folded(c: &Constraint, offset: f64) -> f64 {
+    if c.kind != ConstraintKind::Angle || c.solution != ConstraintSolution::Undirected || !offset.is_finite() {
+        return offset;
+    }
+    let a = offset.rem_euclid(360.0);
+    if a > 180.0 { 360.0 - a } else { a }
+}
+
 /// A limited Angle's offset is a start, as a Mate's (R153): one placement solve of the design
 /// with the constraint `id` unlimited at its offset clamped into the limits, so the part turns
 /// there; the bounded solve that follows keeps it (any value inside meets the limits).
@@ -508,7 +519,7 @@ pub(crate) fn start_angle(s: &mut Session, id: u64) {
         return;
     }
     let (offset, (min, max)) = (offset_now(s, &c), limits_now(s, &c));
-    let at = offset.clamp(min.unwrap_or(f64::NEG_INFINITY), max.unwrap_or(f64::INFINITY));
+    let at = folded(&c, offset).clamp(min.unwrap_or(f64::NEG_INFINITY), max.unwrap_or(f64::INFINITY));
     if let Some(x) = s.doc_mut().assembly.constraints.iter_mut().find(|x| x.id == id) {
         x.offset = at;
         x.exprs.offset = None;
@@ -717,6 +728,11 @@ fn drive_values(s: &Session, c: &Constraint, p: &Value, cmd: &str) -> Result<Vec
     Ok(pass.iter().copied().cycle().take(pass.len() * repeat).collect())
 }
 
+/// A gap of the driven constraint's own that stops its drive: a thousand times the solve's
+/// conflict tolerance (1e-6 mm, 1e-8 rad), well clear of the loop solver's rounding.
+const DRIVE_OWN_GAP_MM: f64 = 1e-3;
+const DRIVE_OWN_GAP_RAD: f64 = 1e-5;
+
 /// Drive a constraint's offset through values (spec §5, §6.6): each frame sets it on the
 /// session's design and places the assembly (no DOF count); the frames say where the moved
 /// occurrences go. It stops past a limit (a last frame at the bound), where a loop the drive
@@ -786,7 +802,11 @@ fn drive(s: &mut Session, p: &Value) -> Result<Value> {
             break;
         }
         let sol = set(s, &from, v);
-        if let Some(opened) = sol.conflicts.iter().find(|x| !open_at_start.contains(&x.0) && owner_of(x.0) != Some(id)) {
+        // The driven constraint's own conflicts are left out only while their gap is the loop
+        // solver's rounding: a real one (it cannot be met there) stops the drive too.
+        let real =
+            |x: u64| owner_of(x) != Some(id) || sol.conflict_gaps.get(&x).is_some_and(|(mm, rad)| *mm > DRIVE_OWN_GAP_MM || *rad > DRIVE_OWN_GAP_RAD);
+        if let Some(opened) = sol.conflicts.iter().find(|x| !open_at_start.contains(&x.0) && real(x.0)) {
             out["stopped_by_loop"] = json!({"value": last.as_ref().map(|(l, _)| *l), "constraint": opened.1});
             break;
         }

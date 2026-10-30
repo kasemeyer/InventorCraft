@@ -252,3 +252,34 @@ fn a_limited_angle_drives_to_its_limit() {
         assert!((got - want).abs() <= ANG, "frame {i}: {got} for {want}");
     }
 }
+
+/// A second Mate on A's top and B's bottom (at (20, 10)), offset 0: B's tree member is Mate:1,
+/// Mate:2 closes the loop (R110).
+fn two_mates(s: &mut Session) {
+    run(s, "constraint.create", mate_a_b(json!({"offset": 0})));
+    let b = crate::test_support::at(s, "B", Vec3::new(20.0, 10.0, 40.0));
+    run(s, "constraint.create", json!({"type": "mate", "a": face("A", [20.0, 10.0, 20.0]), "b": face("B", [b.x, b.y, b.z]), "offset": 0}));
+}
+
+/// Final wave item 11: driving the tree member opens the loop Mate:2 closes, so the drive stops
+/// at the last value that kept it closed and names it.
+#[test]
+fn drive_stops_where_a_loop_opens() {
+    let mut s = blocks();
+    two_mates(&mut s);
+    let r = drive(&mut s, json!({"constraint": "Mate:1", "end": 2, "steps": 2}));
+    assert_eq!(values(&r), [0.0], "{r}");
+    assert_eq!(r["stopped_by_loop"], json!({"value": 0.0, "constraint": "Mate:2"}), "{r}");
+}
+
+/// Final wave item 11: the driven constraint's own conflict stops the drive when its gap is real
+/// (more than a thousand times the conflict tolerance): driving the closing Mate:2 off the face
+/// Mate:1 holds B on cannot be met.
+#[test]
+fn drive_stops_on_its_own_real_conflict() {
+    let mut s = blocks();
+    two_mates(&mut s);
+    let r = drive(&mut s, json!({"constraint": "Mate:2", "end": 2, "steps": 2}));
+    assert_eq!(values(&r), [0.0], "{r}");
+    assert_eq!(r["stopped_by_loop"], json!({"value": 0.0, "constraint": "Mate:2"}), "{r}");
+}

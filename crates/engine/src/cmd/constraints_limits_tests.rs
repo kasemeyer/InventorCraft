@@ -216,6 +216,23 @@ fn a_limited_angle_previews_where_it_commits() {
     assert!(w.contains("Angle:1") && w.contains("40 deg") && w.contains("50 deg"), "{w}");
 }
 
+/// Final wave item 11: an Undirected angle is unsigned (0..180), so an offset of 350 is 10
+/// before it is clamped into [10, 40]: it starts at 10 and does not warn, not at 40.
+#[test]
+fn an_undirected_offset_is_folded_before_it_is_clamped() {
+    let mut s = blocks();
+    let p = json!({"type": "angle", "solution": "undirected", "a": face("A", [50.0, 0.0, 10.0]), "b": face("B", [50.0, 0.0, 50.0]),
+        "offset": 30, "min": 10, "max": 40});
+    run(&mut s, "constraint.create", p);
+    let r = run(&mut s, "constraint.edit", json!({"constraint": "Angle:1", "offset": 350}));
+    assert!((fronts_angle(&s) - 10.0).abs() <= ANG, "{}", fronts_angle(&s));
+    assert!(r.get("warnings").is_none(), "{r}");
+    // 200 is 160: past the max, it starts at 40 and says so in the folded value.
+    let r = run(&mut s, "constraint.edit", json!({"constraint": "Angle:1", "offset": 200}));
+    assert!((fronts_angle(&s) - 40.0).abs() <= ANG, "{}", fronts_angle(&s));
+    assert_eq!(r["warnings"][0], "Angle:1 starts at 40 deg, inside its limits [10, 40], not at its offset 200 deg: the part moved there", "{r}");
+}
+
 #[test]
 fn limits_refuse_hostile_values() {
     let mut s = blocks();
