@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Constrain</title>
+  <path d="M7.37 36.88L32 51.12L32 56.45L7.37 42.23Z" fill="#b8c3cf"/>
+  <path d="M56.63 36.88L32 51.12L32 56.45L56.63 42.23Z" fill="#8e9faf"/>
+  <path d="M32 22.66L56.63 36.88L32 51.12L7.37 36.88Z" fill="#e2e8ef"/>
+  <path d="M32 22.66L56.63 36.88L56.63 42.23L32 56.45L7.37 42.23L7.37 36.88Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M7.37 36.88L32 51.12L56.63 36.88" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 51.12L32 56.45" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 29.77L44.32 36.88L32 44.01L19.68 36.88Z" fill="#b9ddf8"/>
+  <path d="M32 29.77L44.32 36.88L32 44.01L19.68 36.88Z" fill="none" stroke="#236ead" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M19.68 14.66L32 21.77L32 34.23L19.68 27.12Z" fill="#b8c3cf"/>
+  <path d="M44.32 14.66L32 21.77L32 34.23L44.32 27.12Z" fill="#8e9faf"/>
+  <path d="M32 7.55L44.32 14.66L32 21.77L19.68 14.66Z" fill="#e2e8ef"/>
+  <path d="M32 7.55L44.32 14.66L44.32 27.12L32 34.23L19.68 27.12L19.68 14.66Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M19.68 14.66L32 21.77L44.32 14.66" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 21.77L32 34.23" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M50.48 18.23L50.48 30.23" fill="none" stroke="#ffffff" stroke-width="6.45" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M50.48 38.23L45.98 29.23L54.98 29.23Z" fill="#ffffff" stroke="#ffffff" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M50.48 18.23L50.48 30.23" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M50.48 38.23L45.98 29.23L54.98 29.23Z" fill="#236ead"/>
+</svg>

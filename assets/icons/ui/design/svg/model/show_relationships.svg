@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Show constraints</title>
+  <path d="M4.54 27.87L21.26 37.52L21.26 41.14L4.54 31.49Z" fill="#b8c3cf"/>
+  <path d="M37.98 27.87L21.26 37.52L21.26 41.14L37.98 31.49Z" fill="#8e9faf"/>
+  <path d="M21.26 18.22L37.98 27.87L21.26 37.52L4.54 27.87Z" fill="#e2e8ef"/>
+  <path d="M21.26 18.22L37.98 27.87L37.98 31.49L21.26 41.14L4.54 31.49L4.54 27.87Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M4.54 27.87L21.26 37.52L37.98 27.87" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M21.26 37.52L21.26 41.14" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M21.26 23.04L29.62 27.87L21.26 32.7L12.9 27.87Z" fill="#b9ddf8"/>
+  <path d="M21.26 23.04L29.62 27.87L21.26 32.7L12.9 27.87Z" fill="none" stroke="#236ead" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M12.9 12.79L21.26 17.62L21.26 26.06L12.9 21.24Z" fill="#b8c3cf"/>
+  <path d="M29.62 12.79L21.26 17.62L21.26 26.06L29.62 21.24Z" fill="#8e9faf"/>
+  <path d="M21.26 7.97L29.62 12.79L21.26 17.62L12.9 12.79Z" fill="#e2e8ef"/>
+  <path d="M21.26 7.97L29.62 12.79L29.62 21.24L21.26 26.06L12.9 21.24L12.9 12.79Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M12.9 12.79L21.26 17.62L29.62 12.79" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M21.26 17.62L21.26 26.06" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M22.26 45.14C29.18 35.45 51.34 35.45 58.26 45.14C51.34 54.83 29.18 54.83 22.26 45.14Z" fill="#ffffff" stroke="#ffffff" stroke-width="4.95" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M22.26 45.14C29.18 35.45 51.34 35.45 58.26 45.14C51.34 54.83 29.18 54.83 22.26 45.14Z" fill="#e2e8ef"/>
+  <path d="M34.72 45.14A5.54 5.54 0 1 0 45.8 45.14A5.54 5.54 0 1 0 34.72 45.14Z" fill="#328bd3" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="40.26" cy="45.14" r="2.22" fill="#34465b"/>
+  <path d="M22.26 45.14C29.18 35.45 51.34 35.45 58.26 45.14C51.34 54.83 29.18 54.83 22.26 45.14Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

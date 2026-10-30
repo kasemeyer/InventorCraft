@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Show problem constraints</title>
+  <path d="M5.16 24.86L20.12 33.49L20.12 36.73L5.16 28.1Z" fill="#b8c3cf"/>
+  <path d="M35.08 24.86L20.12 33.49L20.12 36.73L35.08 28.1Z" fill="#8e9faf"/>
+  <path d="M20.12 16.22L35.08 24.86L20.12 33.49L5.16 24.86Z" fill="#e2e8ef"/>
+  <path d="M20.12 16.22L35.08 24.86L35.08 28.1L20.12 36.73L5.16 28.1L5.16 24.86Z" fill="none" stroke="#34465b" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M5.16 24.86L20.12 33.49L35.08 24.86" fill="none" stroke="#34465b" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M20.12 33.49L20.12 36.73" fill="none" stroke="#34465b" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M12.64 11.36L20.12 15.68L20.12 23.24L12.64 18.92Z" fill="#b8c3cf"/>
+  <path d="M27.6 11.36L20.12 15.68L20.12 23.24L27.6 18.92Z" fill="#8e9faf"/>
+  <path d="M20.12 7.05L27.6 11.36L20.12 15.68L12.64 11.36Z" fill="#e2e8ef"/>
+  <path d="M20.12 7.05L27.6 11.36L27.6 18.92L20.12 23.24L12.64 18.92L12.64 11.36Z" fill="none" stroke="#34465b" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M12.64 11.36L20.12 15.68L27.6 11.36" fill="none" stroke="#34465b" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M20.12 15.68L20.12 23.24" fill="none" stroke="#34465b" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M42.12 28.23L57.12 55.23L27.12 55.23Z" fill="#ffffff" stroke="#ffffff" stroke-width="6.65" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M42.12 28.23L57.12 55.23L27.12 55.23Z" fill="#b9ddf8"/>
+  <path d="M42.12 28.23L57.12 55.23L27.12 55.23Z" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M42.12 37.14L42.12 45.51" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="42.12" cy="50.64" r="2.4" fill="#236ead"/>
+</svg>

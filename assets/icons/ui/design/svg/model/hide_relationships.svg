@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Hide all constraints</title>
+  <path d="M4.54 26.71L21.26 36.36L21.26 39.98L4.54 30.33Z" fill="#b8c3cf"/>
+  <path d="M37.98 26.71L21.26 36.36L21.26 39.98L37.98 30.33Z" fill="#8e9faf"/>
+  <path d="M21.26 17.06L37.98 26.71L21.26 36.36L4.54 26.71Z" fill="#e2e8ef"/>
+  <path d="M21.26 17.06L37.98 26.71L37.98 30.33L21.26 39.98L4.54 30.33L4.54 26.71Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M4.54 26.71L21.26 36.36L37.98 26.71" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M21.26 36.36L21.26 39.98" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M21.26 21.88L29.62 26.71L21.26 31.54L12.9 26.71Z" fill="#b9ddf8"/>
+  <path d="M21.26 21.88L29.62 26.71L21.26 31.54L12.9 26.71Z" fill="none" stroke="#236ead" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M12.9 11.63L21.26 16.46L21.26 24.9L12.9 20.08Z" fill="#b8c3cf"/>
+  <path d="M29.62 11.63L21.26 16.46L21.26 24.9L29.62 20.08Z" fill="#8e9faf"/>
+  <path d="M21.26 6.81L29.62 11.63L21.26 16.46L12.9 11.63Z" fill="#e2e8ef"/>
+  <path d="M21.26 6.81L29.62 11.63L29.62 20.08L21.26 24.9L12.9 20.08L12.9 11.63Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M12.9 11.63L21.26 16.46L29.62 11.63" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M21.26 16.46L21.26 24.9" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M22.26 43.98C29.18 34.29 51.34 34.29 58.26 43.98C51.34 53.67 29.18 53.67 22.26 43.98Z" fill="#ffffff" stroke="#ffffff" stroke-width="4.95" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M22.26 43.98C29.18 34.29 51.34 34.29 58.26 43.98C51.34 53.67 29.18 53.67 22.26 43.98Z" fill="#e2e8ef"/>
+  <path d="M34.72 43.98A5.54 5.54 0 1 0 45.8 43.98A5.54 5.54 0 1 0 34.72 43.98Z" fill="#8e9faf" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="40.26" cy="43.98" r="2.22" fill="#34465b"/>
+  <path d="M22.26 43.98C29.18 34.29 51.34 34.29 58.26 43.98C51.34 53.67 29.18 53.67 22.26 43.98Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M29.1 55.14L51.42 32.82" fill="none" stroke="#ffffff" stroke-width="6.65" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M29.1 55.14L51.42 32.82" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

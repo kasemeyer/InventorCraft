@@ -69,6 +69,13 @@ pub(crate) fn badge(p: &egui::Painter, r: Rect, name: &str, c: Color32) {
             p.circle_filled(head, 3.2, c);
             p.line_segment([head, pos2(r.left() + 1.5, r.bottom() - 1.0)], Stroke::new(1.6, c));
         }
+        // A suppressed constraint row: a ring struck through, the constraint switched off.
+        "suppressed" => {
+            let (centre, radius) = (r.center(), r.width().min(r.height()) / 2.0 - 1.5);
+            p.circle_stroke(centre, radius, s);
+            let d = radius * std::f32::consts::FRAC_1_SQRT_2;
+            p.line_segment([pos2(centre.x - d, centre.y + d), pos2(centre.x + d, centre.y - d)], s);
+        }
         _ => {}
     }
 }

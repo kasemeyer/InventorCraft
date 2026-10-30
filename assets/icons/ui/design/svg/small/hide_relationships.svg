@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Hide all constraints</title>
+  <path d="M3.92 24.41L18.88 33.04L18.88 36.28L3.92 27.65Z" fill="#b8c3cf"/>
+  <path d="M33.84 24.41L18.88 33.04L18.88 36.28L33.84 27.65Z" fill="#8e9faf"/>
+  <path d="M18.88 15.77L33.84 24.41L18.88 33.04L3.92 24.41Z" fill="#e2e8ef"/>
+  <path d="M18.88 15.77L33.84 24.41L33.84 27.65L18.88 36.28L3.92 27.65L3.92 24.41Z" fill="none" stroke="#34465b" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M3.92 24.41L18.88 33.04L33.84 24.41" fill="none" stroke="#34465b" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M18.88 33.04L18.88 36.28" fill="none" stroke="#34465b" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M11.4 10.91L18.88 15.23L18.88 22.79L11.4 18.47Z" fill="#b8c3cf"/>
+  <path d="M26.36 10.91L18.88 15.23L18.88 22.79L26.36 18.47Z" fill="#8e9faf"/>
+  <path d="M18.88 6.6L26.36 10.91L18.88 15.23L11.4 10.91Z" fill="#e2e8ef"/>
+  <path d="M18.88 6.6L26.36 10.91L26.36 18.47L18.88 22.79L11.4 18.47L11.4 10.91Z" fill="none" stroke="#34465b" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M11.4 10.91L18.88 15.23L26.36 10.91" fill="none" stroke="#34465b" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M18.88 15.23L18.88 22.79" fill="none" stroke="#34465b" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M18.88 43.28C26.57 32.51 51.19 32.51 58.88 43.28C51.19 54.05 26.57 54.05 18.88 43.28Z" fill="#ffffff" stroke="#ffffff" stroke-width="5.6" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M18.88 43.28C26.57 32.51 51.19 32.51 58.88 43.28C51.19 54.05 26.57 54.05 18.88 43.28Z" fill="#e2e8ef"/>
+  <path d="M32.73 43.28A6.15 6.15 0 1 0 45.03 43.28A6.15 6.15 0 1 0 32.73 43.28Z" fill="#8e9faf" stroke="#34465b" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="38.88" cy="43.28" r="2.46" fill="#34465b"/>
+  <path d="M18.88 43.28C26.57 32.51 51.19 32.51 58.88 43.28C51.19 54.05 26.57 54.05 18.88 43.28Z" fill="none" stroke="#34465b" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M26.48 55.68L51.28 30.88" fill="none" stroke="#ffffff" stroke-width="6.65" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M26.48 55.68L51.28 30.88" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

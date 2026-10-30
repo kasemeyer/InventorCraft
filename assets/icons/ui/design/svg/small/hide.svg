@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Hide</title>
+  <path d="M5 32C15.38 17.46 48.62 17.46 59 32C48.62 46.54 15.38 46.54 5 32Z" fill="#e2e8ef"/>
+  <path d="M23.69 32A8.31 8.31 0 1 0 40.31 32A8.31 8.31 0 1 0 23.69 32Z" fill="#8e9faf" stroke="#34465b" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="32" cy="32" r="3.32" fill="#34465b"/>
+  <path d="M5 32C15.38 17.46 48.62 17.46 59 32C48.62 46.54 15.38 46.54 5 32Z" fill="none" stroke="#34465b" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M15.26 48.74L48.74 15.26" fill="none" stroke="#ffffff" stroke-width="6.65" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M15.26 48.74L48.74 15.26" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>
