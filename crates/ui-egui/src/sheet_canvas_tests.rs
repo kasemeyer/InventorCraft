@@ -21,10 +21,12 @@ fn run(s: &mut Session, id: &str, p: Value) -> Value {
     s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"))
 }
 
-/// `h` with Home closed and a new D drawing (`drawing.new {}`) on its session.
+/// `h` with Home closed and a new D drawing on its session. DRAWN BY and DRAWN DATE are pinned:
+/// their defaults (the OS user, today) are drawn as text strokes, so the counts below would
+/// change with the user and the date.
 fn new_drawing(mut h: Harness) -> Harness {
     h.app.home.open = false;
-    h.app.run("drawing.new", json!({})).unwrap();
+    h.app.run("drawing.new", json!({"properties": {"drawn_by": "TCI", "drawn_date": "2026-10-28"}})).unwrap();
     h.frames(3);
     h
 }
@@ -69,7 +71,7 @@ fn a_drawing_shows_the_sheet() {
     // A blank sheet is its border and title block only, all in the border colour.
     let border = strokes_in(&s, rgba(t.sheet_border));
     // The frame, its zone ticks and letters, and the title block's lines and fields.
-    assert_eq!(border, 220);
+    assert_eq!(border, 217);
     assert_eq!(border, s.strokes.len());
     assert!(s.fills.iter().all(|f| f.color == rgba(t.sheet_border)));
     assert!(s.images.is_empty());
@@ -218,8 +220,8 @@ fn only_a_fresh_picture_is_drawn() {
     assert_eq!(&s.images[0].rgba[..4], &[128, 128, 128, 255]);
     // Under the overlay: the view's lines are drawn too, and the pass draws pictures first.
     let lines = s.strokes.len();
-    // The block's 9 visible curves and its label's strokes over the blank sheet's 220.
-    assert_eq!((blank, lines), (220, 235));
+    // The block's 9 visible curves and its label's strokes over the blank sheet's 217.
+    assert_eq!((blank, lines), (217, 232));
     assert_eq!(solidcraft_gpu::sheet::SheetPass::draw_list(&s)[0], solidcraft_gpu::sheet::SheetDraw::Image);
     // No renderer: rescaling leaves the picture stale, so it is left out and the lines stay (R76).
     h.app.session.view_rasterizer = None;
