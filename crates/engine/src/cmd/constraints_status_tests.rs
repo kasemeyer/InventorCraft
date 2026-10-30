@@ -295,16 +295,17 @@ fn preview_never_changes_the_session() {
     assert!(pv.world.is_empty());
     assert!(Arc::ptr_eq(&s.doc, &before));
     // Editing: with Mate:4 made at offset 0 (redundant), Mate:1 at offset 2 leaves Mate:4, a
-    // closing member, off by 2 (R110). The loop group then does not close, so its other closing
-    // members (Mate:2, Mate:3) stay where they were and are named too; the tree member Mate:1 is
-    // not. A draft that keeps the picks leaves them out.
+    // closing member, off by 2 (R110). The loop group then does not close; closed again without
+    // each member in turn, it closes only without Mate:4, so only Mate:4 is named (final wave
+    // item 12; before, the other closing members Mate:2 and Mate:3 stayed where they were and were
+    // named too). The tree member Mate:1 is not. A draft that keeps the picks leaves them out.
     let p = mate_top_bottom(&s, 20.0, 10.0, json!(0));
     run(&mut s, "constraint.create", p);
     let edit = Draft { editing: Some(id_of(&s, "Mate:1")), offset: Some("2".into()), ..Draft::default() };
     assert_eq!(edit.params()["constraint"], id_of(&s, "Mate:1"));
     let before = s.doc.clone();
     let pv = preview(&s, &edit);
-    assert_eq!(pv.refused.as_deref(), Some("over-constrains B: Mate:2, Mate:3, Mate:4 off by 2.000 mm"), "{pv:?}");
+    assert_eq!(pv.refused.as_deref(), Some("over-constrains B: Mate:4 off by 2.000 mm"), "{pv:?}");
     assert!(Arc::ptr_eq(&s.doc, &before));
     let pv = preview(&s, &Draft { offset: Some("0".into()), ..edit });
     assert_eq!(pv.refused, None, "{pv:?}");
@@ -312,6 +313,22 @@ fn preview_never_changes_the_session() {
     // An incomplete draft says what it is missing.
     let pv = preview(&s, &Draft { b: None, ..draft });
     assert!(pv.refused.as_deref().is_some_and(|r| r.contains("`b` is missing")), "{pv:?}");
+}
+
+/// Final wave item 12, the bound: with two redundant Mates (Mate:4, Mate:5) against Mate:1 at
+/// offset 2, no one member's removal closes the group, so every closing member left off is named
+/// as before.
+#[test]
+fn a_group_no_single_removal_closes_names_every_member() {
+    let mut s = blocks();
+    three_mates(&mut s);
+    for (x, y) in [(20.0, 10.0), (80.0, 40.0)] {
+        let p = mate_top_bottom(&s, x, y, json!(0));
+        run(&mut s, "constraint.create", p);
+    }
+    let edit = Draft { editing: Some(id_of(&s, "Mate:1")), offset: Some("2".into()), ..Draft::default() };
+    let pv = preview(&s, &edit);
+    assert_eq!(pv.refused.as_deref(), Some("over-constrains B: Mate:2, Mate:3, Mate:4, Mate:5 off by 2.000 mm"), "{pv:?}");
 }
 
 #[test]

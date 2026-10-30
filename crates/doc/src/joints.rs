@@ -1441,7 +1441,14 @@ fn close_loops(
         match closed {
             Some(m) => changed.extend(m),
             None if !moves.is_empty() => stuck.extend(tree.closing_ids(group)),
-            None => {}
+            None => {
+                // Not closed with nothing held moving: the members whose own removal lets the rest
+                // close are the ones at fault; the rest close without the first of them, so only
+                // what that pose leaves open is named.
+                if let Some(m) = close_without_one(tree, group, asm, &linked, held, vals) {
+                    changed.extend(m);
+                }
+            }
         }
     }
     // The stored values with what each group moved (groups may move different values of one
@@ -1459,6 +1466,51 @@ fn close_loops(
         }
     }
     (moved, stuck)
+}
+
+/// A group that does not close is closed again without each member in turn (at most this many
+/// members; a larger group keeps every member that is off named).
+const MAX_BLAME: usize = 8;
+
+/// Close loop group `group` (which does not close as it is) without one member: the newest
+/// first (the highest id: what the user added or changed last), the first whose removal lets
+/// the rest of the group close. Its closure is kept in `vals` and returned; the member left out
+/// is then the one off. `None` (nothing changed) when the group is larger than [`MAX_BLAME`] or
+/// no single member's removal closes it.
+fn close_without_one(
+    tree: &Tree,
+    group: &[Closing],
+    asm: &Assembly,
+    linked: &BTreeSet<(u64, usize)>,
+    held: &Held,
+    vals: &mut Values,
+) -> Option<BTreeMap<(u64, usize), f64>> {
+    if group.len() < 2 || group.len() > MAX_BLAME {
+        return None;
+    }
+    let mut order: Vec<usize> = (0..group.len()).collect();
+    order.sort_by_key(|k| std::cmp::Reverse(group.get(*k).and_then(|c| tree.closing_id(c)).unwrap_or(0)));
+    // Its own budget, so the trials never cap the groups after it.
+    let spent = std::cell::Cell::new(0usize);
+    'member: for k in order {
+        let rest: Vec<Closing> = group.iter().enumerate().filter(|(i, _)| *i != k).map(|(_, c)| *c).collect();
+        let mut trial = vals.clone();
+        let mut moved = BTreeMap::new();
+        for (sub, around, touches) in loop_groups(tree, &rest, asm, linked) {
+            let vars = unknowns(tree, &around, asm, linked, held);
+            if sub.len() > MAX_LOOPS || vars.len() > MAX_LOOP_VALUES {
+                continue 'member;
+            }
+            let moves = held_moves(tree, held, &touches, &trial);
+            match close_group(tree, &sub, &around, &vars, &moves, asm, &spent, &mut trial) {
+                Some(m) => moved.extend(m),
+                None => continue 'member,
+            }
+        }
+        *vals = trial;
+        return Some(moved);
+    }
+    None
 }
 
 /// A group of loops solved together: its closing joints, the joints around them, and the values
