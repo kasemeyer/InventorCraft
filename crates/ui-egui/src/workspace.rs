@@ -117,6 +117,7 @@ pub const SECTIONS: &[Section] = &[
         promoted: 4,
         ids: &[
             "joint.create",
+            "constraint.create",
             "joint.as_built",
             "joint.origin",
             "joint.rigid_group",

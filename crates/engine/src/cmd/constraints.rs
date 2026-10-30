@@ -28,14 +28,14 @@ use crate::{Result, Session};
 const PICK: &str = "a pick is {occurrence: id|name, face|edge: \"<name>\" | [x,y,z]} (a world point picks the nearest face/edge on that occurrence; a name may take near?: [x,y,z] in the component's coordinates), {occurrence, vertex: [x,y,z]} (or vertex: \"<edge name>\", end?: start|end, near?), or {occurrence?: id|name (default: the assembly), origin: \"xy\"|\"xz\"|\"yz\"|\"x\"|\"y\"|\"z\"|\"center\"}";
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("constraint.create", "Constrain", create).icon("joint").enabled(has_components).params(
+    CommandSpec::new("constraint.create", "Constrain", create).at("SOLID", "ASSEMBLE").icon("constrain").enabled(has_components).params(
         "type: mate|angle|tangent|insert (symmetry: second wave, refused with that reason in v1); a, b: picks; ref?: a third pick (Angle explicit vector); solution? (default per §1.2); axis?: [x,y,z] (Directed Angle only: the world direction it turns about, kept in A's frame; default a × b of the picks as made); offset?: number or expression (default 0; predict: true measures it instead); predict?: bool (default false on the command line, true from the dialog); min?, max?: number or expression; lock?: bool (Insert only); suppressed?: bool (default false); name?. A pick is {occurrence: id|name, face|edge: \"<name>\" | [x,y,z]} (a world point picks the nearest face/edge on that occurrence, as joint.create does; a name may take near?: [x,y,z] in the component's coordinates), {occurrence, vertex: [x,y,z]} (or vertex: \"<edge name>\", end?: start|end, near?), or {occurrence?: id|name (default: the assembly), origin: \"xy\"|\"xz\"|\"yz\"|\"x\"|\"y\"|\"z\"|\"center\"} → {id, name, status, dof: {<occurrence>: n}, moved: [occurrences]}",
     ),
     CommandSpec::new("constraint.edit", "Edit Constraint", edit).icon("edit").enabled(has_components).params(
         "constraint: id|name; any of type, a, b, ref, solution, axis, offset, min, max (null clears), lock, name → as create; an edit that changes nothing adds no undo step",
     ),
     CommandSpec::new("constraint.suppress", "Suppress Constraint", suppress)
-        .icon("eye")
+        .icon("hide")
         .enabled(has_constraints)
         .params("constraint: id|name or a list; suppressed?: bool (default toggles) → {constraints: [{name, suppressed, status}]}"),
     CommandSpec::new("constraint.delete", "Delete Constraint", delete).icon("delete").enabled(has_constraints).params("constraint: id|name or a list → {deleted: n}"),
@@ -49,17 +49,20 @@ pub static COMMANDS: &[CommandSpec] = &[
         "constraint? → as list (status redundant when it is met and takes no freedom away) + per pick the resolved primitive in world (picks: [{…, resolved: {kind, p|c, n|d|axis, r?}}]), the compiled joints/equations (compiled: [{id, kind, flip, offset}]), gaps: {mm, deg} (how far the picks are from meeting it)",
     ),
     CommandSpec::new("constraint.show", "Show Constraints", show)
-        .icon("eye")
+        .at("SOLID", "ASSEMBLE")
+        .icon("show_relationships")
         .noundo()
         .enabled(has_constraints)
         .params("occurrences: [ids|names] (the constraints picking any of them are added to the shown glyphs; an empty list clears) → {shown: [names]}"),
     CommandSpec::new("constraint.show_sick", "Show Problems", show_sick)
-        .icon("inspect")
+        .at("SOLID", "ASSEMBLE")
+        .icon("show_sick")
         .noundo()
         .enabled(any_sick)
         .params("→ {shown: [names]}: every sick or lost constraint, in place of the shown glyphs"),
     CommandSpec::new("constraint.hide_all", "Hide All Constraints", hide_all)
-        .icon("eye")
+        .at("SOLID", "ASSEMBLE")
+        .icon("hide_relationships")
         .noundo()
         .enabled(has_constraints)
         .params("→ {shown: []}: no constraint glyph is shown"),

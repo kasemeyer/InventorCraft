@@ -414,7 +414,12 @@ fn clipboard_buttons_use_the_edit_clipboard() {
 const ASSEMBLY_FACES: &[(&str, &str, &[(&str, bool)])] = &[
     ("ASSEMBLE", "COMPONENT", &[("component.insert_design", L), ("component.create", L)]),
     ("ASSEMBLE", "POSITION", &[("solid.move", L)]),
-    ("ASSEMBLE", "RELATIONSHIPS", &[("joint.create", L), ("joint.as_built", S)]),
+    // Updated by design (R70, Plan E-2 Task 1): CAP §E's Relationships panel.
+    (
+        "ASSEMBLE",
+        "RELATIONSHIPS",
+        &[("joint.create", L), ("constraint.create", L), ("constraint.show", S), ("constraint.show_sick", S), ("constraint.hide_all", S)],
+    ),
     ("ASSEMBLE", "MANAGE", &[("assembly.bom", L), ("parameters.change", L)]),
     ("DESIGN", "FASTEN", &[("parts.fastener", L)]),
     ("DESIGN", "FRAME", &[("frame.member", L)]),
@@ -454,10 +459,13 @@ fn inventor_commands() -> BTreeSet<&'static str> {
 /// commands: Plan D-1's 29 drawing commands (161 to 190) and Plan D-2 Task 0's
 /// `drawing.note.edit` (191; R74), which the Drawing ribbon does not place. Plan D-2 Task 1's
 /// Drawing ribbon places ten drawing commands (191 - 10 = 181). Plan E-1 Task 0 measured the
-/// base N = 182 (R121). Plan E-1 Task 4's six constraint commands (+6): 182 + 6 = 188 (E-2 Task 1
-/// places them). Plan E-1 Task 5's three show commands (+3): 188 + 3 = 191 (N + 9). Plan E-1
-/// Task 8's `constraint.drive` (+1): 191 + 1 = 192 (N + 10).
-const INVENTOR_UNPLACED: usize = 192;
+/// base N = 182 (R121). Plan E-1 Task 4's six constraint commands (+6): 182 + 6 = 188 (of those six
+/// only `constraint.create` is placed, by E-2 Task 1; edit, suppress, delete, list and inspect stay
+/// unplaced). Plan E-1 Task 5's three show commands (+3): 188 + 3 = 191 (N + 9). Plan E-1 Task 8's
+/// `constraint.drive` (+1): 191 + 1 = 192 (N + 10). Plan E-2 Task 1 places four on
+/// ASSEMBLE › RELATIONSHIPS (-4): `constraint.create`, `constraint.show`, `constraint.show_sick`,
+/// `constraint.hide_all`; 192 - 4 = 188 (N + 6).
+const INVENTOR_UNPLACED: usize = 188;
 
 #[test]
 fn inventor_assembly_ribbon_follows_the_capture() {
@@ -504,10 +512,8 @@ fn inventor_assembly_faces_follow_the_capture() {
     for (tab, panel, want) in ASSEMBLY_FACES {
         assert_eq!(face(Assembly, tab, panel), *want, "{tab}/{panel}");
     }
-    // Joint is the only large button on RELATIONSHIPS, and no stand-in Constrain is placed.
-    assert_eq!(large(Assembly, "ASSEMBLE", "RELATIONSHIPS"), ["joint.create"]);
-    let relationships = commands(Assembly, "ASSEMBLE", "RELATIONSHIPS");
-    assert!(relationships.iter().all(|c| !c.contains("constrain")), "{relationships:?}");
+    // Updated by design (R70, Plan E-2 Task 1): Joint and Constrain are RELATIONSHIPS' large buttons.
+    assert_eq!(large(Assembly, "ASSEMBLE", "RELATIONSHIPS"), ["joint.create", "constraint.create"]);
     assert_eq!(large(Assembly, "MODEL", "MODIFY ASSEMBLY"), ["solid.extrude", "solid.revolve", "solid.hole", "solid.fillet"]);
     // Every Assembly panel outside the inherited RENDER tab has a row here, or shares the face
     // of a panel with the same id pinned by either table.
@@ -584,11 +590,12 @@ fn every_inventor_ribbon_carries_the_render_tab() {
 }
 
 /// Task 6 (D5): the 46 Inventor aliases with a SolidCraft target, as data, with the one-key wait;
-/// updated by design (R70) for Plan D-2 Task 1's eight drawing aliases.
+/// updated by design (R70) for Plan D-2 Task 1's eight drawing aliases and Plan E-2 Task 1's `C`
+/// (Constrain, assembly scope).
 #[test]
-fn inventor_maps_54_aliases_without_conflicts() {
+fn inventor_maps_55_aliases_without_conflicts() {
     assert_eq!(inventor().letter_keys, LetterKeys::Aliases);
-    assert_eq!(inventor().aliases.len(), 54);
+    assert_eq!(inventor().aliases.len(), 55);
     assert_eq!(inventor().alias_wait_ms, 750);
     assert_eq!(validate(inventor()), Vec::<String>::new());
 }

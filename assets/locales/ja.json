@@ -2192,6 +2192,7 @@
   "render.volume_max": "最大境界 · ワールド mm",
   "render.volume_min": "最小境界 · ワールド mm",
   "render.volume_title": "有限の均一ボリューム",
+  "ribbon.hide_all": "すべて非表示",
   "ribbon.place": "配置",
   "sample.bracket.about": "2 mm の板金ルールによるベース フランジ、エッジ フランジ、ヘミング",
   "sample.bracket.name": "板金ブラケット",

@@ -1156,6 +1156,10 @@ mod inventor_tests;
 mod shell_tests;
 
 #[cfg(test)]
+#[path = "profile_constraints_tests.rs"]
+mod constraints_tests;
+
+#[cfg(test)]
 #[path = "profile_drawing_tests.rs"]
 mod drawing_tests;
 

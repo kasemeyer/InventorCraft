@@ -63,6 +63,7 @@ component	false
 compute	false
 configuration_table	false
 conic	false
+constrain	false
 constrainer	false
 construction	false
 contact_all	false
@@ -110,6 +111,8 @@ graph	false
 ground	false
 help	false
 hem	false
+hide	false
+hide_relationships	false
 hole	false
 home	false
 import	false
@@ -209,6 +212,8 @@ settings	false
 sheet_rules	false
 shell	false
 shield	false
+show_relationships	false
+show_sick	false
 silhouette	false
 sketch	false
 sketch_break	false

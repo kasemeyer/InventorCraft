@@ -58,6 +58,59 @@ pub(crate) fn frames_for(seconds: f64) -> usize {
     (seconds * 60.0).ceil() as usize + 1
 }
 
+/// E-1's `blocks()` built through `h.app.run`, in millimetres, laid out for picking from the default view:
+///   document.units {"units": "mm"};
+///   "A" grounded (the first placement, R103/R123): solid.box {100, 50, 20, corner [0, 0, 0]}
+///        (top z = 20, pick [50, 25, 20]; right face x = 100, pick [100, 25, 10]);
+///   "B": solid.box {100, 50, 20, corner [0, 70, 7]}  (top z = 27, 7 mm above A's, pick [50, 95, 27];
+///        top corner vertex [100, 120, 27]; top front edge along X at [50, 70, 27]);
+///   "Plate": solid.box {80, 80, 10, corner [150, -40, 0]} + cut solid.cylinder {diameter 20, height 12, base [190, 0, -1]}
+///        (top pick [160, 30, 10]; hole top rim pick [200, 0, 10]; hole wall pick [190, -10, 5]);
+///   "Pin": solid.cylinder {diameter 20, height 60, base [300, 0, 50]}
+///        (top face pick [300, 5, 110]; top rim pick [310, 0, 110]; wall pick [310, 0, 80]);
+///   then the `ui.home` view and `h.settle()`.
+pub(crate) fn constraint_blocks(h: &mut Harness) {
+    let mut run = |id: &str, p: Value| {
+        if let Err(e) = h.app.run(id, p.clone()) {
+            panic!("{id} {p}: {e}");
+        }
+    };
+    run("document.units", json!({"units": "mm"}));
+    let parts: [(&str, bool, Vec<(&str, Value)>); 4] = [
+        ("A", true, vec![("solid.box", json!({"length": 100, "width": 50, "height": 20, "corner": [0, 0, 0]}))]),
+        ("B", false, vec![("solid.box", json!({"length": 100, "width": 50, "height": 20, "corner": [0, 70, 7]}))]),
+        (
+            "Plate",
+            false,
+            vec![
+                ("solid.box", json!({"length": 80, "width": 80, "height": 10, "corner": [150, -40, 0], "name": "Plate"})),
+                ("solid.cylinder", json!({"diameter": 20, "height": 12, "base": [190, 0, -1], "operation": "cut", "name": "Hole"})),
+            ],
+        ),
+        ("Pin", false, vec![("solid.cylinder", json!({"diameter": 20, "height": 60, "base": [300, 0, 50], "name": "PinBody"}))]),
+    ];
+    for (name, grounded, steps) in parts {
+        run("component.create", json!({"name": name, "grounded": grounded}));
+        for (id, p) in steps {
+            run(id, p);
+        }
+        run("component.activate", json!({"component": "root"}));
+    }
+    assert_eq!(h.call("ui.view", json!({"view": "home"}))["ok"], json!(true));
+    h.settle();
+}
+
+/// Click a world point (`{"click": {"world": [x, y, z]}}`), then 2 frames.
+pub(crate) fn click_world(h: &mut Harness, p: [f64; 3]) {
+    h.step(&json!({"click": {"world": p}})).unwrap();
+    h.frames(2);
+}
+
+/// The constraint's id by name (`h.app.session.doc.assembly.constraint(name)`, `doc/src/constraints.rs:405`).
+pub(crate) fn constraint_id(h: &Harness, name: &str) -> u64 {
+    h.app.session.doc.assembly.constraint(name).map(|c| c.id).unwrap_or_else(|| panic!("no constraint {name}"))
+}
+
 /// Let the last clicks expire (egui's double-click delay), so the next click is a new one.
 pub(crate) fn clicks_expire(h: &mut Harness) {
     let delay = h.ctx.options(|o| o.input_options.max_double_click_delay);

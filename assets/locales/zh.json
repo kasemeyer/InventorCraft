@@ -2192,6 +2192,7 @@
   "render.volume_max": "最大边界 · 世界坐标 mm",
   "render.volume_min": "最小边界 · 世界坐标 mm",
   "render.volume_title": "有界均匀体积",
+  "ribbon.hide_all": "全部隐藏",
   "ribbon.place": "放置",
   "sample.bracket.about": "基于 2 mm 钣金规则的基础法兰、边线法兰和卷边",
   "sample.bracket.name": "钣金支架",
