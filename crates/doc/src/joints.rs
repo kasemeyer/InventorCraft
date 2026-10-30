@@ -2429,7 +2429,7 @@ fn build<'a>(doc: &'a Document, st: &ModelState, vals: &Values, extra: &'a Compi
         dof.insert(o.id, 0);
     }
     // `Free` members (from the root) are left out: they place what the joints don't.
-    if let Some(a) = floating_anchor(&placed, &joints) {
+    if let Some(a) = floating_anchor(&placed, &joints, &extra.equations) {
         placed.insert(a, occurrence_world(doc, a));
         dof.insert(a, 0);
     }
@@ -2523,11 +2523,13 @@ fn build<'a>(doc: &'a Document, st: &ModelState, vals: &Values, extra: &'a Compi
     Built { tree, placed, closing, dof }
 }
 
-/// With no fixed occurrence among the joints' (the `Free` members aside), the first joint's A
-/// side is held where it is.
-fn floating_anchor(placed: &BTreeMap<u64, Mat>, joints: &[&Joint]) -> Option<u64> {
+/// With no fixed occurrence among the joints' and the equations' (the `Free` members aside), the
+/// first joint's A side is held where it is. An equation touching a fixed occurrence counts
+/// (R148): a loose pair angled to a grounded part turns as a pair, no side of it held.
+fn floating_anchor(placed: &BTreeMap<u64, Mat>, joints: &[&Joint], equations: &[Eq]) -> Option<u64> {
     let real = || joints.iter().filter(|j| j.kind != JointKind::Free);
-    if real().flat_map(|j| [j.a.occurrence, j.b.occurrence]).any(|o| placed.contains_key(&o)) {
+    let mut involved = real().flat_map(|j| [j.a.occurrence, j.b.occurrence]).chain(equations.iter().flat_map(|e| e.eq.occurrences()));
+    if involved.any(|o| placed.contains_key(&o)) {
         return None;
     }
     real().next().map(|j| j.a.occurrence)
@@ -2551,7 +2553,7 @@ fn free_members(doc: &Document, extra: &Compiled) -> Vec<Joint> {
     for o in doc.occurrences.iter().filter(|o| o.grounded) {
         fixed.insert(o.id, IDENTITY);
     }
-    if let Some(a) = floating_anchor(&fixed, &joints) {
+    if let Some(a) = floating_anchor(&fixed, &joints, &extra.equations) {
         fixed.insert(a, IDENTITY);
     }
     let mut next: BTreeMap<u64, Vec<u64>> = BTreeMap::new();

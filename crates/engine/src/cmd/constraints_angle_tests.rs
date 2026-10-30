@@ -325,3 +325,27 @@ fn the_dof_memo_follows_an_angle_edit() {
     run(&mut s, "constraint.suppress", json!({"constraint": "Angle:1"}));
     check(&mut s, "suppressed", 3);
 }
+
+/// R148: A grounded, B and Pin Mated (both free), then B angled to A: no side of the pair is held
+/// as an anchor, so the pair turns together (Inventor's behaviour), not refused.
+#[test]
+fn a_loose_mated_pair_turns_to_an_angle() {
+    let mut s = blocks();
+    let r = run(&mut s, "constraint.create", json!({"type": "mate", "a": face("B", [50.0, 25.0, 60.0]), "b": face("Pin", [305.0, 0.0, 50.0])}));
+    assert_eq!(r["status"], "ok", "{r}");
+    let rel = |s: &Session| {
+        let (b, pin) = (occurrence_world(&s.doc, occ(s, "B")), occurrence_world(&s.doc, occ(s, "Pin")));
+        solidcraft_doc::mat_mul(&solidcraft_doc::mat_inverse(&b).unwrap(), &pin)
+    };
+    let before = rel(&s);
+    let r = run(&mut s, "constraint.create", fronts("directed", 30.0, json!({})));
+    assert_eq!(r["status"], "ok", "{r}");
+    let c = constraint(&s, "Angle:1");
+    let axis = apply_vector(&occurrence_world(&s.doc, occ(&s, "A")), c.axis.unwrap());
+    let (na, nb) = normals(&s, "Angle:1");
+    assert!((signed(na, nb, axis) - 30.0).abs() <= ANG, "{}", signed(na, nb, axis));
+    let after = rel(&s);
+    for (x, y) in before.iter().flatten().zip(after.iter().flatten()) {
+        assert!((x - y).abs() <= TOL, "Pin left B: {before:?} {after:?}");
+    }
+}
