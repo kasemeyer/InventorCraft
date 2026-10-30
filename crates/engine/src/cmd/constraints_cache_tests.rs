@@ -6,7 +6,7 @@
 //! nearest-match search finds.
 
 use serde_json::json;
-use solidcraft_doc::constraints::{ConstraintStatus, PickCache, PickWhat, Prim, geo_at, resolve};
+use solidcraft_doc::constraints::{ConstraintStatus, Geo, GeoRef, PickCache, PickWhat, Prim, geo_at, resolve};
 use solidcraft_geom::Vec3;
 
 use crate::Session;
@@ -156,4 +156,47 @@ fn the_name_index_finds_what_the_search_finds() {
         name.push_str("-gone");
     }
     assert_eq!(picks.resolve(&g).map_err(|e| e.to_string()), resolve(&s.doc, &st, &g).map_err(|e| e.to_string()));
+}
+
+/// A scratch copy shares the session's pick cache (entries are keyed on what they read, so a
+/// shared one is safe): a part edit in the scratch resolves its pick at the new geometry, and the
+/// session, its own geometry as it was, still gets its own face.
+#[test]
+fn a_scratch_shares_the_cache_and_cannot_poison_it() {
+    let mut s = blocks();
+    let p = json!({"type": "mate", "a": {"occurrence": "A", "face": at(&s, "A", v(50.0, 25.0, 20.0))},
+        "b": {"occurrence": "B", "face": at(&s, "B", v(50.0, 25.0, 40.0))}, "offset": 0});
+    run(&mut s, "constraint.create", p);
+    let mut t = s.scratch();
+    assert!(std::sync::Arc::ptr_eq(&s.pick_cache, &t.pick_cache), "the scratch shares the cache");
+    let misses = s.pick_cache.misses();
+    let a_box = first_feature(&t, "A");
+    run(&mut t, "timeline.edit", json!({"feature": a_box, "set": {"height": "30 mm"}}));
+    assert!((b_bottom(&t) - 30.0).abs() <= TOL, "the scratch's B on its taller A: {}", b_bottom(&t));
+    assert!(s.pick_cache.misses() > misses, "the scratch's miss went into the shared cache");
+    // The session's A is as it was: its solve does not take the scratch's face.
+    run(&mut s, "joint.solve", json!({}));
+    assert!((b_bottom(&s) - 20.0).abs() <= TOL, "the session's B stays on A's top: {}", b_bottom(&s));
+    let st = s.model.state();
+    let top = s.doc.assembly.constraints[0].picks[0].clone();
+    match s.pick_cache.picks(&s.doc, &st).resolve_world(&top) {
+        Ok(Prim::Plane { p, .. }) => assert!((p.z - 20.0).abs() <= TOL, "{p:?}"),
+        other => panic!("A's top is {other:?}"),
+    }
+}
+
+/// A sheet face's plane comes from the model's sheet bodies, which the component's geometry key
+/// does not cover: a sheet-named pick is resolved every time, never kept.
+#[test]
+fn sheet_named_picks_are_not_cached() {
+    let s = blocks();
+    let st = s.model.state();
+    let cache = PickCache::default();
+    let a = occ(&s, "A");
+    let sheet = GeoRef { occurrence: a, geo: Geo::Face { name: "sheet:Body1:base:top".into(), pick: v(50.0, 25.0, 20.0) } };
+    let _ = cache.picks(&s.doc, &st).resolve(&sheet);
+    assert_eq!((cache.len(), cache.misses()), (0, 0), "a sheet-named pick is not kept");
+    let plain = geo_at(&s.doc, &st, a, PickWhat::Face, v(50.0, 25.0, 20.0)).unwrap();
+    let _ = cache.picks(&s.doc, &st).resolve(&plain);
+    assert_eq!((cache.len(), cache.misses()), (1, 1), "a plain one is");
 }

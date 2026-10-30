@@ -12,7 +12,8 @@
 //!
 //! Faces and edges are looked up in a per-body [`NameIndex`] (exact names), made once per body
 //! geometry key; a pick whose name is not there exactly is found by the nearest-match search.
-//! Not saved; a scratch copy of a session clones it.
+//! Not saved; a scratch copy of a session shares it (an `Arc`): what a scratch resolves is keyed
+//! on what it read, so it is right for the session too.
 
 use std::cell::OnceCell;
 use std::collections::HashMap;
@@ -185,8 +186,9 @@ impl Picks<'_> {
     }
 
     /// Where pick `g` is kept: its key, component and the component's geometry key (`None`: an
-    /// origin pick, an unknown occurrence or a component with a body that has no geometry key,
-    /// which are resolved every time).
+    /// origin pick, an unknown occurrence, a component with a body that has no geometry key, or a
+    /// sheet face name, whose plane is read from the model's sheet bodies, which the geometry key
+    /// does not cover; those are resolved every time).
     fn slot(&self, g: &GeoRef) -> Option<(PickKey, u64, u64)> {
         let layout = self.layout();
         let comp = match g.occurrence {
@@ -194,6 +196,9 @@ impl Picks<'_> {
             o => *layout.occurrences.get(&o)?,
         };
         let key = PickKey::of(comp, &g.geo)?;
+        if crate::sheet::split_sheet_face_name(&key.name).is_some() {
+            return None;
+        }
         let geometry = layout.components.get(&comp)?.1?;
         Some((key, comp, geometry))
     }
