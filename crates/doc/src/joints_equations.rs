@@ -22,13 +22,7 @@ impl Side {
     /// The direction it gives an angle in the world: a plane's normal, a line's, a cylinder's or
     /// a circle's axis. `None` for a point or a sphere, or where its occurrence is not placed.
     fn direction(&self, world: &dyn Fn(u64) -> Option<Mat>) -> Option<Vec3> {
-        let d = match self.prim {
-            Prim::Plane { n, .. } => n,
-            Prim::Line { d, .. } | Prim::Cylinder { d, .. } => d,
-            Prim::Circle { axis, .. } => axis,
-            Prim::Point { .. } | Prim::Sphere { .. } => return None,
-        };
-        apply_vector(&world(self.occurrence)?, d).normalized()
+        apply_vector(&world(self.occurrence)?, self.prim.direction()?).normalized()
     }
 
     /// The line it gives in the world (a point on it, its unit direction).

@@ -15,7 +15,7 @@ use serde::Serialize;
 use solidcraft_geom::Vec3;
 
 use super::geo::{Prim, PrimKind, resolve};
-use super::{COMPILED_BASE, Constraint, ConstraintKind, ConstraintSolution, StateSignature};
+use super::{COMPILED_BASE, Constraint, ConstraintKind, ConstraintSolution, PARALLEL_SIN, StateSignature};
 use crate::joints::{self, Assembly, Joint, JointKind, JointOrigin, Snap, Solution, nearest_values, occurrence_world};
 use crate::{Document, ModelState, apply_vector};
 
@@ -123,25 +123,11 @@ fn bounds_of(doc: &Document, c: &Constraint) -> Result<Option<(f64, f64)>, Strin
     Ok(Some((lo.min(hi), hi.max(lo))))
 }
 
-/// The direction an Angle measures on a pick: a plane's normal, a line's, an axis's.
-fn direction(p: &Prim) -> Option<Vec3> {
-    match *p {
-        Prim::Plane { n, .. } => Some(n),
-        Prim::Line { d, .. } | Prim::Cylinder { d, .. } => Some(d),
-        Prim::Circle { axis, .. } => Some(axis),
-        Prim::Point { .. } | Prim::Sphere { .. } => None,
-    }
-}
-
 /// An undirected angle within 0..π: 330° is 30°.
 fn unsigned(a: f64) -> f64 {
     let w = a.rem_euclid(std::f64::consts::TAU);
     if w > std::f64::consts::PI { std::f64::consts::TAU - w } else { w }
 }
-
-/// Directions closer to parallel than this (the sine of the angle between them) are parallel
-/// for an Angle's start.
-const PARALLEL_SIN: f64 = 1e-6;
 
 /// A direction with its largest component positive (the first of equal ones).
 fn canonical(d: Vec3) -> Vec3 {
@@ -169,7 +155,7 @@ fn reference_side(
         ConstraintSolution::ExplicitVector => {
             let r = picks.get(2).ok_or_else(|| "an Explicit vector Angle takes a third pick".to_string())?;
             let g = resolve(doc, st, r).map_err(|e| e.to_string())?;
-            if direction(&g).is_none() {
+            if g.direction().is_none() {
                 return Err(format!("Angle can't measure about a {}", word(g.kind())));
             }
             // An edge runs whichever way its B-rep curve does: its sense is its largest
@@ -195,7 +181,7 @@ pub fn angle_reference(
     picks: &[super::GeoRef],
     axis: Option<Vec3>,
 ) -> Result<Option<Vec3>, String> {
-    Ok(reference_side(doc, st, solution, picks, axis)?.and_then(|r| direction(&r.prim).and_then(|d| world_dir(doc, r.occurrence, d).normalized())))
+    Ok(reference_side(doc, st, solution, picks, axis)?.and_then(|r| r.prim.direction().and_then(|d| world_dir(doc, r.occurrence, d).normalized())))
 }
 
 /// A direction of occurrence `occ` in the world.
@@ -251,7 +237,7 @@ fn one(doc: &Document, st: &ModelState, c: &Constraint) -> Result<(Vec<Joint>, V
             return Ok((vec![parallel], vec![apart]));
         }
         ConstraintKind::Angle => {
-            let (Some(da), Some(db)) = (direction(&ga), direction(&gb)) else { return Err(cant()) };
+            let (Some(da), Some(db)) = (ga.direction(), gb.direction()) else { return Err(cant()) };
             let bounds = bounds_of(doc, c)?;
             let axis = match c.solution {
                 S::Directed | S::ExplicitVector => reference_side(doc, st, c.solution, &c.picks, c.axis)?,

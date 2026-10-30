@@ -71,7 +71,7 @@ pub(crate) fn predict_prims(kind: ConstraintKind, a: &Prim, b: &Prim, about: Opt
             _ => p(0.0, S::MateFace),
         },
         ConstraintKind::Angle => {
-            let (da, db) = (direction(a)?, direction(b)?);
+            let (da, db) = (a.direction()?, b.direction()?);
             p(joints::measured_angle(da.normalized()?, db.normalized()?, about).to_degrees(), solidcraft_doc::constraints::ANGLE_DEFAULT)
         }
         ConstraintKind::Insert => match (*a, *b) {
@@ -132,7 +132,7 @@ pub(crate) fn gaps(kind: ConstraintKind, solution: ConstraintSolution, offset: f
             (Role::Point(p), Role::Point(q)) => (p.dist(q), 0.0),
         }),
         ConstraintKind::Angle => {
-            let v = joints::measured_angle(direction(a)?.normalized()?, direction(b)?.normalized()?, about);
+            let v = joints::measured_angle(a.direction()?.normalized()?, b.direction()?.normalized()?, about);
             let off = if about.is_some() {
                 joints::wrapped(v - offset.to_radians()).abs()
             } else {
@@ -190,16 +190,6 @@ fn role(p: &Prim) -> Role {
 /// Is the pick an axis for a Mate (a line, a cylinder or a circle)?
 pub(crate) fn is_axis(p: &Prim) -> bool {
     matches!(role(p), Role::Line(..))
-}
-
-/// The direction an Angle measures: a plane's normal or a line's direction.
-pub(crate) fn direction(p: &Prim) -> Option<Vec3> {
-    match *p {
-        Prim::Plane { n, .. } => Some(n),
-        Prim::Line { d, .. } | Prim::Cylinder { d, .. } => Some(d),
-        Prim::Circle { axis, .. } => Some(axis),
-        _ => None,
-    }
 }
 
 fn xyz(v: Vec3) -> Value {

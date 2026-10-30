@@ -9,7 +9,8 @@ use std::collections::BTreeMap;
 use serde_json::{Value, json};
 use solidcraft_doc::constraints::{
     Constraint, ConstraintExprs, ConstraintKind, ConstraintLimits, ConstraintSolution, ConstraintStatus, EdgeEnd, Geo, GeoRef, MAX_CONSTRAINTS,
-    OriginItem, PickWhat, Prim, angle_reference, check_name, compile, geo_at, next_name, owner_of, resolve, resolve_world,
+    OriginItem, PARALLEL_SIN, PickWhat, Prim, TANGENT_PARALLEL_SIN, angle_reference, check_name, compile, geo_at, next_name, owner_of, resolve,
+    resolve_world,
 };
 use solidcraft_doc::joints::{self, Analysis, occurrence_world};
 use solidcraft_doc::{DocumentKind, Mat};
@@ -18,7 +19,7 @@ use solidcraft_geom::Vec3;
 use super::CommandSpec;
 use super::joints::{occurrence_id, typed, value};
 use crate::constraints::{
-    Prediction, direction, gaps, is_axis, offset_now, over_constrains, over_constrains_all, pick_json, predict_prims, prim_json, status_map, word,
+    Prediction, gaps, is_axis, offset_now, over_constrains, over_constrains_all, pick_json, predict_prims, prim_json, status_map, word,
 };
 use crate::params::{bad, vec3};
 use crate::{Result, Session};
@@ -223,7 +224,7 @@ fn fits_picks(kind: ConstraintKind, solution: ConstraintSolution, a: &Prim, b: &
             _ => Err(bad(cmd, format!("Insert takes two circular edges, not a {} and a {}", word(a), word(b)))),
         },
         ConstraintKind::Tangent => match (a, b) {
-            (Prim::Cylinder { d, .. }, Prim::Cylinder { d: e, .. }) if d.cross(*e).len() > 1e-9f64.sin() => {
+            (Prim::Cylinder { d, .. }, Prim::Cylinder { d: e, .. }) if d.cross(*e).len() > TANGENT_PARALLEL_SIN => {
                 Err(bad(cmd, "skew cylinders come in a later version: pick cylinders whose axes are parallel"))
             }
             _ => predict_prims(kind, a, b, None).map(|_| ()).ok_or_else(|| bad(cmd, format!("Tangent can't join a {} and a {}", word(a), word(b)))),
@@ -310,7 +311,7 @@ pub(crate) fn build(s: &Session, p: &Value, base: Option<&Constraint>, cmd: &str
         && let Some(r) = picks.get(2)
     {
         let w = resolve_world(&s.doc, &s.model.state(), r).map_err(|e| bad(cmd, format!("`ref`: {e}")))?;
-        if direction(&w).is_none() {
+        if w.direction().is_none() {
             return Err(bad(cmd, format!("`ref` must be a plane, a line or an axis to measure about, not a {}", word(&w))));
         }
     }
@@ -350,6 +351,10 @@ pub(crate) fn build(s: &Session, p: &Value, base: Option<&Constraint>, cmd: &str
     };
     let (min, min_expr) = limit("min", base.map_or((None, None), |b| (b.limits.min, b.exprs.min.clone())))?;
     let (max, max_expr) = limit("max", base.map_or((None, None), |b| (b.limits.max, b.exprs.max.clone())))?;
+    // A Directed Angle turns to its one signed value: no limits (spec §2.2, R152).
+    if kind == ConstraintKind::Angle && solution == ConstraintSolution::Directed && (min.is_some() || max.is_some()) {
+        return Err(bad(cmd, "Directed angle takes no limits"));
+    }
     let lock = match p.get("lock") {
         None | Some(Value::Null) => base.is_some_and(|b| b.lock) && kind == ConstraintKind::Insert,
         Some(Value::Bool(true)) if kind != ConstraintKind::Insert => return Err(bad(cmd, format!("lock is for Insert only, not {}", kind.word()))),
@@ -392,10 +397,6 @@ pub(crate) fn build(s: &Session, p: &Value, base: Option<&Constraint>, cmd: &str
     Ok(c)
 }
 
-/// Directions closer to parallel than this (the sine of the angle between them) have no a × b
-/// to freeze.
-const PARALLEL_SIN: f64 = 1e-6;
-
 /// A Directed Angle's axis in A's frame (spec §3.5): `given` (world) when the command names one;
 /// else the one `kept` (the same Directed picks) has; else frozen now as a × b of the picks'
 /// directions (`looked`, or resolved here), or a direction square to a when they are parallel.
@@ -418,7 +419,7 @@ fn directed_axis(s: &Session, a: &GeoRef, b: &GeoRef, given: Option<Vec3>, looke
             (resolve_world(&s.doc, &st, a).ok()?, resolve_world(&s.doc, &st, b).ok()?)
         }
     };
-    let (da, db) = (direction(&wa)?, direction(&wb)?);
+    let (da, db) = (wa.direction()?, wb.direction()?);
     // Parallel (to a micro-radian: faces modelled parallel differ by rounding): any direction
     // square to a, the same one every time.
     let k = da.cross(db);

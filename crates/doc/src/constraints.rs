@@ -26,6 +26,14 @@ pub const COMPILED_BASE: u64 = 1 << 48;
 /// Reference Vector, now that its equation holds (Plan E-1 Task 6).
 pub const ANGLE_DEFAULT: ConstraintSolution = ConstraintSolution::ExplicitVector;
 
+/// Directions closer to parallel than this (the sine of the angle between them) are parallel
+/// for an Angle: no a × b to freeze, no slope for an unsigned angle to start from.
+pub const PARALLEL_SIN: f64 = 1e-6;
+
+/// Cylinders whose axes are further from parallel than this (the sine) can't be tangent in v1:
+/// refused at create (R150).
+pub const TANGENT_PARALLEL_SIN: f64 = 1e-9;
+
 /// One assembly constraint.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Constraint {

@@ -76,6 +76,17 @@ pub enum PickWhat {
 }
 
 impl Prim {
+    /// The direction an Angle measures on it: a plane's normal, a line's, a cylinder's or a
+    /// circle's axis. `None` for a point or a sphere.
+    pub fn direction(&self) -> Option<Vec3> {
+        match *self {
+            Self::Plane { n, .. } => Some(n),
+            Self::Line { d, .. } | Self::Cylinder { d, .. } => Some(d),
+            Self::Circle { axis, .. } => Some(axis),
+            Self::Point { .. } | Self::Sphere { .. } => None,
+        }
+    }
+
     pub fn kind(&self) -> PrimKind {
         match self {
             Self::Plane { .. } => PrimKind::Plane,

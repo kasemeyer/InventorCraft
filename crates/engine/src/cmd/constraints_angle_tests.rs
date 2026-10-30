@@ -454,3 +454,49 @@ fn an_angle_over_a_part_whose_joint_fails() {
     let (na, nb) = normals(&s, "Angle:1");
     assert!((signed(na, nb, axis) - 30.0).abs() <= ANG, "{}", signed(na, nb, axis));
 }
+
+/// R152: a Directed Angle takes no limits (spec §2.2): refused at create, and on an edit that
+/// gives one.
+#[test]
+fn directed_takes_no_limits() {
+    let mut s = blocks();
+    refused(&mut s, "constraint.create", fronts("directed", 30.0, json!({"min": 10})), "Directed angle takes no limits");
+    run(&mut s, "constraint.create", fronts("directed", 30.0, json!({})));
+    refused(&mut s, "constraint.edit", json!({"constraint": "Angle:1", "max": 40}), "Directed angle takes no limits");
+}
+
+/// The frozen Directed axis is saved: reopened and solved again, the axis and B's whole
+/// transform are as they were.
+#[test]
+fn the_frozen_axis_survives_save_and_reopen() {
+    let mut s = blocks();
+    run(&mut s, "constraint.create", fronts("directed", 30.0, json!({})));
+    let (axis, b) = (constraint(&s, "Angle:1").axis.unwrap(), occurrence_world(&s.doc, occ(&s, "B")));
+    let dir = std::env::temp_dir().join(format!("tcicad-con-{}-the_frozen_axis_survives_save_and_reopen", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("angle.tciasm");
+    run(&mut s, "file.save", json!({"path": path.to_string_lossy(), "format": "json"}));
+    let mut back = Session::default();
+    run(&mut back, "doc.open", json!({"path": path.to_string_lossy()}));
+    let _ = std::fs::remove_dir_all(&dir);
+    run(&mut back, "joint.solve", json!({}));
+    assert_eq!(constraint(&back, "Angle:1").axis, Some(axis));
+    let again = occurrence_world(&back.doc, occ(&back, "B"));
+    assert!(same_mat(&again, &b), "{b:?} {again:?}");
+    let (na, nb) = normals(&back, "Angle:1");
+    let k = apply_vector(&occurrence_world(&back.doc, occ(&back, "A")), axis);
+    assert!((signed(na, nb, k) - 30.0).abs() <= ANG, "{}", signed(na, nb, k));
+}
+
+/// Undirected with limits from an exactly parallel start tilts about a fixed direction: two
+/// fresh runs place B identically.
+#[test]
+fn the_parallel_start_tilt_is_deterministic() {
+    let placed = || {
+        let mut s = blocks();
+        run(&mut s, "constraint.create", fronts("undirected", 30.0, json!({"min": 20, "max": 40})));
+        occurrence_world(&s.doc, occ(&s, "B"))
+    };
+    let (first, second) = (placed(), placed());
+    assert_eq!(first, second);
+}
