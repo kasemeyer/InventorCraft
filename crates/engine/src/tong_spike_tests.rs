@@ -72,6 +72,9 @@ fn the_record_tong_is_what_the_hand_count_says() {
     assert_eq!([m.pins[0], m.pins[3]].map(dof), [Some(0); 2]);
 
     // By command, on the same parts (the joints build's, its joints taken out): the same records.
+    // The evidence covers each record's id, name, kind, solution, picks, offset and lock, on
+    // tong(1) only (tong(9)'s records are built with `build`, over the command cap); limits,
+    // expressions, suppression, the Directed axis and the saved state are not compared.
     let mut parts = (*tong(1, false).session.doc).clone();
     parts.assembly.joints.clear();
     let mut s = Session::new(parts);
@@ -180,7 +183,10 @@ fn spike(compiled: bool) -> Vec<Row> {
     }
     conflicts += sol.conflicts.len();
     let full = median(&mut times);
-    rows.push(("1 full solve (median of 5)".into(), format!("{full:.1} ms {times:.1?}"), "<= 500 ms".into(), full <= 500.0));
+    // The records build answers to R156's target too: within the joints build's ×1.5 (180 ms).
+    let (bound, pass) =
+        if compiled { ("<= 500 ms (§8.1) and <= 180 ms (R156)", full <= 500.0 && full <= 180.0) } else { ("<= 500 ms (§8.1)", full <= 500.0) };
+    rows.push(("1 full solve (median of 5)".into(), format!("{full:.1} ms {times:.1?}"), bound.into(), pass));
     let opened = (*s.doc).clone();
     let at = Instant::now();
     let placed = joints::solve_holding_with_analysis(&s.doc, &st, &Held::new(), Analysis::Placement);
