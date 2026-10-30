@@ -267,8 +267,8 @@ fn an_angle_or_tangent_that_disagrees_is_refused() {
     refused(&mut s, "constraint.create", p, "over-constrains Drum: Tangent:1 off by 25.000 mm");
 }
 
-/// Two cylinders whose axes are not parallel can't be tangent in v1: refused at create, Lost in
-/// a solve.
+/// Two cylinders whose axes are not parallel can't be tangent in v1: refused at create (R150:
+/// only there; a solve pulls a moved part back).
 #[test]
 fn skew_cylinders_come_later() {
     let mut s = blocks();
@@ -410,4 +410,21 @@ fn gaps_and_predict_take_the_sign_from_the_reference() {
     assert!(unsigned_gap <= ANG, "{unsigned_gap}");
     assert!((predict_prims(Angle, &b, &a, Some(Vec3::Z)).unwrap().offset + 30.0).abs() <= ANG);
     assert!((predict_prims(Angle, &b, &a, None).unwrap().offset - 30.0).abs() <= ANG);
+}
+
+/// R150: a Tangent's drum turned 10° off parallel after the fact is pulled back, parallel and
+/// touching, by the next solve: Ok, not Lost.
+#[test]
+fn a_turned_drum_is_pulled_back_to_tangent() {
+    let mut s = blocks();
+    let pin = occ(&s, "Pin");
+    run(&mut s, "occurrence.ground", json!({"occurrence": pin, "grounded": true}));
+    let p = json!({"type": "tangent", "solution": "outside", "a": face("Pin", [310.0, 0.0, 80.0]), "b": face("Drum", [385.0, 0.0, 20.0])});
+    assert_eq!(run(&mut s, "constraint.create", p)["status"], "ok");
+    let drum = occ(&s, "Drum");
+    run(&mut s, "occurrence.move", json!({"occurrence": drum, "axis": [0, 1, 0], "angle": "10 deg"}));
+    run(&mut s, "joint.solve", json!({}));
+    let l = run(&mut s, "constraint.list", json!({}));
+    assert_eq!(l["constraints"][0]["status"], "ok", "{l}");
+    assert!((axes_apart(&s, "Tangent:1") - 25.0).abs() <= TOL, "{}", axes_apart(&s, "Tangent:1"));
 }

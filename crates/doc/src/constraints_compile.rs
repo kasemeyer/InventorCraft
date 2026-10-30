@@ -198,9 +198,6 @@ pub fn angle_reference(
     Ok(reference_side(doc, st, solution, picks, axis)?.and_then(|r| direction(&r.prim).and_then(|d| world_dir(doc, r.occurrence, d).normalized())))
 }
 
-/// Cylinders whose axes are further from parallel than this (radians) can't be tangent in v1.
-const PARALLEL_RAD: f64 = 1e-9;
-
 /// A direction of occurrence `occ` in the world.
 fn world_dir(doc: &Document, occ: u64, d: Vec3) -> Vec3 {
     if occ == 0 { d } else { apply_vector(&occurrence_world(doc, occ), d) }
@@ -244,10 +241,9 @@ fn one(doc: &Document, st: &ModelState, c: &Constraint) -> Result<(Vec<Joint>, V
         // read on every compile.
         ConstraintKind::Tangent if matches!((ga, gb), (Prim::Cylinder { .. }, Prim::Cylinder { .. })) => {
             let (Prim::Cylinder { p, d, r: ra }, Prim::Cylinder { p: q, d: e, r: rb }) = (ga, gb) else { return Err(cant()) };
+            // Skew cylinders are refused at create (R150); here the axes may be off parallel
+            // only because a part was moved, and the Parallel member pulls them back.
             let (wd, we) = (world_dir(doc, oa, d), world_dir(doc, ob, e));
-            if wd.cross(we).len() > PARALLEL_RAD.sin() {
-                return Err("skew cylinders come in a later version".into());
-            }
             let target = if c.solution == S::Inside { (ra - rb).abs() } else { ra + rb } + offset;
             let bounds = bounds_of(doc, c)?.map(|(lo, hi)| (target - offset + lo, target - offset + hi));
             let parallel = seeded(doc, st, c, 0, JointKind::Parallel, (oa, p, d), (ob, q, e), wd.dot(we) > 0.0, 0.0, 0.0);
