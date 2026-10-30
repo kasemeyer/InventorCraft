@@ -158,36 +158,94 @@ fn placed(s: &Session) -> Vec<(Vec<u64>, Body)> {
     out
 }
 
-/// The active contact sets' bodies tessellated once (R158), for checking the frames of a drive:
-/// each check places the cached meshes where the frame has the parts instead of moving and
-/// tessellating every body again (what [`collisions`] does). Contact sets the cache can't hold
-/// (a mesh body, the sweep's budgets) are checked by [`collisions`] on every frame.
-pub(crate) enum ContactCheck {
-    /// Contact is off: nothing collides.
+/// What stops a drive at contact (R158): the active contact sets' bodies tessellated once, and
+/// the member pairs that already pass through each other where the drive starts (they don't stop
+/// it). Each check places the cached meshes where the frame has the parts instead of moving and
+/// tessellating every body again (what [`collisions`] does), leaves the pairs it started with
+/// out, and tests again only pairs a body of which moved since their last test. Contact sets the
+/// cache can't hold (a mesh body, the sweep's budgets) are checked by [`collisions`] on every
+/// frame.
+pub(crate) struct ContactCheck {
+    kind: ContactKind,
+    /// Member pairs (occurrence names, in the design's order) passing through each other at the
+    /// start.
+    start: Vec<(String, String)>,
+    /// The same by occurrence ids (lower first).
+    start_ids: std::collections::BTreeSet<(u64, u64)>,
+}
+
+enum ContactKind {
+    /// Contact is off (or not asked for): nothing stops the drive.
     Off,
-    Cached(contact_sweep::ContactGeometry),
+    /// The geometry, and each pair's last answer with the frames it was worked out at.
+    Cached(contact_sweep::ContactGeometry, std::cell::RefCell<contact_sweep::HitMemo>),
     Uncached,
 }
 
+/// A member of a contact set: (occurrence id, name).
+type Member = (u64, String);
+
 impl ContactCheck {
-    pub(crate) fn new(s: &Session) -> Self {
-        if !s.doc.assembly.contact_enabled {
-            return Self::Off;
-        }
-        contact_sweep::ContactGeometry::new(s).map_or(Self::Uncached, Self::Cached)
+    /// Nothing to check.
+    pub(crate) fn off() -> Self {
+        Self { kind: ContactKind::Off, start: Vec::new(), start_ids: Default::default() }
     }
 
-    /// The pairs of set members (occurrence names) whose bodies pass through each other where `s`
-    /// has them now, each pair in the design's occurrence order (as [`collisions`] names them).
-    pub(crate) fn pairs(&self, s: &Session) -> Vec<(String, String)> {
-        let hits = match self {
-            Self::Off => return Vec::new(),
-            Self::Cached(g) => g.hits(s, &mut 0, usize::MAX, true),
-            Self::Uncached => return collisions(s).into_iter().map(|(a, b, _)| (a, b)).collect(),
-        };
-        let Ok(hits) = hits else { return collisions(s).into_iter().map(|(a, b, _)| (a, b)).collect() };
+    /// The design's contact sets as `s` has them at the start of a drive.
+    pub(crate) fn new(s: &Session) -> Self {
+        if !s.doc.assembly.contact_enabled {
+            return Self::off();
+        }
+        let kind = contact_sweep::ContactGeometry::new(s).map_or(ContactKind::Uncached, |g| ContactKind::Cached(g, Default::default()));
+        let mut out = Self { kind, start: Vec::new(), start_ids: Default::default() };
+        let start = out.overlapping(s);
+        out.start_ids = start.iter().map(|(a, b)| (a.0.min(b.0), a.0.max(b.0))).collect();
+        out.start = start.into_iter().map(|(a, b)| (a.1, b.1)).collect();
+        out
+    }
+
+    /// Whether the geometry is cached (else every check runs [`collisions`]).
+    #[cfg(test)]
+    pub(crate) fn cached(&self) -> bool {
+        matches!(self.kind, ContactKind::Cached(..))
+    }
+
+    /// The member pairs passing through each other at the start.
+    #[cfg(test)]
+    pub(crate) fn at_start(&self) -> &[(String, String)] {
+        &self.start
+    }
+
+    /// The overlapping member pairs where `s` has the parts (the ones at the start left out),
+    /// each pair in the design's occurrence order.
+    fn overlapping(&self, s: &Session) -> Vec<(Member, Member)> {
         let order = |id: u64| s.doc.occurrences.iter().position(|o| o.id == id).unwrap_or(usize::MAX);
-        hits.into_iter().map(|(a, b, _)| if order(b.0) < order(a.0) { (b.1, a.1) } else { (a.1, b.1) }).collect()
+        let ordered = |(a, b): (Member, Member)| if order(b.0) < order(a.0) { (b, a) } else { (a, b) };
+        let id = |name: &str| s.doc.occurrences.iter().find(|o| o.name == name).map_or(0, |o| o.id);
+        let uncached = || -> Vec<(Member, Member)> {
+            collisions(s)
+                .into_iter()
+                .filter(|(a, b, _)| !self.start.iter().any(|(x, y)| x == a && y == b))
+                .map(|(a, b, _)| ((id(&a), a), (id(&b), b)))
+                .collect()
+        };
+        match &self.kind {
+            ContactKind::Off => Vec::new(),
+            ContactKind::Uncached => uncached(),
+            ContactKind::Cached(g, memo) => {
+                let skip = |a: u64, b: u64| self.start_ids.contains(&(a.min(b), a.max(b)));
+                match g.overlapping(s, &mut memo.borrow_mut(), &skip) {
+                    Ok(pairs) => pairs.into_iter().map(ordered).collect(),
+                    Err(_) => uncached(),
+                }
+            }
+        }
+    }
+
+    /// The first member pair (occurrence names) that passes through each other where `s` has
+    /// the parts now and did not at the start.
+    pub(crate) fn hit(&self, s: &Session) -> Option<(String, String)> {
+        self.overlapping(s).into_iter().next().map(|(a, b)| (a.1, b.1))
     }
 }
 
@@ -233,26 +291,37 @@ fn overlap(a: &Body, b: &Body) -> Option<f64> {
 }
 
 fn mesh_overlap(ma: &solidcraft_geom::Mesh, mb: &solidcraft_geom::Mesh, tol: f64) -> Option<f64> {
+    if apart(ma, mb, tol) {
+        return None;
+    }
+    let depth = deepest(ma, mb, tol, false).max(deepest(mb, ma, tol, false));
+    (depth > tol).then_some(depth)
+}
+
+/// Whether [`mesh_overlap`] finds an overlap, stopping at the first sample deeper than `tol`
+/// rather than looking for the deepest (R158: a drive's contact stop needs only that).
+fn mesh_overlaps(ma: &solidcraft_geom::Mesh, mb: &solidcraft_geom::Mesh, tol: f64) -> bool {
+    !apart(ma, mb, tol) && (deepest(ma, mb, tol, true) > tol || deepest(mb, ma, tol, true) > tol)
+}
+
+/// The meshes' boxes are apart by more than `tol`.
+fn apart(ma: &solidcraft_geom::Mesh, mb: &solidcraft_geom::Mesh, tol: f64) -> bool {
     let (ba, bb) = (ma.bounds(), mb.bounds());
-    if ba.max.x < bb.min.x + tol
+    ba.max.x < bb.min.x + tol
         || bb.max.x < ba.min.x + tol
         || ba.max.y < bb.min.y + tol
         || bb.max.y < ba.min.y + tol
         || ba.max.z < bb.min.z + tol
         || bb.max.z < ba.min.z + tol
-    {
-        return None;
-    }
-    let depth = deepest(ma, mb, tol).max(deepest(mb, ma, tol));
-    (depth > tol).then_some(depth)
 }
 
 fn tris(m: &solidcraft_geom::Mesh) -> Vec<[Vec3; 3]> {
     m.triangles.iter().filter_map(|t| m.tri(t)).collect()
 }
 
-/// The deepest any sample point of `a` lies inside `b` (0 if none).
-fn deepest(a: &solidcraft_geom::Mesh, b: &solidcraft_geom::Mesh, tol: f64) -> f64 {
+/// The deepest any sample point of `a` lies inside `b` (0 if none); with `first`, the first depth
+/// past `tol` found.
+fn deepest(a: &solidcraft_geom::Mesh, b: &solidcraft_geom::Mesh, tol: f64, first: bool) -> f64 {
     let tb = tris(b);
     let bx = b.bounds();
     let mut pts: Vec<Vec3> = a.positions.clone();
@@ -275,10 +344,16 @@ fn deepest(a: &solidcraft_geom::Mesh, b: &solidcraft_geom::Mesh, tol: f64) -> f6
         let d = tb.iter().map(|[a, b, c]| closest(p, *a, *b, *c).dist(p)).fold(f64::MAX, f64::min);
         if d > tol.max(best) && inside(p, &tb) {
             best = d;
+            if first {
+                return best;
+            }
         }
     }
     for (p, q) in edges.into_iter().take(200_000) {
         best = best.max(crossing(p, q, &tb, bx, tol));
+        if first && best > tol {
+            return best;
+        }
     }
     best
 }

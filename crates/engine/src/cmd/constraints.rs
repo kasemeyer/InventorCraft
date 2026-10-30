@@ -743,9 +743,9 @@ fn drive(s: &mut Session, p: &Value) -> Result<Value> {
     let before = worlds(s);
     // What is already open or touching at the start does not stop the drive.
     let open_at_start: BTreeSet<u64> = super::joints::solution(s, &joints::Held::new(), Analysis::Placement).conflicts.iter().map(|c| c.0).collect();
-    // The contact sets' bodies tessellated once for the whole drive (R158).
-    let check = if contact { super::motion::ContactCheck::new(s) } else { super::motion::ContactCheck::Off };
-    let touching_at_start: Vec<(String, String)> = check.pairs(s);
+    // The contact sets' bodies tessellated once for the whole drive, and what already passes
+    // through each other there, which does not stop it (R158).
+    let check = if contact { super::motion::ContactCheck::new(s) } else { super::motion::ContactCheck::off() };
     // The design `from` (the last placed frame's) with the offset at `v`, placed. The driven
     // constraint goes without its limits for the sweep (R154), so every frame compiles to the
     // exact value (a Mate's Planar, an Angle's target); the stop above uses the limits it had.
@@ -765,7 +765,7 @@ fn drive(s: &mut Session, p: &Value) -> Result<Value> {
             worlds(s).into_iter().filter(|(o, m)| before.get(o) != Some(m)).map(|(o, m)| (o.to_string(), json!(m))).collect();
         json!({"value": v, "world": world})
     };
-    let hit = |s: &Session| -> Option<(String, String)> { check.pairs(s).into_iter().find(|pair| !touching_at_start.contains(pair)) };
+    let hit = |s: &Session| check.hit(s);
     let mut frames: Vec<Value> = Vec::new();
     // The last frame's value and design.
     let mut last: Option<(f64, Arc<Document>)> = None;

@@ -94,6 +94,10 @@ fn contact_mesh(body: &solidcraft_doc::ModelBody) -> Result<ContactMesh> {
 /// A member of a contact set: (occurrence id, name).
 pub(super) type Member = (u64, String);
 
+/// Each tested pair of bodies (indices) with the frames it was tested at and whether they
+/// overlapped there ([`ContactGeometry::overlapping`]).
+pub(crate) type HitMemo = HashMap<(usize, usize), ((Mat, Mat), bool)>;
+
 pub(crate) struct ContactGeometry {
     bodies: Vec<CachedBody>,
     /// Body indices, and the set members (occurrence id, name) they are under.
@@ -291,14 +295,67 @@ impl ContactGeometry {
 
     /// Each body's mesh placed where `s` has it.
     fn placed(&self, s: &Session) -> Result<Vec<Mesh>> {
+        Ok(self.placed_with_frames(s)?.into_iter().map(|(m, _)| m).collect())
+    }
+
+    /// [`Self::placed`] with each body's frame.
+    fn placed_with_frames(&self, s: &Session) -> Result<Vec<(Mesh, Mat)>> {
         self.bodies
             .iter()
             .map(|body| {
                 let frame = Self::frame(body, s)?;
                 let positions = body.mesh.positions.iter().map(|p| apply_point(&frame, *p)).collect();
-                Ok(Mesh { positions, triangles: body.mesh.triangles.clone(), ..Mesh::default() })
+                Ok((Mesh { positions, triangles: body.mesh.triangles.clone(), ..Mesh::default() }, frame))
             })
             .collect()
+    }
+
+    /// The pairs of set members whose bodies pass through each other in `s` (as [`Self::hits`]
+    /// with `all`, without the depths and the work budget), leaving out the member pairs `skip`
+    /// takes. Each pair of bodies' answer is kept in `memo` with the frames it was worked out at
+    /// (R158): a pair placed exactly as at its last test (in a drive, every pair but those the
+    /// driven parts are in) is not tested again; a pair is tested only until it is seen to pass
+    /// through ([`super::mesh_overlaps`]), not for its deepest point.
+    pub(crate) fn overlapping(&self, s: &Session, memo: &mut HitMemo, skip: &dyn Fn(u64, u64) -> bool) -> Result<Vec<(Member, Member)>> {
+        let mut out: Vec<(Member, Member)> = Vec::new();
+        let mut found: BTreeSet<(u64, u64)> = BTreeSet::new();
+        let (meshes, frames): (Vec<Mesh>, Vec<Mat>) = self.placed_with_frames(s)?.into_iter().unzip();
+        let boxes: Vec<Aabb3> = meshes.iter().map(Mesh::bounds).collect();
+        for (a, b, oa, ob) in &self.pairs {
+            let key = (oa.0.min(ob.0), oa.0.max(ob.0));
+            if found.contains(&key) || skip(oa.0, ob.0) {
+                continue;
+            }
+            let (Some(ma), Some(mb), Some(ba), Some(bb)) = (meshes.get(*a), meshes.get(*b), self.bodies.get(*a), self.bodies.get(*b)) else {
+                return Err(limit("invalid contact geometry pair"));
+            };
+            let (Some(aabb), Some(bbb), Some(fa), Some(fb)) = (boxes.get(*a), boxes.get(*b), frames.get(*a), frames.get(*b)) else {
+                return Err(limit("invalid contact geometry pair"));
+            };
+            if aabb.max.x < bbb.min.x
+                || bbb.max.x < aabb.min.x
+                || aabb.max.y < bbb.min.y
+                || bbb.max.y < aabb.min.y
+                || aabb.max.z < bbb.min.z
+                || bbb.max.z < aabb.min.z
+            {
+                continue;
+            }
+            let at = (*fa, *fb);
+            let hit = match memo.get(&(*a, *b)) {
+                Some((was, hit)) if *was == at => *hit,
+                _ => {
+                    let hit = super::mesh_overlaps(ma, mb, 1e-4 * ba.size.max(bb.size).max(1.0));
+                    memo.insert((*a, *b), (at, hit));
+                    hit
+                }
+            };
+            if hit {
+                found.insert(key);
+                out.push((oa.clone(), ob.clone()));
+            }
+        }
+        Ok(out)
     }
 
     pub(super) fn first_hit(&self, s: &Session, work: &mut usize) -> Result<Option<(String, String, f64)>> {

@@ -102,6 +102,34 @@ fn drive_stops_on_contact() {
     assert!((bottom(&world_in(&r, v.len() - 1, &s, "B")) - (20.0 + last)).abs() <= TOL, "{r}");
 }
 
+/// R158: the drive's contact check (meshes made once, a pair tested again only when a body of it
+/// moved) leaves out what already passes through each other at the start: B through grounded D
+/// all the way, B into C at 13 stops it, as `motion::collisions` would.
+#[test]
+fn drive_stops_at_a_new_contact_only() {
+    let mut s = blocks();
+    run(&mut s, "constraint.create", mate_a_b(json!({})));
+    for (name, z) in [("C", 53), ("D", 30)] {
+        run(&mut s, "component.create", json!({"name": name, "grounded": true}));
+        run(&mut s, "solid.box", json!({"length": 30, "width": 50, "height": 20, "corner": [if name == "D" { 70 } else { 0 }, 0, z]}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+    }
+    let (b, c, d) = (occ(&s, "B"), occ(&s, "C"), occ(&s, "D"));
+    run(&mut s, "contact.create", json!({"occurrences": [b, c, d]}));
+    let names = |id: u64| s.doc.occurrences.iter().find(|o| o.id == id).unwrap().name.clone();
+    let (nb, nc, nd) = (names(b), names(c), names(d));
+    assert_eq!(super::super::motion::collisions(&s).into_iter().map(|(x, y, _)| (x, y)).collect::<Vec<_>>(), vec![(nb.clone(), nd.clone())]);
+    let check = super::super::motion::ContactCheck::new(&s);
+    assert!(check.cached());
+    assert_eq!(check.at_start(), &[(nb.clone(), nd)]);
+    assert_eq!(check.hit(&s), None, "B through D is where it started");
+    let r = drive(&mut s, json!({"constraint": "Mate:1", "end": 20, "steps": 10, "stop_on_contact": true}));
+    let stop = &r["stopped_by_contact"];
+    let at = stop["value"].as_f64().unwrap_or_else(|| panic!("{r}"));
+    assert!((at - 13.0).abs() <= 0.02, "{r}");
+    assert_eq!(stop["pair"], json!([nb, nc]), "{r}");
+}
+
 #[test]
 fn drive_cycles_and_repeats() {
     let mut s = blocks();
