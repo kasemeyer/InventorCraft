@@ -373,7 +373,7 @@ fn a_constraints_only_assembly_draws_no_joint_frames() {
         lock: false,
         axis: None,
         state: Vec::new(),
-        signature: None,
+        signatures: Vec::new(),
     };
     h.app.session.doc_mut().assembly.constraints.push(mate);
     h.app.session.refresh();

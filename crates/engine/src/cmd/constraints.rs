@@ -17,7 +17,9 @@ use solidcraft_geom::Vec3;
 
 use super::CommandSpec;
 use super::joints::{occurrence_id, typed, value};
-use crate::constraints::{gaps, is_axis, offset_now, over_constrains, over_constrains_all, pick_json, predict_prims, prim_json, status_map, word};
+use crate::constraints::{
+    direction, gaps, is_axis, offset_now, over_constrains, over_constrains_all, pick_json, predict_prims, prim_json, status_map, word,
+};
 use crate::params::{bad, vec3};
 use crate::{Result, Session};
 
@@ -26,10 +28,10 @@ const PICK: &str = "a pick is {occurrence: id|name, face|edge: \"<name>\" | [x,y
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("constraint.create", "Constrain", create).icon("constrain").enabled(has_components).params(
-        "type: mate|angle|tangent|insert (symmetry: second wave, refused with that reason in v1); a, b: picks; ref?: a third pick (Angle explicit vector); solution? (default per §1.2); offset?: number or expression (default 0; predict: true measures it instead); predict?: bool (default false on the command line, true from the dialog); min?, max?: number or expression; lock?: bool (Insert only); suppressed?: bool (default false); name?. A pick is {occurrence: id|name, face|edge: \"<name>\" | [x,y,z]} (a world point picks the nearest face/edge on that occurrence, as joint.create does; a name may take near?: [x,y,z] in the component's coordinates), {occurrence, vertex: [x,y,z]} (or vertex: \"<edge name>\", end?: start|end, near?), or {occurrence?: id|name (default: the assembly), origin: \"xy\"|\"xz\"|\"yz\"|\"x\"|\"y\"|\"z\"|\"center\"} → {id, name, status, dof: {<occurrence>: n}, moved: [occurrences]}",
+        "type: mate|angle|tangent|insert (symmetry: second wave, refused with that reason in v1); a, b: picks; ref?: a third pick (Angle explicit vector); solution? (default per §1.2); axis?: [x,y,z] (Directed Angle only: the world direction it turns about, kept in A's frame; default a × b of the picks as made); offset?: number or expression (default 0; predict: true measures it instead); predict?: bool (default false on the command line, true from the dialog); min?, max?: number or expression; lock?: bool (Insert only); suppressed?: bool (default false); name?. A pick is {occurrence: id|name, face|edge: \"<name>\" | [x,y,z]} (a world point picks the nearest face/edge on that occurrence, as joint.create does; a name may take near?: [x,y,z] in the component's coordinates), {occurrence, vertex: [x,y,z]} (or vertex: \"<edge name>\", end?: start|end, near?), or {occurrence?: id|name (default: the assembly), origin: \"xy\"|\"xz\"|\"yz\"|\"x\"|\"y\"|\"z\"|\"center\"} → {id, name, status, dof: {<occurrence>: n}, moved: [occurrences]}",
     ),
     CommandSpec::new("constraint.edit", "Edit Constraint", edit).icon("edit").enabled(has_components).params(
-        "constraint: id|name; any of type, a, b, ref, solution, offset, min, max (null clears), lock, name → as create; an edit that changes nothing adds no undo step",
+        "constraint: id|name; any of type, a, b, ref, solution, axis, offset, min, max (null clears), lock, name → as create; an edit that changes nothing adds no undo step",
     ),
     CommandSpec::new("constraint.suppress", "Suppress Constraint", suppress)
         .icon("hide")
@@ -220,6 +222,12 @@ fn fits_picks(kind: ConstraintKind, solution: ConstraintSolution, a: &Prim, b: &
             (Prim::Circle { .. }, Prim::Circle { .. }) => Ok(()),
             _ => Err(bad(cmd, format!("Insert takes two circular edges, not a {} and a {}", word(a), word(b)))),
         },
+        ConstraintKind::Tangent => match (a, b) {
+            (Prim::Cylinder { d, .. }, Prim::Cylinder { d: e, .. }) if d.cross(*e).len() > 1e-9f64.sin() => {
+                Err(bad(cmd, "skew cylinders come in a later version: pick cylinders whose axes are parallel"))
+            }
+            _ => predict_prims(kind, a, b).map(|_| ()).ok_or_else(|| bad(cmd, format!("Tangent can't join a {} and a {}", word(a), word(b)))),
+        },
         _ => predict_prims(kind, a, b).map(|_| ()).ok_or_else(|| bad(cmd, format!("{} can't join a {} and a {}", kind.word(), word(a), word(b)))),
     }
 }
@@ -265,12 +273,23 @@ pub(crate) fn build(s: &Session, p: &Value, base: Option<&Constraint>, cmd: &str
     // An edit that keeps the picks, type and solution does not look at the geometry again (R134):
     // a Lost constraint can still be renamed, given another offset, limits, lock or suppressed.
     let same_geometry = base.is_some_and(|b| b.picks == picks && b.kind == kind && given.is_none_or(|g| g == b.solution)) && !predict;
+    let given_axis = match p.get("axis") {
+        None | Some(Value::Null) => None,
+        Some(v) => {
+            let cap = solidcraft_doc::constraints::MAX_OFFSET_MM;
+            let w = vec3(v).filter(|w| w.x.abs().max(w.y.abs()).max(w.z.abs()) <= cap);
+            Some(w.and_then(Vec3::normalized).ok_or_else(|| bad(cmd, "`axis` must be a direction [x,y,z]: not zero, each within ±10000000"))?)
+        }
+    };
+    // The picks' world primitives, when this build looks at them.
+    let mut looked: Option<(Prim, Prim)> = None;
     let (solution, prediction) = match base {
         Some(b) if same_geometry => (b.solution, None),
         _ => {
             let st = s.model.state();
             let world = |g: &GeoRef, what: &str| resolve_world(&s.doc, &st, g).map_err(|e| bad(cmd, format!("`{what}`: {e}")));
             let (wa, wb) = (world(ga, "a")?, world(gb, "b")?);
+            looked = Some((wa, wb));
             let prediction = if predict { predict_prims(kind, &wa, &wb) } else { None };
             let solution = match (given, prediction, base) {
                 (Some(g), ..) => g,
@@ -281,6 +300,25 @@ pub(crate) fn build(s: &Session, p: &Value, base: Option<&Constraint>, cmd: &str
             fits_picks(kind, solution, &wa, &wb, cmd)?;
             (solution, prediction)
         }
+    };
+    // An Explicit vector Angle measures about its third pick's direction: a plane or a line.
+    if kind == ConstraintKind::Angle
+        && solution == ConstraintSolution::ExplicitVector
+        && !same_geometry
+        && let Some(r) = picks.get(2)
+    {
+        let w = resolve_world(&s.doc, &s.model.state(), r).map_err(|e| bad(cmd, format!("`ref`: {e}")))?;
+        if direction(&w).is_none() {
+            return Err(bad(cmd, format!("`ref` must be a plane, a line or an axis to measure about, not a {}", word(&w))));
+        }
+    }
+    if given_axis.is_some() && !(kind == ConstraintKind::Angle && solution == ConstraintSolution::Directed) {
+        return Err(bad(cmd, "`axis` is for a Directed Angle only"));
+    }
+    let axis = if kind == ConstraintKind::Angle && solution == ConstraintSolution::Directed {
+        directed_axis(s, ga, gb, given_axis, looked, base.filter(|b| b.solution == ConstraintSolution::Directed && b.picks == picks))
+    } else {
+        None
     };
     let angle = kind.is_angle();
     let (offset, offset_expr) = match p.get("offset") {
@@ -320,9 +358,9 @@ pub(crate) fn build(s: &Session, p: &Value, base: Option<&Constraint>, cmd: &str
     // from where the parts are. A new solution keeps them: the state's signature (R132) tells the
     // solve they were solved for another compile (Mate to Flush, Opposed to Aligned), which then
     // re-seeds them.
-    let (state, signature) = match base {
-        Some(b) if b.picks == picks && b.kind == kind => (b.state.clone(), b.signature),
-        _ => (Vec::new(), None),
+    let (state, signatures) = match base {
+        Some(b) if b.picks == picks && b.kind == kind => (b.state.clone(), b.signatures.clone()),
+        _ => (Vec::new(), Vec::new()),
     };
     let c = Constraint {
         id: base.map_or(0, |b| b.id),
@@ -335,12 +373,45 @@ pub(crate) fn build(s: &Session, p: &Value, base: Option<&Constraint>, cmd: &str
         exprs: ConstraintExprs { offset: offset_expr, min: min_expr, max: max_expr },
         suppressed,
         lock,
-        axis: base.and_then(|b| b.axis),
+        axis,
         state,
-        signature,
+        signatures,
     };
     c.validate().map_err(|e| bad(cmd, e.to_string()))?;
     Ok(c)
+}
+
+/// Directions closer to parallel than this (the sine of the angle between them) have no a × b
+/// to freeze.
+const PARALLEL_SIN: f64 = 1e-6;
+
+/// A Directed Angle's axis in A's frame (spec §3.5): `given` (world) when the command names one;
+/// else the one `kept` (the same Directed picks) has; else frozen now as a × b of the picks'
+/// directions (`looked`, or resolved here), or a direction square to a when they are parallel.
+/// `None` when a pick does not resolve (the solve then reports the constraint Lost).
+fn directed_axis(s: &Session, a: &GeoRef, b: &GeoRef, given: Option<Vec3>, looked: Option<(Prim, Prim)>, kept: Option<&Constraint>) -> Option<Vec3> {
+    let into_a = |w: Vec3| {
+        let m = if a.occurrence == 0 { solidcraft_doc::IDENTITY } else { occurrence_world(&s.doc, a.occurrence) };
+        solidcraft_doc::mat_inverse(&m).and_then(|inv| solidcraft_doc::apply_vector(&inv, w).normalized())
+    };
+    if let Some(w) = given {
+        return into_a(w);
+    }
+    if let Some(k) = kept.and_then(|c| c.axis) {
+        return Some(k);
+    }
+    let (wa, wb) = match looked {
+        Some(l) => l,
+        None => {
+            let st = s.model.state();
+            (resolve_world(&s.doc, &st, a).ok()?, resolve_world(&s.doc, &st, b).ok()?)
+        }
+    };
+    let (da, db) = (direction(&wa)?, direction(&wb)?);
+    // Parallel (to a micro-radian: faces modelled parallel differ by rounding): any direction
+    // square to a, the same one every time.
+    let k = da.cross(db);
+    into_a(if k.len() > PARALLEL_SIN { k } else { da.any_perp() })
 }
 
 /// Every occurrence's world placement now.
@@ -562,11 +633,21 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
                     j
                 })
                 .collect();
+            let equations = compiled.equations.iter().filter(|e| owner_of(e.id) == Some(c.id)).map(|e| match &e.eq {
+                joints::Equation::Angle { axis, target, bounds, .. } => {
+                    json!({"id": e.id, "kind": if axis.is_some() { "signed_angle" } else { "angle" },
+                    "target": target.to_degrees(), "bounds": bounds.map(|(lo, hi)| [lo.to_degrees(), hi.to_degrees()])})
+                }
+                joints::Equation::AxisDistance { target, bounds, .. } => {
+                    json!({"id": e.id, "kind": "axis_distance", "target": target, "bounds": bounds.map(|(lo, hi)| [lo, hi])})
+                }
+            });
             v["compiled"] = compiled
                 .joints
                 .iter()
                 .filter(|j| owner_of(j.id) == Some(c.id))
                 .map(|j| json!({"id": j.id, "kind": j.kind, "flip": j.flip, "offset": j.offset}))
+                .chain(equations)
                 .collect();
             if let Some((_, why)) = compiled.lost.iter().find(|(id, _)| *id == c.id) {
                 v["lost"] = json!(why);
@@ -659,3 +740,7 @@ mod constraints_hostile_tests;
 #[cfg(test)]
 #[path = "constraints_status_tests.rs"]
 mod constraints_status_tests;
+
+#[cfg(test)]
+#[path = "constraints_angle_tests.rs"]
+mod constraints_angle_tests;

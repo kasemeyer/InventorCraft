@@ -358,7 +358,7 @@ fn reseeded(mut s: Session, id: u64, solution: &str, name: &str) -> Mat {
     s.doc_mut().assembly.constraints.retain(|x| x.id != id);
     c.solution = solidcraft_doc::constraints::ConstraintSolution::parse(solution).unwrap();
     c.state = Vec::new();
-    c.signature = None;
+    c.signatures = Vec::new();
     s.doc_mut().assembly.constraints.push(c);
     crate::cmd::joints::resolve(&mut s);
     transform(&s, name)
@@ -374,7 +374,7 @@ fn same(a: &Mat, b: &Mat) -> bool {
 }
 
 fn signature(s: &Session, id: u64) -> Option<solidcraft_doc::constraints::StateSignature> {
-    constraint(s, id).signature
+    constraint(s, id).signatures.first().copied()
 }
 
 #[test]
@@ -391,7 +391,7 @@ fn a_mate_edited_to_flush_lands_without_a_jump() {
     // B turns over about its bottom's centre: the centre stays where the Mate put it.
     assert!(p.dist(v(50.0, 25.0, 20.0)) <= 1e-6, "B's bottom centre {p:?}");
     assert!((n.dot(m) - 1.0).abs() <= 1e-12, "normals {n:?} {m:?}");
-    assert_eq!(c.signature.map(|g| g.flip), Some(true), "state re-seeded for Flush");
+    assert_eq!(c.signatures.first().map(|g| g.flip), Some(true), "state re-seeded for Flush");
     assert_eq!(solution(&s).conflicts, vec![]);
 }
 
@@ -427,7 +427,7 @@ fn an_undirected_sense_change_reseeds() {
     let c = constraint(&s, id);
     let (drum, axis) = (line(now(&s, &c.picks[0])), line(now(&s, &c.picks[1])));
     assert!((drum.1.dot(axis.1) + 1.0).abs() <= 1e-12, "dot {}", drum.1.dot(axis.1));
-    assert_eq!(c.signature.map(|g| g.flip), Some(false), "re-seeded for the opposed sense");
+    assert_eq!(c.signatures.first().map(|g| g.flip), Some(false), "re-seeded for the opposed sense");
     let after = placed(&s, "Pin", v(300.0, 0.0, 80.0));
     assert!(after.dist(centre) <= 1.0, "the pin jumped from {centre:?} to {after:?}");
 }
@@ -442,13 +442,13 @@ fn a_file_from_before_signatures_reseeds_once() {
     run(&mut made, "file.save", json!({"path": path.to_string_lossy(), "format": "json"}));
     let mut file: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     let record = file.pointer_mut("/assembly/constraints/0").and_then(|c| c.as_object_mut()).unwrap();
-    assert!(record.remove("signature").is_some(), "the save wrote a signature");
+    assert!(record.remove("signatures").is_some(), "the save wrote the signatures");
     std::fs::write(&path, file.to_string()).unwrap();
     let mut s = Session::default();
     run(&mut s, "doc.open", json!({"path": path.to_string_lossy()}));
     let _ = std::fs::remove_dir_all(&dir);
     let c = constraint(&s, id);
-    assert_eq!(c.signature.map(|g| (g.kind, g.flip)), Some((joints::JointKind::Planar, false)), "signed on open");
+    assert_eq!(c.signatures.first().map(|g| (g.kind, g.flip)), Some((joints::JointKind::Planar, false)), "signed on open");
     assert_eq!(c.state.len(), 3);
     let (p, _) = plane(now(&s, &c.picks[1]));
     assert!((p.z - 20.0).abs() <= TOL, "B's bottom at {p:?}");
@@ -478,4 +478,40 @@ fn the_dof_memo_follows_grounding_part_and_constraint_edits() {
     check(&mut s, "a part edit", 1);
     run(&mut s, "constraint.edit", json!({"constraint": "Mate:2", "offset": 2}));
     check(&mut s, "a constraint edit", 1);
+}
+
+/// Plan E-1 Task 6: a file written with Task 3's single `signature` reads it as a one-member
+/// list: the state keeps its meaning (no re-seed, B does not move), and the next save writes the
+/// list.
+#[test]
+fn a_file_with_one_signature_keeps_its_state() {
+    let mut made = blocks();
+    let id = mate_a_b(&mut made, 0.0);
+    let before = transform(&made, "B");
+    let dir = std::env::temp_dir().join(format!("tcicad-con-{}-a_file_with_one_signature_keeps_its_state", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("mate.tciasm");
+    run(&mut made, "file.save", json!({"path": path.to_string_lossy(), "format": "json"}));
+    let mut file: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let record = file.pointer_mut("/assembly/constraints/0").and_then(|c| c.as_object_mut()).unwrap();
+    let list = record.remove("signatures").unwrap();
+    assert_eq!(list.as_array().map(Vec::len), Some(1), "{list}");
+    record.insert("signature".into(), list[0].clone());
+    // A state that only the reused values give: B a little along x from where the Mate left it.
+    let state = record.get_mut("state").and_then(|v| v.as_array_mut()).unwrap();
+    let x = state[0].as_f64().unwrap();
+    state[0] = json!(x + 7.0);
+    std::fs::write(&path, file.to_string()).unwrap();
+    let mut s = Session::default();
+    run(&mut s, "doc.open", json!({"path": path.to_string_lossy()}));
+    let c = constraint(&s, id);
+    assert_eq!(c.signatures.iter().map(|g| (g.kind, g.flip)).collect::<Vec<_>>(), vec![(joints::JointKind::Planar, false)]);
+    assert!((c.state[0] - (x + 7.0)).abs() <= TOL, "the state was re-seeded: {:?}", c.state);
+    let moved = transform(&s, "B");
+    let shift = Vec3::new(moved[3][0] - before[3][0], moved[3][1] - before[3][1], moved[3][2] - before[3][2]).len();
+    assert!((shift - 7.0).abs() <= TOL, "B moved {shift} mm, not by the saved state's 7");
+    run(&mut s, "file.save", json!({"path": path.to_string_lossy(), "format": "json"}));
+    let saved = std::fs::read_to_string(&path).unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(saved.contains("\"signatures\"") && !saved.contains("\"signature\""), "{saved}");
 }

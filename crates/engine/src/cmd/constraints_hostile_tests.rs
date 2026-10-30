@@ -214,3 +214,48 @@ fn hostile_show_params_are_refused() {
     assert_eq!(s.undo.len(), steps);
     let _ = occ(&s, "B");
 }
+
+/// Plan E-1 Task 6: the Angle's `axis` (Directed only), its reference pick, and Tangent between
+/// cylinders: each refused with its reason, no undo step, nothing changed.
+#[test]
+fn hostile_angle_params_are_refused() {
+    let mut s = blocks();
+    let create = "constraint.create";
+    let directed =
+        json!({"type": "angle", "solution": "directed", "a": face("A", [50.0, 0.0, 10.0]), "b": face("B", [50.0, 0.0, 50.0]), "offset": 30});
+    let axis_bad = "`axis` must be a direction [x,y,z]: not zero, each within ±10000000";
+    for v in [
+        json!([0, 0, 0]),
+        json!("z"),
+        json!([1, 2]),
+        json!([1e300, 0, 0]),
+        json!([f64::NAN, 0, 0]),
+        json!(true),
+        json!([1, 2, 3, 4]),
+        json!({"x": 1}),
+    ] {
+        refused(&mut s, create, with(directed.clone(), json!({"axis": v})), axis_bad);
+    }
+    for p in [with(mate(), json!({"axis": [0, 0, 1]})), with(directed.clone(), json!({"solution": "undirected", "axis": [0, 0, 1]}))] {
+        refused(&mut s, create, p, "`axis` is for a Directed Angle only");
+    }
+    // An Explicit vector Angle about a point.
+    let about_point = with(directed.clone(), json!({"solution": "explicit_vector", "ref": {"occurrence": "A", "vertex": [0.0, 0.0, 20.0]}}));
+    refused(&mut s, create, about_point, "`ref` must be a plane, a line or an axis to measure about, not a point");
+    // A point can't take an angle.
+    refused(
+        &mut s,
+        create,
+        with(directed.clone(), json!({"a": {"occurrence": "A", "vertex": [0.0, 0.0, 20.0]}})),
+        "Angle can't join a point and a plane",
+    );
+    // Tangent between two planes.
+    let p = json!({"type": "tangent", "a": face("A", [50.0, 25.0, 20.0]), "b": face("B", [50.0, 25.0, 40.0])});
+    refused(&mut s, create, p, "Tangent can't join a plane and a plane");
+    // Edits: a bad axis, an axis on a Mate.
+    run(&mut s, create, directed);
+    refused(&mut s, "constraint.edit", json!({"constraint": "Angle:1", "axis": [0, 0, 0]}), axis_bad);
+    let mut s = blocks();
+    run(&mut s, create, mate());
+    refused(&mut s, "constraint.edit", json!({"constraint": "Mate:1", "axis": [0, 0, 1]}), "`axis` is for a Directed Angle only");
+}

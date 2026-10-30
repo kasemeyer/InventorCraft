@@ -53,12 +53,14 @@ pub struct Constraint {
     /// length or with a non-finite value (a NaN is written as `null`) is re-seeded by the solve.
     #[serde(default, skip_serializing_if = "Vec::is_empty", deserialize_with = "lenient_state")]
     pub state: Vec<f64>,
-    /// What `state` was solved for (R132): the compiled joint's kind and flip. A state whose
-    /// signature differs from what the constraint compiles to now (Mate↔Flush, Opposed↔Aligned,
-    /// an Undirected sense change, a lock) or that has none (a file from before R132) is
-    /// re-seeded, not reused with a new meaning.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub signature: Option<StateSignature>,
+    /// What `state` was solved for (R132), one per compiled joint in member order (a Tangent
+    /// between cylinders compiles to a joint and an equation; an equation keeps no values): each
+    /// joint's kind and flip. A member whose signature differs from what the constraint compiles
+    /// to now (Mate↔Flush, Opposed↔Aligned, an Undirected sense change, a lock), or a state with
+    /// none (a file from before R132), is re-seeded, not reused with a new meaning. A file written
+    /// with the single `signature` of Task 3 reads as a one-member list (what it meant).
+    #[serde(default, alias = "signature", deserialize_with = "one_or_many", skip_serializing_if = "Vec::is_empty")]
+    pub signatures: Vec<StateSignature>,
 }
 
 /// A compiled joint's kind and flip: what a constraint's `state` values mean (R132).
@@ -74,13 +76,42 @@ impl StateSignature {
     pub fn of(j: &crate::joints::Joint) -> Self {
         Self { kind: j.kind, flip: j.flip }
     }
+
+    /// How many values of `state` it stands for: its kind's, or a locked Insert's one turn
+    /// (its `Rigid` holds the turn it is locked at).
+    fn len(self) -> usize {
+        if self.kind == crate::joints::JointKind::Rigid { 1 } else { self.kind.dofs().len() }
+    }
+}
+
+/// The single signature of a Task 3 file, or the per-member list.
+fn one_or_many<'de, D: Deserializer<'de>>(d: D) -> std::result::Result<Vec<StateSignature>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum OneOrMany {
+        One(StateSignature),
+        Many(Vec<StateSignature>),
+    }
+    Ok(match Option::<OneOrMany>::deserialize(d)? {
+        Some(OneOrMany::One(s)) => vec![s],
+        Some(OneOrMany::Many(v)) => v,
+        None => Vec::new(),
+    })
 }
 
 impl Constraint {
-    /// The saved state, when it fits a compiled joint with `n` values and signature `sig`: as many
-    /// values, all finite, solved for the same kind and flip (R132).
-    pub fn state_for(&self, n: usize, sig: StateSignature) -> Option<&Vec<f64>> {
-        (self.state.len() == n && self.state.iter().all(|v| v.is_finite()) && self.signature == Some(sig)).then_some(&self.state)
+    /// The saved values of its joint member `member` (in member order), when they fit a
+    /// compiled joint with `n` values and signature `sig`: the state is as long as its signatures
+    /// say, the member was solved for the same kind and flip (R132), and its values are finite.
+    pub fn state_for(&self, member: usize, n: usize, sig: StateSignature) -> Option<&[f64]> {
+        if self.signatures.get(member) != Some(&sig) || sig.len() != n {
+            return None;
+        }
+        if self.state.len() != self.signatures.iter().map(|s| s.len()).sum::<usize>() {
+            return None;
+        }
+        let start: usize = self.signatures.iter().take(member).map(|s| s.len()).sum();
+        self.state.get(start..start + n).filter(|q| q.iter().all(|v| v.is_finite()))
     }
 }
 

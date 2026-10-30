@@ -330,7 +330,7 @@ pub(crate) fn add(
         lock,
         axis: None,
         state: Vec::new(),
-        signature: None,
+        signatures: Vec::new(),
     };
     c.validate().unwrap();
     doc.assembly.constraints.push(c);

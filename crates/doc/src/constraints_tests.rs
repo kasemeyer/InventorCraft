@@ -29,7 +29,7 @@ fn record(id: u64, name: &str, kind: ConstraintKind, picks: Vec<GeoRef>) -> Cons
         lock: false,
         axis: None,
         state: Vec::new(),
-        signature: None,
+        signatures: Vec::new(),
     }
 }
 
@@ -306,21 +306,42 @@ fn loading_refuses_a_joint_in_the_compiled_range() {
     Document::from_json(&file(COMPILED_BASE - 1)).unwrap();
 }
 
-/// R132: the state's signature is written beside it and read back; a record without one (a file
-/// from before R132) loads with none, and its state is not reused.
+/// R132: the state's signatures (one per joint member) are written beside it and read back; a
+/// record with the single `signature` of a Task 3 file reads as a one-member list; one with none
+/// (a file from before R132) loads with none, and its state is not reused.
 #[test]
-fn the_state_signature_round_trips() {
+fn the_state_signatures_round_trip() {
     let sig = StateSignature { kind: crate::joints::JointKind::Planar, flip: true };
-    let c = Constraint { state: vec![1.0, 2.0, 0.5], signature: Some(sig), ..mate(5, "Mate:1") };
+    let c = Constraint { state: vec![1.0, 2.0, 0.5], signatures: vec![sig], ..mate(5, "Mate:1") };
     let v = serde_json::to_value(&c).unwrap();
-    assert_eq!(v["signature"], json!({"kind": "planar", "flip": true}));
+    assert_eq!(v["signatures"], json!([{"kind": "planar", "flip": true}]));
     let back: Constraint = serde_json::from_value(v.clone()).unwrap();
     assert_eq!(back, c);
-    assert_eq!(back.state_for(3, sig), Some(&vec![1.0, 2.0, 0.5]));
-    assert_eq!(back.state_for(3, StateSignature { flip: false, ..sig }), None, "Mate's state is not Flush's");
+    assert_eq!(back.state_for(0, 3, sig), Some(&[1.0, 2.0, 0.5][..]));
+    assert_eq!(back.state_for(0, 3, StateSignature { flip: false, ..sig }), None, "Mate's state is not Flush's");
+    assert_eq!(back.state_for(1, 3, sig), None, "no second member");
+    // Task 3's single form.
+    let mut single = v.clone();
+    let o = single.as_object_mut().unwrap();
+    o.remove("signatures");
+    o.insert("signature".into(), json!({"kind": "planar", "flip": true}));
+    let single: Constraint = serde_json::from_value(single).unwrap();
+    assert_eq!(single.signatures, vec![sig]);
+    assert_eq!(single.state_for(0, 3, sig), Some(&[1.0, 2.0, 0.5][..]));
+    // None: re-seeded.
     let mut old = v;
-    old.as_object_mut().unwrap().remove("signature");
+    old.as_object_mut().unwrap().remove("signatures");
     let old: Constraint = serde_json::from_value(old).unwrap();
-    assert_eq!(old.signature, None);
-    assert_eq!(old.state_for(3, sig), None);
+    assert_eq!(old.signatures, Vec::new());
+    assert_eq!(old.state_for(0, 3, sig), None);
+    // Two members: a Parallel's four values, then a Revolute's one.
+    let two = vec![
+        StateSignature { kind: crate::joints::JointKind::Parallel, flip: false },
+        StateSignature { kind: crate::joints::JointKind::Revolute, flip: false },
+    ];
+    let c = Constraint { state: vec![1.0, 2.0, 3.0, 4.0, 5.0], signatures: two.clone(), ..mate(6, "Mate:2") };
+    assert_eq!(c.state_for(1, 1, two[1]), Some(&[5.0][..]));
+    assert_eq!(c.state_for(0, 4, two[0]), Some(&[1.0, 2.0, 3.0, 4.0][..]));
+    let short = Constraint { state: vec![1.0, 2.0, 3.0, 4.0], ..c };
+    assert_eq!(short.state_for(0, 4, two[0]), None, "a state shorter than its signatures say");
 }

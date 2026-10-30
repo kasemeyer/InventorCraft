@@ -70,6 +70,12 @@ pub(crate) fn predict_prims(kind: ConstraintKind, a: &Prim, b: &Prim) -> Option<
             }
             _ => None,
         },
+        // Two cylinders: Outside when they are apart by more than their radii, else Inside.
+        ConstraintKind::Tangent if matches!((a, b), (Prim::Cylinder { .. }, Prim::Cylinder { .. })) => {
+            let (Prim::Cylinder { p: pa, d, r: ra }, Prim::Cylinder { p: pb, r: rb, .. }) = (*a, *b) else { return None };
+            let apart = (pb - pa).cross(d).len();
+            if apart >= ra + rb { p(apart - ra - rb, S::Outside) } else { p(apart - (ra - rb).abs(), S::Inside) }
+        }
         ConstraintKind::Tangent => {
             let ((pp, n), other) = match (*a, *b) {
                 (Prim::Plane { p, n }, o) | (o, Prim::Plane { p, n }) => ((p, n), o),
@@ -121,6 +127,11 @@ pub(crate) fn gaps(kind: ConstraintKind, solution: ConstraintSolution, offset: f
             }
             _ => None,
         },
+        ConstraintKind::Tangent if matches!((a, b), (Prim::Cylinder { .. }, Prim::Cylinder { .. })) => {
+            let (Prim::Cylinder { p: pa, d, r: ra }, Prim::Cylinder { p: pb, d: e, r: rb }) = (*a, *b) else { return None };
+            let want = if solution == S::Inside { (ra - rb).abs() } else { ra + rb } + offset;
+            Some((((pb - pa).cross(d).len() - want).abs(), angle(e, d).min(angle(e, d * -1.0))))
+        }
         ConstraintKind::Tangent => {
             let ((pp, n), other) = match (*a, *b) {
                 (Prim::Plane { p, n }, o) | (o, Prim::Plane { p, n }) => ((p, n), o),
@@ -161,7 +172,7 @@ pub(crate) fn is_axis(p: &Prim) -> bool {
 }
 
 /// The direction an Angle measures: a plane's normal or a line's direction.
-fn direction(p: &Prim) -> Option<Vec3> {
+pub(crate) fn direction(p: &Prim) -> Option<Vec3> {
     match *p {
         Prim::Plane { n, .. } => Some(n),
         Prim::Line { d, .. } | Prim::Cylinder { d, .. } => Some(d),

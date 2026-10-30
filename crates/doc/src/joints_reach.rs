@@ -231,7 +231,7 @@ pub fn reach(doc: &Document, st: &ModelState, r: &Reach) -> Result<Reached, Stri
             if let Some(ro) = approach(&mut g, &|_, _| 0.0, mt, &mut xo, bo, co, tol, loose_gap(scale))
                 && miss(&ro) < miss(&res) - REACH_TOL.max(1e-9 * miss(&res))
             {
-                out.stopped_by_loop = Some(*first);
+                out.stopped_by_loop = tree.closing_id(first);
             }
         }
     }
@@ -263,7 +263,7 @@ fn misses(
     r: &Reach,
     scale: f64,
     vars: &[(u64, usize)],
-    closers: &[u64],
+    closers: &[super::Closing],
     x: &[f64],
     work: &mut Values,
     spent: &Cell<usize>,
@@ -493,7 +493,14 @@ mod tests {
                 apply_links(&asm, &mut reference);
                 let mut expected = target(&tree, &r, 37.0, &reference).unwrap();
                 let n = expected.len();
-                super::super::closure_gaps(&mut super::super::PlacementWorkspace::new(&tree), &[6], &reference, 37.0, &mut expected).unwrap();
+                super::super::closure_gaps(
+                    &mut super::super::PlacementWorkspace::new(&tree),
+                    &[super::super::Closing::Joint(6)],
+                    &reference,
+                    37.0,
+                    &mut expected,
+                )
+                .unwrap();
                 for v in expected.iter_mut().skip(n) {
                     *v *= LOOP_WEIGHT;
                 }
@@ -501,7 +508,7 @@ mod tests {
                 let spent = Cell::new(0);
                 PLACEMENT_STEPS.with(|steps| steps.set(0));
                 PLACEMENT_INSERTS.with(|inserts| inserts.set(0));
-                let actual = misses(&mut workspace, &asm, &r, 37.0, &[(1, 0)], &[6], &[x], &mut work, &spent);
+                let actual = misses(&mut workspace, &asm, &r, 37.0, &[(1, 0)], &[super::super::Closing::Joint(6)], &[x], &mut work, &spent);
                 assert_eq!(actual, Some(expected));
                 assert_eq!(
                     PLACEMENT_INSERTS.with(|inserts| inserts.get()),
@@ -515,7 +522,7 @@ mod tests {
             let mut work = base.clone();
             let spent = Cell::new(MAX_LOOP_WORK);
             PLACEMENT_STEPS.with(|steps| steps.set(0));
-            assert!(misses(&mut workspace, &asm, &r, 37.0, &[(1, 0)], &[6], &[0.2], &mut work, &spent).is_none());
+            assert!(misses(&mut workspace, &asm, &r, 37.0, &[(1, 0)], &[super::super::Closing::Joint(6)], &[0.2], &mut work, &spent).is_none());
             assert_eq!(PLACEMENT_STEPS.with(|steps| steps.get()), 0);
         }
     }
