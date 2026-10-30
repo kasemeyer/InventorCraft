@@ -7,11 +7,14 @@
 //! Which side moves is the solver's: it places out from the fixed occurrences along either side
 //! of a joint, so a grounded B with a free A moves A and the joint is kept as written.
 
+use std::collections::{BTreeMap, BTreeSet};
+
+use serde::Serialize;
 use solidcraft_geom::Vec3;
 
 use super::geo::{Prim, PrimKind, resolve};
 use super::{COMPILED_BASE, Constraint, ConstraintKind, ConstraintSolution, StateSignature};
-use crate::joints::{self, Assembly, Joint, JointKind, JointOrigin, Snap, nearest_values, occurrence_world};
+use crate::joints::{self, Assembly, Joint, JointKind, JointOrigin, Snap, Solution, nearest_values, occurrence_world};
 use crate::{Document, ModelState, apply_vector};
 
 /// What one solve adds to the saved joints: the constraints' joints and equations, and the
@@ -182,4 +185,90 @@ fn one(doc: &Document, st: &ModelState, c: &Constraint) -> Result<Joint, String>
         j.values = Vec::new();
     }
     Ok(j)
+}
+
+/// A constraint's state after a solve (spec §3.7): computed per solve, never saved.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum ConstraintStatus {
+    Ok,
+    /// Met, and takes no freedom away (only `constraint.inspect` works this out).
+    Redundant,
+    /// Not met: how far it is off (the largest over its compiled members) and the other
+    /// loop-closing constraints and joints of its loop group that are off too (R110: the members
+    /// of the tree that placed the parts are never named).
+    Sick {
+        gap_mm: f64,
+        gap_deg: f64,
+        with: Vec<String>,
+    },
+    /// A pick or its offset no longer works out.
+    Lost {
+        reason: String,
+    },
+    /// Its loop group was too large to solve (a cap): checked, not solved.
+    Unsolved,
+    Suppressed,
+}
+
+/// The gap a conflict's message gives ("off by X mm and Y° …"): (mm, deg); (0, 0) for a loop
+/// that meets but can't stay closed on the way.
+fn gap_of(why: &str) -> (f64, f64) {
+    let Some(rest) = why.strip_prefix("off by ") else { return (0.0, 0.0) };
+    let mut words = rest.split_whitespace();
+    let mm = words.next().and_then(|w| w.parse::<f64>().ok()).unwrap_or(0.0);
+    let deg = words.nth(2).and_then(|w| w.trim_end_matches('°').parse::<f64>().ok()).unwrap_or(0.0);
+    (mm, deg)
+}
+
+/// Every constraint's status after solve `sol` of the constraints `compiled` from `asm`:
+/// `Suppressed`; `Lost` when it compiled to nothing or a member is a solve error; `Unsolved` when
+/// a member is in a capped loop group; `Sick` when a member is in `sol.conflicts`; else `Ok`.
+/// Only loop-closing members can conflict, so the newest constraint of a loop is the sick one
+/// (R110), as Inventor marks the one just added.
+pub fn statuses(asm: &Assembly, compiled: &Compiled, sol: &Solution) -> BTreeMap<u64, ConstraintStatus> {
+    let lost: BTreeMap<u64, &str> = compiled
+        .lost
+        .iter()
+        .map(|(c, why)| (*c, why.as_str()))
+        .chain(sol.errors.iter().filter_map(|(id, _, why)| owner_of(*id).map(|c| (c, why.as_str()))))
+        .collect();
+    let capped: BTreeSet<u64> = sol.groups.iter().filter(|g| g.capped).flat_map(|g| g.members.iter().copied()).collect();
+    let conflicts: BTreeMap<u64, (&str, &str)> = sol.conflicts.iter().map(|(id, name, why)| (*id, (name.as_str(), why.as_str()))).collect();
+    let members = |c: u64| (0..4).map(move |k| compiled_id(c, k));
+    asm.constraints
+        .iter()
+        .map(|c| {
+            let status = if c.suppressed {
+                ConstraintStatus::Suppressed
+            } else if let Some(why) = lost.get(&c.id) {
+                ConstraintStatus::Lost { reason: (*why).to_string() }
+            } else if members(c.id).any(|id| capped.contains(&id)) {
+                ConstraintStatus::Unsolved
+            } else if members(c.id).any(|id| conflicts.contains_key(&id)) {
+                let (mut gap_mm, mut gap_deg) = (0.0_f64, 0.0_f64);
+                for (_, why) in members(c.id).filter_map(|id| conflicts.get(&id)) {
+                    let (mm, deg) = gap_of(why);
+                    gap_mm = gap_mm.max(mm);
+                    gap_deg = gap_deg.max(deg);
+                }
+                // The other closing members of its loop groups that are off too.
+                let own: BTreeSet<u64> = members(c.id).collect();
+                let with: Vec<String> = sol
+                    .groups
+                    .iter()
+                    .filter(|g| g.members.iter().any(|id| own.contains(id)))
+                    .flat_map(|g| g.members.iter())
+                    .filter(|id| !own.contains(id))
+                    .filter_map(|id| conflicts.get(id).map(|(name, _)| (*name).to_string()))
+                    .collect::<BTreeSet<_>>()
+                    .into_iter()
+                    .collect();
+                ConstraintStatus::Sick { gap_mm, gap_deg, with }
+            } else {
+                ConstraintStatus::Ok
+            };
+            (c.id, status)
+        })
+        .collect()
 }
