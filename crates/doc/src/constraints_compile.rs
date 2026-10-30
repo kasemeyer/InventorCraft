@@ -54,6 +54,9 @@ pub fn compile(doc: &Document, st: &ModelState, asm: &Assembly) -> Compiled {
 /// [`compile`] with the picks resolved through a [`PickCache`] (R156).
 pub fn compile_with(picks: &Picks, asm: &Assembly) -> Compiled {
     let mut out = Compiled::default();
+    // The picks not cached yet, at once (on threads when there are many: a cold solve).
+    let live = || asm.constraints.iter().filter(|c| !c.suppressed && c.kind != ConstraintKind::Symmetry);
+    picks.prefetch(live().flat_map(|c| &c.picks));
     for c in asm.constraints.iter().filter(|c| !c.suppressed) {
         if c.kind == ConstraintKind::Symmetry {
             continue;

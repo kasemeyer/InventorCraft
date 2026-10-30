@@ -174,25 +174,84 @@ pub struct Picks<'a> {
     layout: OnceCell<Layout>,
 }
 
+/// Picks resolved on threads at once when a solve finds at least this many not cached.
+const PARALLEL_MISSES: usize = 4;
+/// Threads they are resolved on at most.
+const MAX_THREADS: usize = 16;
+
 impl Picks<'_> {
+    fn layout(&self) -> &Layout {
+        self.layout.get_or_init(|| Layout::of(self.doc, self.st))
+    }
+
+    /// Where pick `g` is kept: its key, component and the component's geometry key (`None`: an
+    /// origin pick, an unknown occurrence or a component with a body that has no geometry key,
+    /// which are resolved every time).
+    fn slot(&self, g: &GeoRef) -> Option<(PickKey, u64, u64)> {
+        let layout = self.layout();
+        let comp = match g.occurrence {
+            0 => 0,
+            o => *layout.occurrences.get(&o)?,
+        };
+        let key = PickKey::of(comp, &g.geo)?;
+        let geometry = layout.components.get(&comp)?.1?;
+        Some((key, comp, geometry))
+    }
+
+    /// The component's bodies (indices into the model's), in its order.
+    fn bodies(&self, comp: u64) -> &[usize] {
+        self.layout().components.get(&comp).map_or(&[], |c| c.0.as_slice())
+    }
+
+    /// Resolve the picks of `gs` that are not cached at once, on threads (a cold solve: a session's
+    /// first after an open, or after a part edit that changed many components): a cylinder's
+    /// axis is read from its exact surface, about a millisecond a face.
+    pub fn prefetch<'g>(&self, gs: impl IntoIterator<Item = &'g GeoRef>) {
+        let mut jobs: Vec<(PickKey, u64, u64, &GeoRef)> = Vec::new();
+        {
+            let inner = self.cache.lock();
+            let mut seen = std::collections::HashSet::new();
+            for g in gs {
+                let Some((key, comp, geometry)) = self.slot(g) else { continue };
+                if inner.prims.get(&key).is_some_and(|(at, _)| *at == geometry) || !seen.insert(key.clone()) {
+                    continue;
+                }
+                jobs.push((key, comp, geometry, g));
+            }
+        }
+        if jobs.len() < PARALLEL_MISSES {
+            return;
+        }
+        let (doc, st, cache) = (self.doc, self.st, self.cache);
+        let layout = self.layout();
+        let done = solidcraft_kernel::map_on_threads(&jobs, MAX_THREADS, |(_, comp, _, g)| {
+            let bodies = layout.components.get(comp).map_or(&[][..], |c| c.0.as_slice());
+            resolve_indexed(doc, st, *comp, bodies, g, &|bi| cache.index(st, bi))
+        });
+        let mut inner = self.cache.lock();
+        if inner.prims.len() + jobs.len() > MAX_PRIMS {
+            inner.prims.clear();
+        }
+        for ((key, _, geometry, _), prim) in jobs.into_iter().zip(done) {
+            // A pick whose thread failed is resolved again when it is read.
+            if let Some(prim) = prim {
+                inner.misses += 1;
+                inner.prims.insert(key, (geometry, prim));
+            }
+        }
+    }
+
     /// [`resolve`] (component coordinates), from the cache when the component's geometry is as
     /// it was.
     pub fn resolve(&self, g: &GeoRef) -> Result<Prim> {
-        let layout = self.layout.get_or_init(|| Layout::of(self.doc, self.st));
-        let comp = match g.occurrence {
-            0 => Some(0),
-            o => layout.occurrences.get(&o).copied(),
-        };
-        // An unknown occurrence, or an origin pick: as `resolve` says it.
-        let (Some(comp), Some(key)) = (comp, comp.and_then(|c| PickKey::of(c, &g.geo))) else { return resolve(self.doc, self.st, g) };
-        let none = (Vec::new(), None);
-        let (bodies, geometry) = layout.components.get(&comp).unwrap_or(&none);
-        let Some(geometry) = *geometry else { return resolve(self.doc, self.st, g) };
+        // An unknown occurrence, an origin pick, an unkeyed component: as `resolve` says it.
+        let Some((key, comp, geometry)) = self.slot(g) else { return resolve(self.doc, self.st, g) };
         if let Some((at, prim)) = self.cache.lock().prims.get(&key)
             && *at == geometry
         {
             return prim.clone();
         }
+        let bodies = self.bodies(comp);
         let prim = resolve_indexed(self.doc, self.st, comp, bodies, g, &|bi| self.cache.index(self.st, bi));
         let mut inner = self.cache.lock();
         inner.misses += 1;

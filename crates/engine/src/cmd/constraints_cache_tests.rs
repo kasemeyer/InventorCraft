@@ -133,11 +133,23 @@ fn the_name_index_finds_what_the_search_finds() {
         ("Pin", PickWhat::Edge, v(310.0, 0.0, 50.0)),
         ("Ball", PickWhat::Face, v(515.0, 0.0, 50.0)),
     ];
-    for (name, what, p) in cases {
-        let g = geo_at(&s.doc, &st, occ(&s, name), what, at(&s, name, p)).unwrap_or_else(|e| panic!("{name} {what:?}: {e}"));
-        assert_eq!(picks.resolve(&g).unwrap(), resolve(&s.doc, &st, &g).unwrap(), "{name} {g:?}");
+    let gs: Vec<_> = cases
+        .iter()
+        .map(|(name, what, p)| geo_at(&s.doc, &st, occ(&s, name), *what, at(&s, name, *p)).unwrap_or_else(|e| panic!("{name} {what:?}: {e}")))
+        .collect();
+    for g in &gs {
+        assert_eq!(picks.resolve(g).unwrap(), resolve(&s.doc, &st, g).unwrap(), "{g:?}");
     }
     assert_eq!(cache.misses(), cases.len());
+    // A cold solve resolves them at once, on threads: the same primitives, each resolved once.
+    let cold = PickCache::default();
+    let on_threads = cold.picks(&s.doc, &st);
+    on_threads.prefetch(gs.iter().chain(&gs));
+    assert_eq!((cold.misses(), cold.len()), (cases.len(), cases.len()));
+    for g in &gs {
+        assert_eq!(on_threads.resolve(g).unwrap(), resolve(&s.doc, &st, g).unwrap(), "{g:?}");
+    }
+    assert_eq!(cold.misses(), cases.len(), "read from the cache");
     // A name no face has: Lost, as the search says.
     let mut g = geo_at(&s.doc, &st, occ(&s, "A"), PickWhat::Face, at(&s, "A", v(50.0, 25.0, 20.0))).unwrap();
     if let solidcraft_doc::constraints::Geo::Face { name, .. } = &mut g.geo {
