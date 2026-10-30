@@ -183,10 +183,11 @@ fn spike(compiled: bool) -> Vec<Row> {
     }
     conflicts += sol.conflicts.len();
     let full = median(&mut times);
-    // The records build answers to R156's target too: within the joints build's ×1.5 (180 ms).
-    let (bound, pass) =
-        if compiled { ("<= 500 ms (§8.1) and <= 180 ms (R156)", full <= 500.0 && full <= 180.0) } else { ("<= 500 ms (§8.1)", full <= 500.0) };
-    rows.push(("1 full solve (median of 5)".into(), format!("{full:.1} ms {times:.1?}"), bound.into(), pass));
+    rows.push(("1 full solve (median of 5)".into(), format!("{full:.1} ms {times:.1?}"), "<= 500 ms (§8.1)".into(), full <= 500.0));
+    // The records build answers to R156's target too: the joints build's ×1.5 (180 ms).
+    if compiled {
+        rows.push(("1 full solve, R156 target".into(), format!("{full:.1} ms"), "<= 180 ms (R156)".into(), full <= 180.0));
+    }
     let opened = (*s.doc).clone();
     let at = Instant::now();
     let placed = joints::solve_holding_with_analysis(&s.doc, &st, &Held::new(), Analysis::Placement);
