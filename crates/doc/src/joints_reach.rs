@@ -9,8 +9,9 @@ use solidcraft_geom::Vec3;
 use solidcraft_sketch::linalg;
 
 use super::{
-    Assembly, Frames, Held, MAX_CLOSING, MAX_LOOP_VALUES, MAX_LOOP_WORK, MAX_LOOPS, Solution, Tree, Values, apply_links, build, close_within,
-    jacobian, joint_values, largest, least_squares, limit_bounds, link_chains, loop_groups, loop_scale, loose_gap, unknowns,
+    Assembly, Frames, Held, Joint, MAX_CLOSING, MAX_JOINTS, MAX_LOOP_VALUES, MAX_LOOP_WORK, MAX_LOOPS, Solution, Tree, Values, apply_links, build,
+    close_within, free_members, jacobian, joint_values, largest, least_squares, limit_bounds, link_chains, loop_groups, loop_scale, loose_gap,
+    unknowns,
 };
 use crate::constraints::Compiled;
 use crate::{Document, ModelState, apply_point, apply_vector, mat_mul};
@@ -62,10 +63,34 @@ const STEP_SHARE: f64 = 0.1;
 /// through the start of their link chain; the other values of the loops they are in follow. An
 /// error says why nothing can move.
 pub fn reach(doc: &Document, st: &ModelState, r: &Reach) -> Result<Reached, String> {
+    reach_with(doc, st, r, &Compiled::default())
+}
+
+/// [`reach`] over the saved joints and the joints the design's constraints compile to,
+/// `compiled` (R157): a chain or a loop through constraints moves as one through joints does,
+/// and [`Reached::values`] holds the compiled joints' new values too (by compiled id, for their
+/// constraints' `state`). Parts only loop equations hold get their provisional `Free` members,
+/// as a solve gives them.
+pub fn reach_with(doc: &Document, st: &ModelState, r: &Reach, compiled: &Compiled) -> Result<Reached, String> {
     let asm = &doc.assembly;
-    let vals = joint_values(asm, &Compiled::default());
-    let none = Compiled::default();
-    let built = build(doc, st, &vals, &none, &mut Solution::default(), Frames::default());
+    let mut sol = Solution::default();
+    let mut frames = Frames::default();
+    let real: Vec<&Joint> = asm.joints.iter().chain(&compiled.joints).filter(|j| !j.suppressed).take(MAX_JOINTS).collect();
+    frames.resolve(doc, st, &real, &mut sol);
+    let free = free_members(doc, compiled, &frames);
+    let with_free;
+    let compiled = if free.is_empty() {
+        compiled
+    } else {
+        with_free = Compiled {
+            joints: compiled.joints.iter().cloned().chain(free).collect(),
+            equations: compiled.equations.clone(),
+            lost: compiled.lost.clone(),
+        };
+        &with_free
+    };
+    let vals = joint_values(asm, compiled);
+    let built = build(doc, st, &vals, compiled, &mut sol, frames);
     let tree = &built.tree;
     if tree.fixed.contains_key(&r.occurrence) {
         return Err("it is fixed in place (grounded, or the part its joints are placed from)".into());

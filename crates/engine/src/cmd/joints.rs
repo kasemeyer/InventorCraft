@@ -887,7 +887,9 @@ fn reach(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let before = super::motion::positions(s);
     let st = s.model.state();
-    let r = joints::reach(&s.doc, &st, &joints::Reach { occurrence: occ, point: at, to, axis, joints: only });
+    // The joints the constraints compile to as well (R157): a chain through them moves.
+    let compiled = joints::compiled_with(&s.doc, &st, &s.pick_cache);
+    let r = joints::reach_with(&s.doc, &st, &joints::Reach { occurrence: occ, point: at, to, axis, joints: only }, &compiled);
     let reached = match &r {
         Ok(x) => {
             // Only a reach that moves something touches the design (and so adds an undo step).
@@ -896,6 +898,14 @@ fn reach(s: &mut Session, p: &Value) -> Result<Value> {
                 for (id, q) in &x.values {
                     if let Some(j) = doc.assembly.joints.iter_mut().find(|j| j.id == *id) {
                         j.values.clone_from(q);
+                    } else if let Some(j) = compiled.joints.iter().find(|j| j.id == *id) {
+                        // A compiled joint's values are its constraint's state (every constraint
+                        // compiles to one joint member at most): the solve seeds from them.
+                        let owner = solidcraft_doc::constraints::owner_of(*id);
+                        if let Some(c) = doc.assembly.constraints.iter_mut().find(|c| Some(c.id) == owner) {
+                            c.state.clone_from(q);
+                            c.signatures = vec![solidcraft_doc::constraints::StateSignature::of(j)];
+                        }
                     }
                 }
             }
@@ -1482,6 +1492,11 @@ mod point_x_tests;
 #[cfg(test)]
 #[path = "joints_reach_tests.rs"]
 mod reach_tests;
+
+/// `joint.reach` through constraints (R157).
+#[cfg(test)]
+#[path = "constraints_reach_tests.rs"]
+mod constraints_reach_tests;
 #[cfg(test)]
 #[path = "joints_relations_tests.rs"]
 mod relations_tests;

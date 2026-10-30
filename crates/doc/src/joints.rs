@@ -2765,7 +2765,7 @@ pub use equations::{Closing, Eq, Equation, Side, measured_angle, wrapped};
 
 #[path = "joints_relations.rs"]
 mod relations;
-pub use reach::{REACH_TOL, Reach, Reached, reach};
+pub use reach::{REACH_TOL, Reach, Reached, reach, reach_with};
 pub use relations::{nearest_values, relation_values};
 
 /// The rest angle that turns B least as joint `j` is made, as B sits now: none or a half turn
