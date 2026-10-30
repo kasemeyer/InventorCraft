@@ -41,7 +41,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("constraint: id|name or a list; suppressed?: bool (default toggles) → {constraints: [{name, suppressed, status}]}"),
     CommandSpec::new("constraint.delete", "Delete Constraint", delete).icon("delete").enabled(has_constraints).params("constraint: id|name or a list → {deleted: n}"),
     CommandSpec::new("constraint.drive", "Drive Constraint", drive).icon("drive").noundo().enabled(has_constraints).params(
-        "constraint: id|name; start? (default its value, mm or deg); end? (default start + 10); increment? (default 1) or steps? (1-10000); repeat?: 1-1000 (default 1); cycle?: start_end|start_end_start (default start_end); stop_on_contact?: bool (default false: the assembly's contact sets, as joint.drive). At most 10,000 frames. The design is left as it was (no undo step); committing a value is constraint.edit → {frames: [{value, world: {<occurrence>: Mat}}] (the occurrences moved from where they are), stopped_by_contact?: {value: the last free value, pair: [a, b]}, stopped_by_limit?: {value, limit: min|max}, stopped_by_loop?: {value, constraint}}",
+        "constraint: id|name; start? (default its value, mm or deg); end? (default start + 10); increment? (default 1) or steps? (1-9999: steps + 1 frames); repeat?: 1-1000 (default 1); cycle?: start_end|start_end_start (default start_end); stop_on_contact?: bool (default false: the assembly's contact sets, as joint.drive). At most 10,000 frames. The design is left as it was (no undo step); committing a value is constraint.edit → {frames: [{value, world: {<occurrence>: Mat}}] (the occurrences moved from where they are), stopped_by_contact?: {value: the last free value, pair: [a, b]}, stopped_by_limit?: {value, limit: min|max}, stopped_by_loop?: {value, constraint}}",
     ),
     CommandSpec::new("constraint.list", "List Constraints", list).icon("list").noundo().params(
         "occurrence? (default all) → {constraints: [{id, name, type, solution, occurrences: [a, b, ref?], offset, unit, limits, expressions?, suppressed, status}], dof: {<occurrence>: n}}",
@@ -676,7 +676,7 @@ fn drive_values(s: &Session, c: &Constraint, p: &Value, cmd: &str) -> Result<Vec
     if increment.is_some() && p.get("steps").is_some() {
         return Err(bad(cmd, "give `increment` or `steps`, not both"));
     }
-    let steps = count(p, "steps", MAX_FRAMES, 0, cmd)?;
+    let steps = count(p, "steps", MAX_FRAMES - 1, 0, cmd)?;
     let repeat = count(p, "repeat", 1000, 1, cmd)?;
     let back = match p.get("cycle") {
         None => false,
@@ -731,6 +731,9 @@ fn drive(s: &mut Session, p: &Value) -> Result<Value> {
     if c.suppressed {
         return Err(bad(cmd, format!("{} is suppressed: unsuppress it to drive it", c.name)));
     }
+    if let Some((_, why)) = compile(&s.doc, &s.model.state(), &s.doc.assembly).lost.into_iter().find(|(x, _)| *x == id) {
+        return Err(bad(cmd, format!("{} is lost ({why}): edit it to drive it", c.name)));
+    }
     let values = drive_values(s, &c, p, cmd)?;
     let contact = flag(p, "stop_on_contact", cmd)?.unwrap_or(false);
     let (min, max) = limits_now(s, &c);
@@ -740,19 +743,17 @@ fn drive(s: &mut Session, p: &Value) -> Result<Value> {
     let open_at_start: BTreeSet<u64> = super::joints::solution(s, &joints::Held::new(), Analysis::Placement).conflicts.iter().map(|c| c.0).collect();
     let touching_at_start: Vec<(String, String)> =
         if contact { super::motion::collisions(s).into_iter().map(|(a, b, _)| (a, b)).collect() } else { Vec::new() };
-    // A limited Mate's or Insert's offset is its bounded value's start (Task 7): each frame
-    // starts it again.
-    let restart = matches!(c.kind, ConstraintKind::Mate | ConstraintKind::Insert) && !c.limits.is_empty();
-    // The design `from` (the last placed frame's) with the offset at `v`, placed.
+    // The design `from` (the last placed frame's) with the offset at `v`, placed. The driven
+    // constraint goes without its limits for the sweep (R154), so every frame compiles to the
+    // exact value (a Mate's Planar, an Angle's target); the stop above uses the limits it had.
     let set = |s: &mut Session, from: &Arc<Document>, v: f64| {
         s.doc = from.clone();
         if let Some(x) = s.doc_mut().assembly.constraints.iter_mut().find(|x| x.id == id) {
             x.offset = v;
             x.exprs.offset = None;
-            if restart {
-                x.state.clear();
-                x.signatures.clear();
-            }
+            x.limits = ConstraintLimits::default();
+            x.exprs.min = None;
+            x.exprs.max = None;
         }
         super::joints::place(s)
     };
@@ -784,7 +785,7 @@ fn drive(s: &mut Session, p: &Value) -> Result<Value> {
             break;
         }
         let sol = set(s, &from, v);
-        if let Some(opened) = sol.conflicts.iter().find(|x| !open_at_start.contains(&x.0)) {
+        if let Some(opened) = sol.conflicts.iter().find(|x| !open_at_start.contains(&x.0) && owner_of(x.0) != Some(id)) {
             out["stopped_by_loop"] = json!({"value": last.as_ref().map(|(l, _)| *l), "constraint": opened.1});
             break;
         }

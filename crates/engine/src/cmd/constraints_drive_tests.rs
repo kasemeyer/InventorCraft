@@ -171,8 +171,9 @@ fn drive_refuses_hostile_counts() {
         }
         p
     };
-    for steps in [json!(0), json!(1e9), json!(-1), json!(2.5), json!("ten")] {
-        refused(&mut s, m(json!({"steps": steps})), "`steps` must be a whole number from 1 to 10000");
+    // Steps make steps + 1 frames: at most 9999 (M1).
+    for steps in [json!(0), json!(1e9), json!(-1), json!(2.5), json!("ten"), json!(10000)] {
+        refused(&mut s, m(json!({"steps": steps})), "`steps` must be a whole number from 1 to 9999");
     }
     for repeat in [json!(-1), json!(0), json!(1001), json!(1.5), json!(true)] {
         refused(&mut s, m(json!({"repeat": repeat})), "`repeat` must be a whole number from 1 to 1000");
@@ -186,7 +187,7 @@ fn drive_refuses_hostile_counts() {
     refused(&mut s, m(json!({"end": 1e300})), "not a number within ±10000000 mm");
     refused(&mut s, m(json!({"end": 10000, "increment": 1})), "at most 10,000 frames");
     refused(&mut s, m(json!({"end": 10, "increment": 1e-9})), "at most 10,000 frames");
-    refused(&mut s, m(json!({"steps": 10000, "repeat": 2})), "at most 10,000 frames");
+    refused(&mut s, m(json!({"steps": 5000, "repeat": 2})), "at most 10,000 frames");
     refused(&mut s, m(json!({"steps": 5000, "cycle": "start_end_start"})), "at most 10,000 frames");
     refused(&mut s, m(json!({"steps": 2, "increment": 1})), "`increment` or `steps`, not both");
     refused(&mut s, m(json!({"cycle": "loop"})), "`cycle` must be start_end or start_end_start");
@@ -195,4 +196,31 @@ fn drive_refuses_hostile_counts() {
     refused(&mut s, json!({}), "`constraint` must be an id or a name");
     run(&mut s, "constraint.suppress", json!({"constraint": "Mate:1"}));
     refused(&mut s, m(json!({})), "Mate:1 is suppressed");
+    // M3: a Lost constraint (the plate's hole cut away) is refused as a suppressed one is.
+    let mut s = blocks();
+    let insert =
+        json!({"type": "insert", "a": {"occurrence": "Plate", "edge": [200.0, 0.0, 10.0]}, "b": {"occurrence": "Pin", "edge": [310.0, 0.0, 50.0]}});
+    run(&mut s, "constraint.create", insert);
+    run(&mut s, "timeline.edit", json!({"feature": "Plate", "set": {"length": "25 mm"}}));
+    refused(&mut s, json!({"constraint": "Insert:1"}), "Insert:1 is lost");
+}
+
+/// R154: a limited Angle drives through its values (the limits are dropped for the sweep) and
+/// stops at its max.
+#[test]
+fn a_limited_angle_drives_to_its_limit() {
+    let mut s = blocks();
+    let p = json!({"type": "angle", "solution": "undirected", "a": face("A", [50.0, 0.0, 10.0]), "b": face("B", [50.0, 0.0, 50.0]),
+        "offset": 20, "min": 10, "max": 40});
+    assert_eq!(run(&mut s, "constraint.create", p)["status"], "ok");
+    let r = drive(&mut s, json!({"constraint": "Angle:1", "start": 20, "end": 50, "increment": 5}));
+    let v = values(&r);
+    assert_eq!(v, vec![20.0, 25.0, 30.0, 35.0, 40.0], "{r}");
+    assert_eq!(r["stopped_by_limit"], json!({"value": 40.0, "limit": "max"}), "{r}");
+    let a = apply_vector(&occurrence_world(&s.doc, occ(&s, "A")), Vec3::new(0.0, -1.0, 0.0));
+    for (i, want) in v.iter().enumerate() {
+        let b = apply_vector(&world_in(&r, i, &s, "B"), Vec3::new(0.0, -1.0, 0.0));
+        let got = a.cross(b).len().atan2(a.dot(b)).to_degrees();
+        assert!((got - want).abs() <= ANG, "frame {i}: {got} for {want}");
+    }
 }
