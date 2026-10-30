@@ -176,6 +176,15 @@ pub fn resolve_holding(s: &mut Session, held: &joints::Held) -> joints::Solution
     resolve_with_analysis(s, held, joints::Analysis::DegreesOfFreedom)
 }
 
+/// Warm the session's DOF memo (R131): one degrees-of-freedom solve of the design as opened, so
+/// the first edit after an open counts only the occurrences it touches. Nothing is applied (the
+/// open's own refresh placed the occurrences), so the design stays as its file has it.
+pub(crate) fn warm_dof(s: &Session) {
+    if s.doc.assembly.solves() {
+        let _ = solution(s, &BTreeMap::new(), joints::Analysis::DegreesOfFreedom);
+    }
+}
+
 /// Contact and loop-search trials need placements and conflicts, not a DOF report.
 pub(super) fn place_holding(s: &mut Session, held: &joints::Held) -> joints::Solution {
     resolve_with_analysis(s, held, joints::Analysis::Placement)

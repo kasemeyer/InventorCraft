@@ -329,6 +329,8 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     }
     s.replace_design(Session::opened(doc, saved.as_ref()));
     s.path = Some(path.to_string());
+    // The first edit after the open finds the DOF memo warm (R131).
+    super::joints::warm_dof(s);
     let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
     Ok(json!({"path": path, "features": s.doc.features.len(), "errors": errors, "name": s.doc.name}))
 }

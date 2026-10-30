@@ -109,7 +109,13 @@ fn spike_meets_spec_8_1() {
     let placed = joints::solve_holding_with_analysis(&s.doc, &st, &Held::new(), Analysis::Placement);
     println!("placement-only solve: {:.1} ms ({} conflicts)", ms(at), placed.conflicts.len());
 
-    // 2. Re-solve after one offset edit.
+    // 2. Re-solve after one offset edit (R131): COLD is the open's own DOF solve, which warms the
+    // session's memo (recorded, not decisive); WARM are the edits after it, each <= 50 ms (R130).
+    assert!(s.dof_memo.lock().is_ok_and(|m| !m.is_empty()), "doc.open warms the DOF memo");
+    *s.dof_memo.lock().unwrap() = Default::default();
+    let at = Instant::now();
+    crate::cmd::joints::warm_dof(&s);
+    let cold = ms(at);
     let carrier_z = t.modules[0].carrier_z;
     let mut times = Vec::new();
     for k in 0..5 {
@@ -122,12 +128,14 @@ fn spike_meets_spec_8_1() {
     }
     s.doc_mut().assembly.joints.iter_mut().find(|j| j.id == carrier_z).unwrap().offset = 0.0;
     conflicts += crate::cmd::joints::resolve(&mut s).conflicts.len();
+    let warm = times.iter().copied().fold(0.0, f64::max);
+    let in_order = format!("{times:.1?}");
     let resolve = median(&mut times);
     rows.push((
-        "2 re-solve after an offset edit (median of 5)".into(),
-        format!("{resolve:.1} ms {times:.1?}"),
-        "<= 50 ms (R130)".into(),
-        resolve <= 50.0,
+        "2 re-solve after an offset edit".into(),
+        format!("COLD {cold:.1} ms (the open's DOF solve, recorded) | WARM median {resolve:.1} ms, max {warm:.1} ms {in_order}"),
+        "every WARM <= 50 ms (R130, R131)".into(),
+        warm <= 50.0,
     ));
 
     // 3. Drag frames: module 4's jaw tip B turned about A from 90° to 100° in 60 steps.
