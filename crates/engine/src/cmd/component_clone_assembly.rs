@@ -3,6 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use solidcraft_doc::Document;
+use solidcraft_doc::constraints::{Constraint, Geo, next_name};
 use solidcraft_doc::joints::cam::CamProfile;
 use solidcraft_doc::joints::{Assembly, Coupling, JointOrigin, Size};
 
@@ -40,6 +41,7 @@ fn budget(assembly: &Assembly) -> Result<()> {
         assembly.contact_sets.len(),
         assembly.studies.len(),
         assembly.exploded.len(),
+        assembly.constraints.len(),
     ];
     if counts.iter().any(|n| *n > MAX_RECORDS) {
         return Err(invalid("too many assembly records"));
@@ -76,6 +78,10 @@ fn budget(assembly: &Assembly) -> Result<()> {
                 text(face)?;
             }
         }
+    }
+    for constraint in &assembly.constraints {
+        text(&constraint.name)?;
+        add_references(&mut references, constraint.picks.len())?;
     }
     for contact in &assembly.contact_sets {
         text(&contact.name)?;
@@ -235,6 +241,29 @@ fn origin(
     Some(out)
 }
 
+/// A constraint as it is in the copy (R133): every pick on a copied occurrence (the source's
+/// assembly origin is not copied), its face, edge and vertex names remapped as a joint origin's.
+/// `None` when any pick stays behind, so the constraint is not carried.
+pub(super) fn carried_constraint(
+    c: &Constraint,
+    occurrences: &BTreeMap<u64, u64>,
+    features: &BTreeMap<u64, u64>,
+    bodies: &BTreeMap<String, String>,
+) -> Option<Constraint> {
+    let mut out = c.clone();
+    for g in &mut out.picks {
+        if g.occurrence == 0 {
+            return None;
+        }
+        g.occurrence = *occurrences.get(&g.occurrence)?;
+        match &mut g.geo {
+            Geo::Face { name, .. } | Geo::Edge { name, .. } | Geo::Vertex { edge: name, .. } => *name = face_name(name, features, bodies)?,
+            Geo::Origin { .. } => {}
+        }
+    }
+    Some(out)
+}
+
 fn report(messages: &mut Vec<String>, kind: &str, name: &str) {
     messages.push(format!("Skipped {kind} `{name}`: references outside the copied component tree or geometry without a copied identity."));
 }
@@ -312,6 +341,25 @@ pub(super) fn clone_assembly(
                 a.joints.push(item);
             }
             _ => report(&mut messages, "joint", &old.name),
+        }
+    }
+    // Constraints wholly inside the copy (R133): new ids, names kept unless taken (then the next
+    // generated one). One that crosses the copy's boundary stays where it is, and is named.
+    let mut taken: BTreeSet<String> = a.joints.iter().map(|j| j.name.clone()).chain(a.constraints.iter().map(|c| c.name.clone())).collect();
+    for old in &source.assembly.constraints {
+        if !old.picks.iter().any(|g| g.occurrence != 0 && occurrences.contains_key(&g.occurrence)) {
+            continue;
+        }
+        match carried_constraint(old, occurrences, features, bodies) {
+            Some(mut item) => {
+                item.id = next_id(&mut item_id)?;
+                if taken.contains(&item.name) {
+                    item.name = next_name(&a, item.kind);
+                }
+                taken.insert(item.name.clone());
+                a.constraints.push(item);
+            }
+            None => report(&mut messages, "constraint", &old.name),
         }
     }
     for old in &source.assembly.links {

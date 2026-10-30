@@ -368,7 +368,8 @@ fn part_design(s: &Session, sc: &Scope, stem: &str, cmd: &str) -> Result<(Sessio
     let mut scope = Document { assembly: source.assembly.clone(), ..Document::default() };
     let mapped = |o: &u64| sc.occurrences.contains_key(o);
     scope.assembly.joints.retain(|j| mapped(&j.a.occurrence) && mapped(&j.b.occurrence));
-    scope.assembly.constraints.retain(|c| c.picks.iter().all(|g| mapped(&g.occurrence)));
+    // Constraints are all left in: the copy carries those wholly inside and names the others
+    // (R133), which stay here.
     scope.assembly.origins.retain(|o| mapped(&o.origin.occurrence));
     scope.assembly.contact_sets.retain(|c| c.occurrences.iter().all(mapped));
     scope.assembly.exploded.retain(|v| v.moves.iter().all(|(o, _)| mapped(o)));
@@ -401,6 +402,9 @@ fn part_design(s: &Session, sc: &Scope, stem: &str, cmd: &str) -> Result<(Sessio
 /// Take the history of `sc` out of this design: its features, subcomponents, their placements
 /// and the joints among them. The component itself and its own placements stay.
 fn clear_history(s: &mut Session, sc: &Scope) {
+    // The maps the new design was made with (`make_part`), to tell which constraints it carries.
+    let features: BTreeMap<u64, u64> = sc.inside.iter().map(|f| (*f, *f)).collect();
+    let body_map: BTreeMap<String, String> = sc.bodies.iter().map(|b| (b.clone(), b.clone())).collect();
     let d = s.doc_mut();
     for id in &sc.inside {
         // A sketch's own features went with it already.
@@ -426,7 +430,13 @@ fn clear_history(s: &mut Session, sc: &Scope) {
     });
     let a = &mut d.assembly;
     a.joints.retain(|j| !inner.contains(&j.a.occurrence) && !inner.contains(&j.b.occurrence));
-    a.constraints.retain(|c| !c.picks.iter().any(|g| inner.contains(&g.occurrence)));
+    // Constraints the new design carries go from here; one that crosses its boundary stays as a
+    // Lost record (R133), never deleted, and the notice names it.
+    let carried = |c: &solidcraft_doc::constraints::Constraint| {
+        c.picks.iter().any(|g| inner.contains(&g.occurrence))
+            && super::super::component_clone_assembly::carried_constraint(c, &sc.occurrences, &features, &body_map).is_some()
+    };
+    a.constraints.retain(|c| !carried(c));
     let joints: BTreeSet<u64> = a.joints.iter().map(|j| j.id).collect();
     a.links.retain(|l| joints.contains(&l.a) && joints.contains(&l.b));
     a.studies.retain(|study| study.keys.iter().all(|k| joints.contains(&k.joint)));
@@ -494,13 +504,11 @@ impl Before {
             warnings.push(format!("the joints now place {}: nothing in their chain is grounded", moved.join(", ")));
         }
         let sol = solidcraft_doc::joints::solve(&s.doc, &s.model.state());
-        warnings.extend(
-            sol.errors
-                .iter()
-                .chain(&sol.conflicts)
-                .filter(|(_, n, _)| !self.joint_errors.contains(n))
-                .map(|(_, joint, why)| format!("joint {joint}: {why}")),
-        );
+        warnings.extend(sol.errors.iter().chain(&sol.conflicts).filter(|(_, n, _)| !self.joint_errors.contains(n)).map(|(id, name, why)| {
+            // What a constraint compiles to is named as the constraint (owner Q1).
+            let what = if solidcraft_doc::constraints::owner_of(*id).is_some() { "constraint" } else { "joint" };
+            format!("{what} {name}: {why}")
+        }));
         Ok(warnings)
     }
 }
