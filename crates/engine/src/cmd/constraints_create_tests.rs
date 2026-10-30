@@ -139,7 +139,7 @@ fn predict_measures_and_does_not_move() {
     assert!(same(&transform(&s, "B"), &before));
     // The pure measure, through the public API.
     let c = &s.doc.assembly.constraints[0];
-    let pr = crate::constraints::predict(&s, c.kind, &c.picks[0], &c.picks[1]).unwrap();
+    let pr = crate::constraints::predict(&s, c).unwrap();
     assert!((pr.offset - 7.0).abs() <= TOL);
     assert_eq!(pr.solution, solidcraft_doc::constraints::ConstraintSolution::MateFace);
 }

@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use serde_json::{Value, json};
 use solidcraft_doc::constraints::{
     Constraint, ConstraintExprs, ConstraintKind, ConstraintLimits, ConstraintSolution, ConstraintStatus, EdgeEnd, Geo, GeoRef, MAX_CONSTRAINTS,
-    OriginItem, PickWhat, Prim, check_name, compile, geo_at, next_name, owner_of, resolve, resolve_world,
+    OriginItem, PickWhat, Prim, angle_reference, check_name, compile, geo_at, next_name, owner_of, resolve, resolve_world,
 };
 use solidcraft_doc::joints::{self, Analysis, occurrence_world};
 use solidcraft_doc::{DocumentKind, Mat};
@@ -18,7 +18,7 @@ use solidcraft_geom::Vec3;
 use super::CommandSpec;
 use super::joints::{occurrence_id, typed, value};
 use crate::constraints::{
-    direction, gaps, is_axis, offset_now, over_constrains, over_constrains_all, pick_json, predict_prims, prim_json, status_map, word,
+    Prediction, direction, gaps, is_axis, offset_now, over_constrains, over_constrains_all, pick_json, predict_prims, prim_json, status_map, word,
 };
 use crate::params::{bad, vec3};
 use crate::{Result, Session};
@@ -226,9 +226,11 @@ fn fits_picks(kind: ConstraintKind, solution: ConstraintSolution, a: &Prim, b: &
             (Prim::Cylinder { d, .. }, Prim::Cylinder { d: e, .. }) if d.cross(*e).len() > 1e-9f64.sin() => {
                 Err(bad(cmd, "skew cylinders come in a later version: pick cylinders whose axes are parallel"))
             }
-            _ => predict_prims(kind, a, b).map(|_| ()).ok_or_else(|| bad(cmd, format!("Tangent can't join a {} and a {}", word(a), word(b)))),
+            _ => predict_prims(kind, a, b, None).map(|_| ()).ok_or_else(|| bad(cmd, format!("Tangent can't join a {} and a {}", word(a), word(b)))),
         },
-        _ => predict_prims(kind, a, b).map(|_| ()).ok_or_else(|| bad(cmd, format!("{} can't join a {} and a {}", kind.word(), word(a), word(b)))),
+        _ => {
+            predict_prims(kind, a, b, None).map(|_| ()).ok_or_else(|| bad(cmd, format!("{} can't join a {} and a {}", kind.word(), word(a), word(b))))
+        }
     }
 }
 
@@ -290,7 +292,7 @@ pub(crate) fn build(s: &Session, p: &Value, base: Option<&Constraint>, cmd: &str
             let world = |g: &GeoRef, what: &str| resolve_world(&s.doc, &st, g).map_err(|e| bad(cmd, format!("`{what}`: {e}")));
             let (wa, wb) = (world(ga, "a")?, world(gb, "b")?);
             looked = Some((wa, wb));
-            let prediction = if predict { predict_prims(kind, &wa, &wb) } else { None };
+            let prediction = if predict { predict_prims(kind, &wa, &wb, None) } else { None };
             let solution = match (given, prediction, base) {
                 (Some(g), ..) => g,
                 (None, Some(pr), _) => pr.solution,
@@ -319,6 +321,15 @@ pub(crate) fn build(s: &Session, p: &Value, base: Option<&Constraint>, cmd: &str
         directed_axis(s, ga, gb, given_axis, looked, base.filter(|b| b.solution == ConstraintSolution::Directed && b.picks == picks))
     } else {
         None
+    };
+    // A predicted Directed or Explicit vector angle is measured about its reference, as compile
+    // will (R149): from −30° it predicts −30, so the solve keeps B where it is.
+    let prediction = match (prediction, looked) {
+        (Some(pr), Some((wa, wb))) if kind == ConstraintKind::Angle => {
+            let about = angle_reference(&s.doc, &s.model.state(), solution, &picks, axis).ok().flatten();
+            predict_prims(kind, &wa, &wb, about).map(|q| Prediction { solution: pr.solution, ..q })
+        }
+        (pr, _) => pr,
     };
     let angle = kind.is_angle();
     let (offset, offset_expr) = match p.get("offset") {
@@ -654,7 +665,8 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
             }
             v["gaps"] = match (world.first(), world.get(1)) {
                 (Some(Ok(a)), Some(Ok(b))) => {
-                    gaps(c.kind, c.solution, offset_now(s, c), a, b).map_or(Value::Null, |(mm, deg)| json!({"mm": mm, "deg": deg}))
+                    let about = angle_reference(&s.doc, &st, c.solution, &c.picks, c.axis).ok().flatten();
+                    gaps(c.kind, c.solution, offset_now(s, c), a, b, about).map_or(Value::Null, |(mm, deg)| json!({"mm": mm, "deg": deg}))
                 }
                 _ => Value::Null,
             };

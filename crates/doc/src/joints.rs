@@ -2685,7 +2685,7 @@ pub(crate) mod face;
 pub use face::{end_faces, face_name_at, named_face_spot, pin_end, round_end_at};
 #[path = "joints_equations.rs"]
 mod equations;
-pub use equations::{Closing, Eq, Equation, Side};
+pub use equations::{Closing, Eq, Equation, Side, measured_angle, wrapped};
 
 #[path = "joints_relations.rs"]
 mod relations;

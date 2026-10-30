@@ -62,8 +62,22 @@ fn bounded(v: f64, target: f64, bounds: Option<(f64, f64)>) -> f64 {
     }
 }
 
+/// The angle from direction `a` to `b` (radians): unsigned (0..π) with no axis; else signed
+/// about `axis`, both projected square to it (right-hand rule), (−π, π]. The one measure the
+/// solve, `predict` and `inspect` share (R149).
+pub fn measured_angle(a: Vec3, b: Vec3, axis: Option<Vec3>) -> f64 {
+    match axis {
+        // From the sine and the cosine: no rounding loss near 0.
+        None => a.cross(b).len().atan2(a.dot(b)),
+        Some(k) => {
+            let (pa, pb) = (a - k * a.dot(k), b - k * b.dot(k));
+            pa.cross(pb).dot(k).atan2(pa.dot(pb))
+        }
+    }
+}
+
 /// An angle within a half turn of 0: (−π, π].
-fn wrapped(a: f64) -> f64 {
+pub fn wrapped(a: f64) -> f64 {
     let w = a.rem_euclid(std::f64::consts::TAU);
     if w > std::f64::consts::PI { w - std::f64::consts::TAU } else { w }
 }
@@ -96,13 +110,9 @@ impl Equation {
             Self::Angle { a, b, axis, target, bounds } => {
                 let (da, db) = (a.direction(world)?, b.direction(world)?);
                 match axis {
-                    // Unsigned: 0..π, from the sine and the cosine (no rounding loss near 0).
-                    None => Some(bounded(da.cross(db).len().atan2(da.dot(db)), *target, *bounds)),
-                    // Signed about the axis, both projected square to it (right-hand rule).
+                    None => Some(bounded(measured_angle(da, db, None), *target, *bounds)),
                     Some(k) => {
-                        let k = k.direction(world)?;
-                        let (pa, pb) = (da - k * da.dot(k), db - k * db.dot(k));
-                        let v = pa.cross(pb).dot(k).atan2(pa.dot(pb));
+                        let v = measured_angle(da, db, Some(k.direction(world)?));
                         Some(if bounds.is_some() { bounded(v, *target, *bounds) } else { wrapped(v - target) })
                     }
                 }

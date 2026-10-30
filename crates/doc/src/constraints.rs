@@ -405,7 +405,7 @@ pub use geo::{PickWhat, Prim, PrimKind, geo_at, resolve, resolve_world};
 
 #[path = "constraints_compile.rs"]
 pub mod compile;
-pub use compile::{Compiled, ConstraintStatus, compile, compiled_id, owner_of, statuses};
+pub use compile::{Compiled, ConstraintStatus, angle_reference, compile, compiled_id, owner_of, statuses};
 
 #[cfg(test)]
 #[path = "constraints_tests.rs"]

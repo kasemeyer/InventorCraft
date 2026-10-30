@@ -32,11 +32,19 @@ pub struct Prediction {
 /// `Opposed` or `Aligned` by the axes' senses; Angle → the angle between them, `ANGLE_DEFAULT`;
 /// Insert → the distance along A's axis, `Opposed` when the axes oppose; Tangent → the plane to
 /// axis (or centre) distance less the radius, `Outside` on the normal side.
-pub fn predict(s: &Session, kind: ConstraintKind, a: &GeoRef, b: &GeoRef) -> Result<Prediction> {
+/// A Directed or Explicit vector Angle measures signed about its reference (R149).
+pub fn predict(s: &Session, c: &Constraint) -> Result<Prediction> {
+    let kind = c.kind;
+    let (Some(a), Some(b)) = (c.picks.first(), c.picks.get(1)) else { return Err(EngineError::Other(format!("{} takes 2 picks", kind.word()))) };
     let st = s.model.state();
     let ga = resolve_world(&s.doc, &st, a)?;
     let gb = resolve_world(&s.doc, &st, b)?;
-    predict_prims(kind, &ga, &gb).ok_or_else(|| EngineError::Other(format!("{} can't join a {} and a {}", kind.word(), word(&ga), word(&gb))))
+    let about = if kind == ConstraintKind::Angle {
+        solidcraft_doc::constraints::angle_reference(&s.doc, &st, c.solution, &c.picks, c.axis).ok().flatten()
+    } else {
+        None
+    };
+    predict_prims(kind, &ga, &gb, about).ok_or_else(|| EngineError::Other(format!("{} can't join a {} and a {}", kind.word(), word(&ga), word(&gb))))
 }
 
 /// A primitive's kind as a word (`plane`, `circle`…).
@@ -47,8 +55,10 @@ pub(crate) fn word(p: &Prim) -> String {
     }
 }
 
-/// [`predict`] on world primitives (`None`: the kind can't join them).
-pub(crate) fn predict_prims(kind: ConstraintKind, a: &Prim, b: &Prim) -> Option<Prediction> {
+/// [`predict`] on world primitives (`None`: the kind can't join them). An Angle measures signed
+/// about `about` (the world reference of a Directed or Explicit vector Angle, R149), unsigned
+/// without one.
+pub(crate) fn predict_prims(kind: ConstraintKind, a: &Prim, b: &Prim, about: Option<Vec3>) -> Option<Prediction> {
     use ConstraintSolution as S;
     let p = |offset: f64, solution: S| Some(Prediction { offset, solution });
     match kind {
@@ -62,7 +72,7 @@ pub(crate) fn predict_prims(kind: ConstraintKind, a: &Prim, b: &Prim) -> Option<
         },
         ConstraintKind::Angle => {
             let (da, db) = (direction(a)?, direction(b)?);
-            p(da.dot(db).clamp(-1.0, 1.0).acos().to_degrees(), solidcraft_doc::constraints::ANGLE_DEFAULT)
+            p(joints::measured_angle(da.normalized()?, db.normalized()?, about).to_degrees(), solidcraft_doc::constraints::ANGLE_DEFAULT)
         }
         ConstraintKind::Insert => match (*a, *b) {
             (Prim::Circle { c: ca, axis: na, .. }, Prim::Circle { c: cb, axis: nb, .. }) => {
@@ -94,8 +104,10 @@ pub(crate) fn predict_prims(kind: ConstraintKind, a: &Prim, b: &Prim) -> Option<
 }
 
 /// How far a constraint's world picks are from meeting it at `offset` with `solution`:
-/// (mm, deg). `None` when the kind can't join the picks.
-pub(crate) fn gaps(kind: ConstraintKind, solution: ConstraintSolution, offset: f64, a: &Prim, b: &Prim) -> Option<(f64, f64)> {
+/// (mm, deg). An Angle measures as compile does (R149): signed about `about` (its world
+/// reference) with the difference wrapped, else unsigned against the offset folded into 0..180.
+/// `None` when the kind can't join the picks.
+pub(crate) fn gaps(kind: ConstraintKind, solution: ConstraintSolution, offset: f64, a: &Prim, b: &Prim, about: Option<Vec3>) -> Option<(f64, f64)> {
     use ConstraintSolution as S;
     let angle = |u: Vec3, v: Vec3| u.dot(v).clamp(-1.0, 1.0).acos().to_degrees();
     // The angle a direction makes with a plane (0 when it lies in it).
@@ -119,7 +131,16 @@ pub(crate) fn gaps(kind: ConstraintKind, solution: ConstraintSolution, offset: f
             (Role::Line(p, d), Role::Point(q)) | (Role::Point(q), Role::Line(p, d)) => (from_line(q, p, d), 0.0),
             (Role::Point(p), Role::Point(q)) => (p.dist(q), 0.0),
         }),
-        ConstraintKind::Angle => Some((0.0, (angle(direction(a)?, direction(b)?) - offset).abs())),
+        ConstraintKind::Angle => {
+            let v = joints::measured_angle(direction(a)?.normalized()?, direction(b)?.normalized()?, about);
+            let off = if about.is_some() {
+                joints::wrapped(v - offset.to_radians()).abs()
+            } else {
+                let d = offset.rem_euclid(360.0);
+                (v - (if d > 180.0 { 360.0 - d } else { d }).to_radians()).abs()
+            };
+            Some((0.0, off.to_degrees()))
+        }
         ConstraintKind::Insert => match (*a, *b) {
             (Prim::Circle { c: ca, axis: na, .. }, Prim::Circle { c: cb, axis: nb, .. }) => {
                 let want = ca + na * offset;
@@ -676,10 +697,7 @@ pub fn preview(s: &Session, d: &Draft) -> Preview {
     {
         return refused(why);
     }
-    let predicted = match (&d.offset, c.picks.first(), c.picks.get(1)) {
-        (None, Some(a), Some(b)) => predict(s, c.kind, a, b).ok(),
-        _ => None,
-    };
+    let predicted = if d.offset.is_none() { predict(s, &c).ok() } else { None };
     let (sol, map) = dry_solve(s, all, Analysis::DegreesOfFreedom);
     Preview { world: sol.world, dof: sol.dof, status: map.get(&c.id).cloned(), predicted, refused: None }
 }

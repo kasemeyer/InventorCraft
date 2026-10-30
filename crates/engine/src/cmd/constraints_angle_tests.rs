@@ -349,3 +349,65 @@ fn a_loose_mated_pair_turns_to_an_angle() {
         assert!((x - y).abs() <= TOL, "Pin left B: {before:?} {after:?}");
     }
 }
+
+/// Whole transforms equal to 1e-9.
+fn same_mat(a: &solidcraft_doc::Mat, b: &solidcraft_doc::Mat) -> bool {
+    a.iter().flatten().zip(b.iter().flatten()).all(|(x, y)| (x - y).abs() <= TOL)
+}
+
+/// The `deg` gap `constraint.inspect` reports for `name`.
+fn inspect_deg(s: &mut Session, name: &str) -> f64 {
+    let v = run(s, "constraint.inspect", json!({"constraint": name}));
+    v["constraints"][0]["gaps"]["deg"].as_f64().unwrap_or_else(|| panic!("no gap in {v}"))
+}
+
+/// R149: predict measures an Explicit vector Angle signed about its reference, as compile does:
+/// from a −30° pose it predicts −30 and B stays exactly where it is.
+#[test]
+fn predict_keeps_a_signed_angle() {
+    let mut s = blocks();
+    let b = occ(&s, "B");
+    run(&mut s, "occurrence.move", json!({"occurrence": b, "axis": [0, 0, 1], "angle": "-30 deg"}));
+    let before = occurrence_world(&s.doc, b);
+    let front = crate::test_support::at(&s, "B", Vec3::new(50.0, 0.0, 50.0));
+    let (na, nb) = (Vec3::new(0.0, -1.0, 0.0), apply_vector(&before, Vec3::new(0.0, -1.0, 0.0)));
+    assert!((signed(na, nb, Vec3::Z) + 30.0).abs() <= ANG, "the pose: {}", signed(na, nb, Vec3::Z));
+    let p = json!({"type": "angle", "solution": "explicit_vector", "a": face("A", [50.0, 0.0, 10.0]), "b": face("B", [front.x, front.y, front.z]),
+        "ref": edge("A", [0.0, 0.0, 10.0]), "predict": true});
+    let r = run(&mut s, "constraint.create", p);
+    assert_eq!(r["status"], "ok", "{r}");
+    assert!((constraint(&s, "Angle:1").offset + 30.0).abs() <= ANG, "{}", constraint(&s, "Angle:1").offset);
+    assert!(same_mat(&occurrence_world(&s.doc, b), &before), "B moved: {before:?} {:?}", occurrence_world(&s.doc, b));
+    assert!(inspect_deg(&mut s, "Angle:1") <= ANG);
+}
+
+/// R149: `inspect` gaps of a met Directed 330 and a met Explicit vector −30 are 0.
+#[test]
+fn inspect_measures_signed_angles_as_compile_does() {
+    let mut s = blocks();
+    let r = run(&mut s, "constraint.create", fronts("directed", 330.0, json!({})));
+    assert_eq!(r["status"], "ok", "{r}");
+    assert!(inspect_deg(&mut s, "Angle:1") <= ANG, "directed 330");
+    let mut s = blocks();
+    let r = run(&mut s, "constraint.create", fronts("explicit_vector", -30.0, json!({"ref": edge("A", [0.0, 0.0, 10.0])})));
+    assert_eq!(r["status"], "ok", "{r}");
+    assert!(inspect_deg(&mut s, "Angle:1") <= ANG, "explicit vector -30");
+}
+
+/// R149, the pure measure: a pose at +30 about z is 60° from −30 signed, 0 from it unsigned;
+/// predict reads the sign only with a reference.
+#[test]
+fn gaps_and_predict_take_the_sign_from_the_reference() {
+    use crate::constraints::{gaps, predict_prims};
+    use solidcraft_doc::constraints::ConstraintKind::Angle;
+    let a = Prim::Plane { p: Vec3::ZERO, n: Vec3::new(0.0, -1.0, 0.0) };
+    let b = Prim::Plane { p: Vec3::ZERO, n: Vec3::new(0.5, -(0.75f64.sqrt()), 0.0) };
+    let (_, signed_gap) = gaps(Angle, ConstraintSolution::ExplicitVector, -30.0, &a, &b, Some(Vec3::Z)).unwrap();
+    assert!((signed_gap - 60.0).abs() <= ANG, "{signed_gap}");
+    let (_, wrapped_gap) = gaps(Angle, ConstraintSolution::Directed, 390.0, &a, &b, Some(Vec3::Z)).unwrap();
+    assert!(wrapped_gap <= ANG, "{wrapped_gap}");
+    let (_, unsigned_gap) = gaps(Angle, ConstraintSolution::Undirected, 330.0, &a, &b, None).unwrap();
+    assert!(unsigned_gap <= ANG, "{unsigned_gap}");
+    assert!((predict_prims(Angle, &b, &a, Some(Vec3::Z)).unwrap().offset + 30.0).abs() <= ANG);
+    assert!((predict_prims(Angle, &b, &a, None).unwrap().offset - 30.0).abs() <= ANG);
+}

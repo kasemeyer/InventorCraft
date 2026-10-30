@@ -150,6 +150,54 @@ fn canonical(d: Vec3) -> Vec3 {
     if big < 0.0 { d * -1.0 } else { d }
 }
 
+/// What a Directed or Explicit vector Angle measures about, as compile reads it: Directed's
+/// frozen a × b in A's frame (set when it became Directed); the reference pick's direction, an
+/// edge's sense canonical. `None` for any other solution.
+fn reference_side(
+    doc: &Document,
+    st: &ModelState,
+    solution: ConstraintSolution,
+    picks: &[super::GeoRef],
+    axis: Option<Vec3>,
+) -> Result<Option<joints::Side>, String> {
+    match solution {
+        ConstraintSolution::Directed => {
+            let oa = picks.first().map_or(0, |g| g.occurrence);
+            let k = axis.and_then(Vec3::normalized).ok_or_else(|| "a Directed Angle needs its axis: edit it to set one".to_string())?;
+            Ok(Some(joints::Side { occurrence: oa, prim: Prim::Line { p: Vec3::ZERO, d: k } }))
+        }
+        ConstraintSolution::ExplicitVector => {
+            let r = picks.get(2).ok_or_else(|| "an Explicit vector Angle takes a third pick".to_string())?;
+            let g = resolve(doc, st, r).map_err(|e| e.to_string())?;
+            if direction(&g).is_none() {
+                return Err(format!("Angle can't measure about a {}", word(g.kind())));
+            }
+            // An edge runs whichever way its B-rep curve does: its sense is its largest
+            // component's (in its component's coordinates), so +30 turns the same way after any
+            // rebuild. A plane's outward normal and an axis keep their own.
+            let g = match g {
+                Prim::Line { p, d } => Prim::Line { p, d: canonical(d) },
+                other => other,
+            };
+            Ok(Some(joints::Side { occurrence: r.occurrence, prim: g }))
+        }
+        _ => Ok(None),
+    }
+}
+
+/// The world direction an Angle with `solution`, `picks` and frozen `axis` measures its signed
+/// angle about, exactly as compile does (R149): `None` for an Undirected Angle; Err when the
+/// reference does not resolve.
+pub fn angle_reference(
+    doc: &Document,
+    st: &ModelState,
+    solution: ConstraintSolution,
+    picks: &[super::GeoRef],
+    axis: Option<Vec3>,
+) -> Result<Option<Vec3>, String> {
+    Ok(reference_side(doc, st, solution, picks, axis)?.and_then(|r| direction(&r.prim).and_then(|d| world_dir(doc, r.occurrence, d).normalized())))
+}
+
 /// Cylinders whose axes are further from parallel than this (radians) can't be tangent in v1.
 const PARALLEL_RAD: f64 = 1e-9;
 
@@ -210,26 +258,7 @@ fn one(doc: &Document, st: &ModelState, c: &Constraint) -> Result<(Vec<Joint>, V
             let (Some(da), Some(db)) = (direction(&ga), direction(&gb)) else { return Err(cant()) };
             let bounds = bounds_of(doc, c)?;
             let axis = match c.solution {
-                // The frozen a × b in A's frame (set when it became Directed).
-                S::Directed => {
-                    let k = c.axis.and_then(Vec3::normalized).ok_or_else(|| "a Directed Angle needs its axis: edit it to set one".to_string())?;
-                    Some(side(oa, Prim::Line { p: Vec3::ZERO, d: k }))
-                }
-                S::ExplicitVector => {
-                    let r = c.picks.get(2).ok_or_else(|| "an Explicit vector Angle takes a third pick".to_string())?;
-                    let g = resolve(doc, st, r).map_err(|e| e.to_string())?;
-                    if direction(&g).is_none() {
-                        return Err(format!("Angle can't measure about a {}", word(g.kind())));
-                    }
-                    // An edge runs whichever way its B-rep curve does: its sense is its largest
-                    // component's (in its component's coordinates), so +30 turns the same way
-                    // after any rebuild. A plane's outward normal and an axis keep their own.
-                    let g = match g {
-                        Prim::Line { p, d } => Prim::Line { p, d: canonical(d) },
-                        other => other,
-                    };
-                    Some(side(r.occurrence, g))
-                }
+                S::Directed | S::ExplicitVector => reference_side(doc, st, c.solution, &c.picks, c.axis)?,
                 // Undirected with limits, from two directions parallel now: the unsigned angle
                 // has no slope at 0, so this solve turns b about a fixed direction square to a
                 // (the next, from where it lands, measures unsigned again).
