@@ -112,3 +112,37 @@ fn paste_new_copies_inner_constraints() {
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(s.doc.assembly.constraints, before);
 }
+
+/// Final wave item 8: a constraint between the extracted component's own occurrence (its XY
+/// plane) and an inner one (P's bottom) goes with it onto the new design's root (occurrence 0).
+#[test]
+fn extract_carries_a_constraint_on_its_own_occurrence_onto_the_root() {
+    let dir = std::env::temp_dir().join(format!("tcicad-con-{}-extract_carries_a_constraint_on_its_own_occurrence", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let (mut s, p, _, _) = design();
+    let sub = s.doc.occurrences.iter().find(|o| o.name.starts_with("Sub")).unwrap().id;
+    let r = run(
+        &mut s,
+        "constraint.create",
+        json!({"type": "mate", "a": {"occurrence": sub, "origin": "xy"}, "b": {"occurrence": p, "face": [10, 10, 0]}, "offset": 0}),
+    );
+    assert_eq!(r["status"], "ok", "{r}");
+    run(&mut s, "file.save", json!({"path": dir.join("asm.solidcraft")}));
+    let file = dir.join("sub.solidcraft");
+    let out = run(&mut s, "component.extract", json!({"component": "Sub", "path": file}));
+    let notices = out["notices"].to_string();
+    assert!(notices.contains("Mate:2") && !notices.contains("Mate:3"), "{out}");
+    // It goes with the component: this design keeps only the crossing Mate:2.
+    assert_eq!(names(&s), ["Mate:2"]);
+    let mut part = Session::default();
+    run(&mut part, "doc.open", json!({"path": file}));
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(names(&part), ["Mate:1", "Mate:3"]);
+    let c = part.doc.assembly.constraint("Mate:3").unwrap();
+    assert_eq!(c.picks.iter().map(|g| g.occurrence).collect::<Vec<_>>(), [0, p], "Sub's own occurrence is the new design's root");
+    assert_eq!(c.picks[0].geo, solidcraft_doc::constraints::Geo::Origin { item: solidcraft_doc::constraints::OriginItem::Xy });
+    run(&mut part, "joint.solve", json!({}));
+    let l = run(&mut part, "constraint.list", json!({}));
+    assert!(l["constraints"].as_array().unwrap().iter().all(|c| c["status"] == "ok"), "{l}");
+}

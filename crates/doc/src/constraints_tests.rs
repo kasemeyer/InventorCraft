@@ -356,3 +356,15 @@ fn angle_defaults_to_the_reference_vector() {
     assert_eq!(Angle.picks(Angle.default_solution(false)), 3);
     assert_eq!(Angle.picks(ConstraintSolution::ExplicitVector), 3);
 }
+
+/// Final wave item 8: a new item's id is above every constraint's, even when the saved counter is
+/// behind (a hand-edited or older file), so a joint or group never takes a constraint's id.
+#[test]
+fn next_item_id_is_above_every_constraint() {
+    let mut doc = Document::new("ids");
+    doc.assembly.constraints.push(mate(500, "Mate:1"));
+    doc.next_id = 1;
+    assert_eq!(doc.next_item_id().unwrap(), 501);
+    assert_eq!(doc.allocate_id().unwrap(), 501);
+    assert_eq!(doc.next_item_id().unwrap(), 502);
+}
