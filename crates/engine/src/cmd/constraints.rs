@@ -1014,3 +1014,7 @@ mod constraints_limits_tests;
 #[cfg(test)]
 #[path = "constraints_drive_tests.rs"]
 mod constraints_drive_tests;
+
+#[cfg(test)]
+#[path = "constraints_script_tests.rs"]
+mod constraints_script_tests;
