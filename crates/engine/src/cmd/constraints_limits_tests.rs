@@ -146,6 +146,27 @@ fn angle_limits_rest_at_the_bound() {
     assert!((fronts_angle(&s) - 40.0).abs() <= ANG, "{}", fronts_angle(&s));
 }
 
+/// R153: a limited Angle's offset is a start, as a Mate's.
+#[test]
+fn a_limited_angle_starts_at_its_offset() {
+    let mut s = blocks();
+    // From parallel fronts: it turns to its offset, not to the nearer limit.
+    let p = json!({"type": "angle", "solution": "undirected", "a": face("A", [50.0, 0.0, 10.0]), "b": face("B", [50.0, 0.0, 50.0]),
+        "offset": 30, "min": 10, "max": 40});
+    let r = run(&mut s, "constraint.create", p);
+    assert_eq!(r["status"], "ok", "{r}");
+    assert!(r.get("warnings").is_none(), "{r}");
+    assert!((fronts_angle(&s) - 30.0).abs() <= ANG, "{}", fronts_angle(&s));
+    // An offset edit inside the limits moves it there.
+    run(&mut s, "constraint.edit", json!({"constraint": "Angle:1", "offset": 25}));
+    assert!((fronts_angle(&s) - 25.0).abs() <= ANG, "{}", fronts_angle(&s));
+    // Past the max: it starts at the max, and says so.
+    let r = run(&mut s, "constraint.edit", json!({"constraint": "Angle:1", "offset": 50}));
+    assert!((fronts_angle(&s) - 40.0).abs() <= ANG, "{}", fronts_angle(&s));
+    let w = r["warnings"][0].as_str().unwrap_or_else(|| panic!("no warning: {r}"));
+    assert!(w.contains("Angle:1") && w.contains("40 deg") && w.contains("50 deg"), "{w}");
+}
+
 #[test]
 fn limits_refuse_hostile_values() {
     let mut s = blocks();

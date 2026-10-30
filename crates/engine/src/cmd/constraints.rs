@@ -468,25 +468,26 @@ fn answer(s: &Session, id: u64, sol: &joints::Solution, before: &BTreeMap<u64, M
     v
 }
 
-/// What a limited Mate between planes or a limited Insert says when its offset, the start of
-/// its bounded value, is outside its limits: it starts at the nearer one (as `joint.create`
-/// clamps a joint's values).
+/// What a limited Mate between planes, Insert or Angle says when its offset, the start of its
+/// bounded value (R153 for the Angle), is outside its limits: it starts at the nearer one (as
+/// `joint.create` clamps a joint's values).
 fn clamped(s: &Session, c: &Constraint) -> Option<String> {
     if c.suppressed || c.lock || c.limits.is_empty() {
         return None;
     }
     let st = s.model.state();
     let planes = || c.picks.iter().take(2).all(|g| matches!(resolve_world(&s.doc, &st, g), Ok(Prim::Plane { .. })));
-    if !(c.kind == ConstraintKind::Insert || c.kind == ConstraintKind::Mate && planes()) {
+    if !(matches!(c.kind, ConstraintKind::Insert | ConstraintKind::Angle) || c.kind == ConstraintKind::Mate && planes()) {
         return None;
     }
     let (offset, (min, max)) = (offset_now(s, c), limits_now(s, c));
     let at = offset.clamp(min.unwrap_or(f64::NEG_INFINITY), max.unwrap_or(f64::INFINITY));
     let round = |v: f64| (v * 1e6).round() / 1e6;
     let side = |v: Option<f64>| v.map_or("none".to_string(), |v| round(v).to_string());
+    let unit = if c.kind.is_angle() { "deg" } else { "mm" };
     (at != offset).then(|| {
         format!(
-            "{} starts at {} mm, inside its limits [{}, {}], not at its offset {} mm: the part moved there",
+            "{} starts at {} {unit}, inside its limits [{}, {}], not at its offset {} {unit}: the part moved there",
             c.name,
             round(at),
             side(min),
@@ -494,6 +495,30 @@ fn clamped(s: &Session, c: &Constraint) -> Option<String> {
             round(offset)
         )
     })
+}
+
+/// A limited Angle's offset is a start, as a Mate's (R153): one placement solve of the design
+/// with the constraint `id` unlimited at its offset clamped into the limits, so the part turns
+/// there; the bounded solve that follows keeps it (any value inside meets the limits).
+fn start_angle(s: &mut Session, id: u64) {
+    let Some(c) = s.doc.assembly.constraints.iter().find(|c| c.id == id).cloned() else { return };
+    if c.kind != ConstraintKind::Angle || c.suppressed || c.limits.is_empty() {
+        return;
+    }
+    let (offset, (min, max)) = (offset_now(s, &c), limits_now(s, &c));
+    let at = offset.clamp(min.unwrap_or(f64::NEG_INFINITY), max.unwrap_or(f64::INFINITY));
+    if let Some(x) = s.doc_mut().assembly.constraints.iter_mut().find(|x| x.id == id) {
+        x.offset = at;
+        x.exprs.offset = None;
+        x.limits = ConstraintLimits::default();
+        x.exprs.min = None;
+        x.exprs.max = None;
+    }
+    super::joints::place(s);
+    // The record as made, its pose kept.
+    if let Some(x) = s.doc_mut().assembly.constraints.iter_mut().find(|x| x.id == id) {
+        *x = c;
+    }
 }
 
 fn create(s: &mut Session, p: &Value) -> Result<Value> {
@@ -512,6 +537,7 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
     c.id = doc.allocate_id()?;
     let id = c.id;
     doc.assembly.constraints.push(c);
+    start_angle(s, id);
     let sol = super::joints::resolve(s);
     Ok(answer(s, id, &sol, &before))
 }
@@ -560,8 +586,13 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     {
         return Err(bad(cmd, why));
     }
+    // R153: an edit that changes a limited Angle's offset starts it there.
+    let started = c.offset != base.offset || c.exprs.offset != base.exprs.offset;
     if let Some(slot) = s.doc_mut().assembly.constraints.iter_mut().find(|x| x.id == id) {
         *slot = c;
+    }
+    if started {
+        start_angle(s, id);
     }
     let sol = super::joints::resolve(s);
     Ok(answer(s, id, &sol, &before))

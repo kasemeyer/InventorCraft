@@ -228,11 +228,12 @@ fn angle_equations_obey_caps() {
 #[test]
 fn undirected_limits_hold_the_nearer_bound() {
     let mut s = blocks();
-    let r = run(&mut s, "constraint.create", fronts("undirected", 30.0, json!({"min": 20, "max": 40})));
+    // R153: the offset is a start; 10, below the limits, starts B at the nearer one (Task 7: a
+    // bounded Angle from outside rests on the bound).
+    let r = run(&mut s, "constraint.create", fronts("undirected", 10.0, json!({"min": 20, "max": 40})));
     assert_eq!(r["status"], "ok", "{r}");
     let (na, nb) = normals(&s, "Angle:1");
-    // Any angle inside the limits meets them: B stops just inside the nearer one.
-    assert!((20.0 - ANG..=20.001).contains(&deg(na, nb)), "{}", deg(na, nb));
+    assert!((deg(na, nb) - 20.0).abs() <= ANG, "{}", deg(na, nb));
     assert_eq!(dof_of(&r, &s, "B"), 5);
     let st = s.model.state();
     let compiled = compile(&s.doc, &st, &s.doc.assembly);
