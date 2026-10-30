@@ -916,6 +916,9 @@ pub struct Solution {
     /// owner's `state` by `apply_joint_solution`.
     #[serde(skip)]
     pub compiled: BTreeMap<u64, Vec<f64>>,
+    /// Each compiled joint's kind and flip, what its `compiled` values mean (R132).
+    #[serde(skip)]
+    pub compiled_signatures: BTreeMap<u64, crate::constraints::StateSignature>,
 }
 
 /// One group of loops solved together: its closing joints, how many values it moves, and whether
@@ -1001,11 +1004,12 @@ pub fn joint_values(asm: &Assembly, compiled: &Compiled) -> BTreeMap<u64, Vec<f6
         })
         .collect();
     if !compiled.joints.is_empty() {
-        let states: BTreeMap<u64, &Vec<f64>> = asm.constraints.iter().map(|c| (c.id, &c.state)).collect();
+        let owners: BTreeMap<u64, &crate::constraints::Constraint> = asm.constraints.iter().map(|c| (c.id, c)).collect();
         for j in &compiled.joints {
             let n = j.kind.dofs().len();
-            let state = owner_of(j.id).and_then(|c| states.get(&c)).filter(|q| q.len() == n && q.iter().all(|v| v.is_finite()));
-            let mut q = state.map_or_else(|| j.values.clone(), |q| (*q).clone());
+            // R132: only a state solved for this joint's kind and flip.
+            let state = owner_of(j.id).and_then(|c| owners.get(&c)).and_then(|c| c.state_for(n, crate::constraints::StateSignature::of(j)));
+            let mut q = state.map_or_else(|| j.values.clone(), Clone::clone);
             q.resize(n, 0.0);
             vals.insert(j.id, q);
         }
@@ -1705,6 +1709,17 @@ pub struct DofMemo {
     links: Vec<u64>,
 }
 
+impl DofMemo {
+    /// How many occurrences' counts it keeps.
+    pub fn len(&self) -> usize {
+        self.counts.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.counts.is_empty()
+    }
+}
+
 fn bits(out: &mut Vec<u64>, m: &Mat) {
     out.extend(m.iter().flatten().map(|v| v.to_bits()));
 }
@@ -2063,6 +2078,7 @@ fn solve_core(doc: &Document, st: &ModelState, held: &Held, analysis: Analysis, 
     for j in extra.joints.iter().filter(|j| tree.frames.contains_key(&j.id)) {
         let q = if j.kind == JointKind::Rigid { vec![j.angle] } else { vals.get(&j.id).cloned().unwrap_or_default() };
         sol.compiled.insert(j.id, q);
+        sol.compiled_signatures.insert(j.id, crate::constraints::StateSignature::of(j));
     }
     if analysis == Analysis::DegreesOfFreedom {
         if !closing.is_empty() {
@@ -2231,18 +2247,24 @@ impl Document {
             }
         }
         // Compiled joints' values go to their constraints' `state`, in member order (R114).
-        let mut states: BTreeMap<u64, Vec<f64>> = BTreeMap::new();
+        let mut states: BTreeMap<u64, (Vec<f64>, Option<crate::constraints::StateSignature>)> = BTreeMap::new();
         for (id, q) in &sol.compiled {
             if let Some(c) = owner_of(*id) {
-                states.entry(c).or_default().extend(q.iter().copied());
+                let entry = states.entry(c).or_default();
+                entry.0.extend(q.iter().copied());
+                // The first member's signature (one member each until Task 6).
+                if entry.1.is_none() {
+                    entry.1 = sol.compiled_signatures.get(id).copied();
+                }
             }
         }
         for c in self.assembly.constraints.iter_mut() {
-            let Some(q) = states.remove(&c.id) else { continue };
+            let Some((q, sig)) = states.remove(&c.id) else { continue };
             // NaN-aware: a state read back as NaN is replaced.
             let same = c.state.len() == q.len() && c.state.iter().zip(&q).all(|(a, b)| a.to_bits() == b.to_bits());
-            if !same {
+            if !same || c.signature != sig {
                 c.state = q;
+                c.signature = sig;
                 changed = true;
             }
         }

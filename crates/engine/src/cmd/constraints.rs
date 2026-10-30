@@ -257,11 +257,13 @@ fn build(s: &Session, p: &Value, base: Option<&Constraint>, cmd: &str) -> Result
         }
         Some(_) => return Err(bad(cmd, "`name` must be text")),
     };
-    // The solved values stay while what they belong to does; new picks, a new type or a new
-    // solution start again from where the parts are (R132 also re-seeds a changed compile).
-    let state = match base {
-        Some(b) if b.picks == picks && b.kind == kind && b.solution == solution => b.state.clone(),
-        _ => Vec::new(),
+    // The solved values stay while their picks and type do; new picks or a new type start again
+    // from where the parts are. A new solution keeps them: the state's signature (R132) tells the
+    // solve they were solved for another compile (Mate to Flush, Opposed to Aligned), which then
+    // re-seeds them.
+    let (state, signature) = match base {
+        Some(b) if b.picks == picks && b.kind == kind => (b.state.clone(), b.signature),
+        _ => (Vec::new(), None),
     };
     let c = Constraint {
         id: base.map_or(0, |b| b.id),
@@ -276,6 +278,7 @@ fn build(s: &Session, p: &Value, base: Option<&Constraint>, cmd: &str) -> Result
         lock,
         axis: base.and_then(|b| b.axis),
         state,
+        signature,
     };
     c.validate().map_err(|e| bad(cmd, e.to_string()))?;
     Ok(c)

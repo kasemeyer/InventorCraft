@@ -29,6 +29,7 @@ fn record(id: u64, name: &str, kind: ConstraintKind, picks: Vec<GeoRef>) -> Cons
         lock: false,
         axis: None,
         state: Vec::new(),
+        signature: None,
     }
 }
 
@@ -285,4 +286,41 @@ fn loading_refuses_wrong_picks_ids_and_names() {
         format!("constraint Mate:1: id {COMPILED_BASE} is in the range kept for compiled joints")
     );
     Document::from_json(&file(vec![mate(COMPILED_BASE - 1, "Mate:1"), mate(5, "Mate:2")])).unwrap();
+}
+
+/// A saved joint's id below `COMPILED_BASE` too (Task 3 review): one at or above it is refused on
+/// load, one below opens.
+#[test]
+fn loading_refuses_a_joint_in_the_compiled_range() {
+    let file = |id: u64| {
+        let mut v: Value = serde_json::from_str(&Document::new("A").to_json()).unwrap();
+        let mut j = joint1();
+        j.id = id;
+        v["assembly"] = json!({ "joints": [j] });
+        v.to_string()
+    };
+    assert_eq!(
+        Document::from_json(&file(COMPILED_BASE)).unwrap_err().to_string(),
+        format!("joint Joint1: id {COMPILED_BASE} is in the range kept for compiled joints")
+    );
+    Document::from_json(&file(COMPILED_BASE - 1)).unwrap();
+}
+
+/// R132: the state's signature is written beside it and read back; a record without one (a file
+/// from before R132) loads with none, and its state is not reused.
+#[test]
+fn the_state_signature_round_trips() {
+    let sig = StateSignature { kind: crate::joints::JointKind::Planar, flip: true };
+    let c = Constraint { state: vec![1.0, 2.0, 0.5], signature: Some(sig), ..mate(5, "Mate:1") };
+    let v = serde_json::to_value(&c).unwrap();
+    assert_eq!(v["signature"], json!({"kind": "planar", "flip": true}));
+    let back: Constraint = serde_json::from_value(v.clone()).unwrap();
+    assert_eq!(back, c);
+    assert_eq!(back.state_for(3, sig), Some(&vec![1.0, 2.0, 0.5]));
+    assert_eq!(back.state_for(3, StateSignature { flip: false, ..sig }), None, "Mate's state is not Flush's");
+    let mut old = v;
+    old.as_object_mut().unwrap().remove("signature");
+    let old: Constraint = serde_json::from_value(old).unwrap();
+    assert_eq!(old.signature, None);
+    assert_eq!(old.state_for(3, sig), None);
 }

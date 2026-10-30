@@ -53,6 +53,35 @@ pub struct Constraint {
     /// length or with a non-finite value (a NaN is written as `null`) is re-seeded by the solve.
     #[serde(default, skip_serializing_if = "Vec::is_empty", deserialize_with = "lenient_state")]
     pub state: Vec<f64>,
+    /// What `state` was solved for (R132): the compiled joint's kind and flip. A state whose
+    /// signature differs from what the constraint compiles to now (Mate↔Flush, Opposed↔Aligned,
+    /// an Undirected sense change, a lock) or that has none (a file from before R132) is
+    /// re-seeded, not reused with a new meaning.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature: Option<StateSignature>,
+}
+
+/// A compiled joint's kind and flip: what a constraint's `state` values mean (R132).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StateSignature {
+    pub kind: crate::joints::JointKind,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub flip: bool,
+}
+
+impl StateSignature {
+    /// A joint's signature.
+    pub fn of(j: &crate::joints::Joint) -> Self {
+        Self { kind: j.kind, flip: j.flip }
+    }
+}
+
+impl Constraint {
+    /// The saved state, when it fits a compiled joint with `n` values and signature `sig`: as many
+    /// values, all finite, solved for the same kind and flip (R132).
+    pub fn state_for(&self, n: usize, sig: StateSignature) -> Option<&Vec<f64>> {
+        (self.state.len() == n && self.state.iter().all(|v| v.is_finite()) && self.signature == Some(sig)).then_some(&self.state)
+    }
 }
 
 /// A saved state with `null` entries (how serde_json writes a NaN) reads them as NaN, for the
@@ -287,6 +316,11 @@ impl Constraint {
 pub(crate) fn validate_loaded(asm: &Assembly) -> Result<()> {
     if asm.constraints.len() > MAX_CONSTRAINTS {
         return Err(DocError::Invalid("too many constraints".into()));
+    }
+    // A saved joint never takes an id the compiled joints use: the solver and `owner_of` would
+    // take it for a constraint's.
+    if let Some(j) = asm.joints.iter().find(|j| j.id >= COMPILED_BASE) {
+        return Err(DocError::Invalid(format!("joint {}: id {} is in the range kept for compiled joints", j.name, j.id)));
     }
     let mut ids = std::collections::BTreeSet::new();
     let mut names = std::collections::BTreeSet::new();

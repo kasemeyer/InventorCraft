@@ -348,3 +348,134 @@ fn seeded_tree_values_reach_state() {
     assert_eq!(state.len(), 3);
     assert_eq!(sol.compiled.get(&compiled_id(id, 0)), Some(&state));
 }
+
+// Fix round 1 (R132): a state is reused only for the compile it was solved for.
+
+/// The pose a constraint of `solution` re-seeded from scratch gives: the constraint deleted and
+/// made again with the same picks from where the parts are now.
+fn reseeded(mut s: Session, id: u64, solution: &str, name: &str) -> Mat {
+    let mut c = constraint(&s, id);
+    s.doc_mut().assembly.constraints.retain(|x| x.id != id);
+    c.solution = solidcraft_doc::constraints::ConstraintSolution::parse(solution).unwrap();
+    c.state = Vec::new();
+    c.signature = None;
+    s.doc_mut().assembly.constraints.push(c);
+    crate::cmd::joints::resolve(&mut s);
+    transform(&s, name)
+}
+
+/// A session on a copy of `s`'s design (its model evaluated again).
+fn blocks_like(s: &Session) -> Session {
+    Session::new((*s.doc).clone())
+}
+
+fn same(a: &Mat, b: &Mat) -> bool {
+    a.iter().flatten().zip(b.iter().flatten()).all(|(x, y)| (x - y).abs() <= TOL)
+}
+
+fn signature(s: &Session, id: u64) -> Option<solidcraft_doc::constraints::StateSignature> {
+    constraint(s, id).signature
+}
+
+#[test]
+fn a_mate_edited_to_flush_lands_without_a_jump() {
+    let mut s = blocks();
+    let id = mate_a_b(&mut s, 0.0);
+    assert_eq!(signature(&s, id).map(|g| (g.kind, g.flip)), Some((joints::JointKind::Planar, false)));
+    let want = reseeded(blocks_like(&s), id, "flush", "B");
+    run(&mut s, "constraint.edit", json!({"constraint": "Mate:1", "solution": "flush"}));
+    assert!(same(&transform(&s, "B"), &want), "B is not where a fresh Flush puts it: {:?} vs {want:?}", transform(&s, "B"));
+    let c = constraint(&s, id);
+    let (p, n) = plane(now(&s, &c.picks[1]));
+    let (_, m) = plane(now(&s, &c.picks[0]));
+    // B turns over about its bottom's centre: the centre stays where the Mate put it.
+    assert!(p.dist(v(50.0, 25.0, 20.0)) <= 1e-6, "B's bottom centre {p:?}");
+    assert!((n.dot(m) - 1.0).abs() <= 1e-12, "normals {n:?} {m:?}");
+    assert_eq!(c.signature.map(|g| g.flip), Some(true), "state re-seeded for Flush");
+    assert_eq!(solution(&s).conflicts, vec![]);
+}
+
+#[test]
+fn an_insert_edited_to_aligned_lands_without_a_jump() {
+    let mut s = blocks();
+    let id = add(&mut s, "insert", "opposed", &[("Plate", EDGE, [200.0, 0.0, 10.0]), ("Pin", EDGE, [310.0, 0.0, 50.0])], 0.0, false);
+    let name = constraint(&s, id).name;
+    let want = reseeded(blocks_like(&s), id, "aligned", "Pin");
+    run(&mut s, "constraint.edit", json!({"constraint": name, "solution": "aligned"}));
+    assert!(same(&transform(&s, "Pin"), &want), "the pin is not where a fresh Aligned puts it: {:?} vs {want:?}", transform(&s, "Pin"));
+    let (b, t) = (placed(&s, "Pin", v(300.0, 0.0, 50.0)), placed(&s, "Pin", v(300.0, 0.0, 110.0)));
+    assert!(b.dist(v(190.0, 0.0, 10.0)) <= RIM, "bottom centre {b:?}");
+    assert!(t.dist(v(190.0, 0.0, -50.0)) <= RIM, "top centre {t:?}");
+    assert_eq!(signature(&s, id).map(|g| (g.kind, g.flip)), Some((joints::JointKind::Revolute, true)));
+}
+
+#[test]
+fn an_undirected_sense_change_reseeds() {
+    let mut s = blocks();
+    ground(&mut s, "Drum");
+    let id = add(&mut s, "mate", "undirected", &[("Drum", FACE, [415.0, 0.0, 20.0]), ("Pin", FACE, [310.0, 0.0, 80.0])], 0.0, false);
+    assert_eq!(signature(&s, id).map(|g| g.flip), Some(true), "the axes start aligned");
+    // An outside move turns the pin over (170° about y through its middle): the sense flips.
+    let centre = placed(&s, "Pin", v(300.0, 0.0, 80.0));
+    let pin = occ(&s, "Pin");
+    run(
+        &mut s,
+        "occurrence.move",
+        json!({"occurrence": pin, "space": "world", "axis": [0, 1, 0], "angle": "170 deg", "origin": [centre.x, centre.y, centre.z]}),
+    );
+    crate::cmd::joints::resolve(&mut s);
+    let c = constraint(&s, id);
+    let (drum, axis) = (line(now(&s, &c.picks[0])), line(now(&s, &c.picks[1])));
+    assert!((drum.1.dot(axis.1) + 1.0).abs() <= 1e-12, "dot {}", drum.1.dot(axis.1));
+    assert_eq!(c.signature.map(|g| g.flip), Some(false), "re-seeded for the opposed sense");
+    let after = placed(&s, "Pin", v(300.0, 0.0, 80.0));
+    assert!(after.dist(centre) <= 1.0, "the pin jumped from {centre:?} to {after:?}");
+}
+
+#[test]
+fn a_file_from_before_signatures_reseeds_once() {
+    let mut made = blocks();
+    let id = mate_a_b(&mut made, 0.0);
+    let dir = std::env::temp_dir().join(format!("tcicad-con-{}-a_file_from_before_signatures_reseeds_once", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("mate.tciasm");
+    run(&mut made, "file.save", json!({"path": path.to_string_lossy(), "format": "json"}));
+    let mut file: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let record = file.pointer_mut("/assembly/constraints/0").and_then(|c| c.as_object_mut()).unwrap();
+    assert!(record.remove("signature").is_some(), "the save wrote a signature");
+    std::fs::write(&path, file.to_string()).unwrap();
+    let mut s = Session::default();
+    run(&mut s, "doc.open", json!({"path": path.to_string_lossy()}));
+    let _ = std::fs::remove_dir_all(&dir);
+    let c = constraint(&s, id);
+    assert_eq!(c.signature.map(|g| (g.kind, g.flip)), Some((joints::JointKind::Planar, false)), "signed on open");
+    assert_eq!(c.state.len(), 3);
+    let (p, _) = plane(now(&s, &c.picks[1]));
+    assert!((p.z - 20.0).abs() <= TOL, "B's bottom at {p:?}");
+}
+
+/// The session's DOF memo (R130) answers as a fresh solve after a ground toggle, a part edit and
+/// a constraint edit, on a loop (Mate and Flush on B).
+#[test]
+fn the_dof_memo_follows_grounding_part_and_constraint_edits() {
+    let mut s = blocks();
+    let b = occ(&s, "B");
+    mate_a_b(&mut s, 0.0);
+    add(&mut s, "mate", "flush", &[("A", FACE, [50.0, 0.0, 10.0]), ("B", FACE, [50.0, 0.0, 30.0])], 0.0, false);
+    let check = |s: &mut Session, what: &str, want: usize| {
+        let memo = crate::cmd::joints::resolve(s).dof;
+        assert_eq!(memo, solution(s).dof, "{what}");
+        assert_eq!(memo[&b], want, "{what}");
+    };
+    check(&mut s, "a loop", 1);
+    run(&mut s, "occurrence.ground", json!({"occurrence": b, "grounded": true}));
+    check(&mut s, "grounded", 0);
+    run(&mut s, "occurrence.ground", json!({"occurrence": b, "grounded": false}));
+    check(&mut s, "ungrounded", 1);
+    let comp = s.doc.occurrences.iter().find(|o| o.id == b).unwrap().component;
+    let feature = s.doc.features.iter().find(|f| f.component == comp && matches!(f.kind, solidcraft_doc::FeatureKind::Box { .. })).unwrap().id;
+    run(&mut s, "timeline.edit", json!({"feature": feature, "set": {"height": "25 mm"}}));
+    check(&mut s, "a part edit", 1);
+    run(&mut s, "constraint.edit", json!({"constraint": "Mate:2", "offset": 2}));
+    check(&mut s, "a constraint edit", 1);
+}

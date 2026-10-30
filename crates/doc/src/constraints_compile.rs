@@ -10,7 +10,7 @@
 use solidcraft_geom::Vec3;
 
 use super::geo::{Prim, PrimKind, resolve};
-use super::{COMPILED_BASE, Constraint, ConstraintKind, ConstraintSolution};
+use super::{COMPILED_BASE, Constraint, ConstraintKind, ConstraintSolution, StateSignature};
 use crate::joints::{self, Assembly, Joint, JointKind, JointOrigin, Snap, nearest_values, occurrence_world};
 use crate::{Document, ModelState, apply_vector};
 
@@ -30,6 +30,7 @@ const MAX_EXPR_VALUE: f64 = 1e9;
 
 /// The id of constraint `constraint`'s `k`-th compiled member (`k < 4`).
 pub fn compiled_id(constraint: u64, k: u64) -> u64 {
+    debug_assert!(k < 4, "a constraint compiles to at most 4 members");
     COMPILED_BASE.saturating_add(constraint.saturating_mul(4)).saturating_add(k.min(3))
 }
 
@@ -166,10 +167,15 @@ fn one(doc: &Document, st: &ModelState, c: &Constraint) -> Result<Joint, String>
     };
     // The saved state when it fits (an Insert keeps its turn, locked or not); else the values
     // that move B least (a new constraint, changed picks, a NaN read back from a file).
+    // R132: only a state solved for this kind and flip (a locked Insert's is its Rigid's).
     let n = kind.dofs().len();
-    let fits = c.state.len() == n && c.state.iter().all(|v| v.is_finite());
-    j.values = if fits { c.state.clone() } else { nearest_values(doc, st, &j).unwrap_or_else(|| vec![0.0; n]) };
-    if c.kind == ConstraintKind::Insert && c.lock {
+    let locked = c.kind == ConstraintKind::Insert && c.lock;
+    let sig = StateSignature { kind: if locked { JointKind::Rigid } else { kind }, flip };
+    j.values = match c.state_for(n, sig) {
+        Some(q) => q.clone(),
+        None => nearest_values(doc, st, &j).unwrap_or_else(|| vec![0.0; n]),
+    };
+    if locked {
         // Locked at the turn it holds (new: the turn it has now): a rigid joint at that turn.
         j.angle = j.values.first().copied().unwrap_or(0.0);
         j.kind = JointKind::Rigid;
