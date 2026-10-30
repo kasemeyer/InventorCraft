@@ -455,8 +455,9 @@ fn inventor_commands() -> BTreeSet<&'static str> {
 /// `drawing.note.edit` (191; R74), which the Drawing ribbon does not place. Plan D-2 Task 1's
 /// Drawing ribbon places ten drawing commands (191 - 10 = 181). Plan E-1 Task 0 measured the
 /// base N = 182 (R121). Plan E-1 Task 4's six constraint commands (+6): 182 + 6 = 188 (E-2 Task 1
-/// places them). Plan E-1 Task 5's three show commands (+3): 188 + 3 = 191 (N + 9).
-const INVENTOR_UNPLACED: usize = 191;
+/// places them). Plan E-1 Task 5's three show commands (+3): 188 + 3 = 191 (N + 9). Plan E-1
+/// Task 8's `constraint.drive` (+1): 191 + 1 = 192 (N + 10).
+const INVENTOR_UNPLACED: usize = 192;
 
 #[test]
 fn inventor_assembly_ribbon_follows_the_capture() {

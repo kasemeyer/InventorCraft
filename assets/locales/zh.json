@@ -721,6 +721,7 @@
   "cmd.config_table": "显示配置表",
   "cmd.constraint_create": "约束",
   "cmd.constraint_delete": "删除约束",
+  "cmd.constraint_drive": "驱动约束",
   "cmd.constraint_edit": "编辑约束",
   "cmd.constraint_hide_all": "隐藏所有约束",
   "cmd.constraint_inspect": "检查约束",

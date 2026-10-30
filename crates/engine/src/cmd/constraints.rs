@@ -4,7 +4,8 @@
 //! solve) through `cmd::joints::resolve`, which also refreshes the session's DOF memo with that
 //! solve; each command is one undo step, and an edit that changes nothing is none.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use serde_json::{Value, json};
 use solidcraft_doc::constraints::{
@@ -13,7 +14,7 @@ use solidcraft_doc::constraints::{
     resolve_world,
 };
 use solidcraft_doc::joints::{self, Analysis, occurrence_world};
-use solidcraft_doc::{DocumentKind, Mat};
+use solidcraft_doc::{Document, DocumentKind, Mat};
 use solidcraft_geom::Vec3;
 
 use super::CommandSpec;
@@ -39,6 +40,9 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(has_constraints)
         .params("constraint: id|name or a list; suppressed?: bool (default toggles) → {constraints: [{name, suppressed, status}]}"),
     CommandSpec::new("constraint.delete", "Delete Constraint", delete).icon("delete").enabled(has_constraints).params("constraint: id|name or a list → {deleted: n}"),
+    CommandSpec::new("constraint.drive", "Drive Constraint", drive).icon("drive").noundo().enabled(has_constraints).params(
+        "constraint: id|name; start? (default its value, mm or deg); end? (default start + 10); increment? (default 1) or steps? (1-10000); repeat?: 1-1000 (default 1); cycle?: start_end|start_end_start (default start_end); stop_on_contact?: bool (default false: the assembly's contact sets, as joint.drive). At most 10,000 frames. The design is left as it was (no undo step); committing a value is constraint.edit → {frames: [{value, world: {<occurrence>: Mat}}] (the occurrences moved from where they are), stopped_by_contact?: {value: the last free value, pair: [a, b]}, stopped_by_limit?: {value, limit: min|max}, stopped_by_loop?: {value, constraint}}",
+    ),
     CommandSpec::new("constraint.list", "List Constraints", list).icon("list").noundo().params(
         "occurrence? (default all) → {constraints: [{id, name, type, solution, occurrences: [a, b, ref?], offset, unit, limits, expressions?, suppressed, status}], dof: {<occurrence>: n}}",
     ),
@@ -606,6 +610,183 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"deleted": ids.len()}))
 }
 
+/// Most frames one drive makes (spec §5).
+const MAX_FRAMES: usize = 10_000;
+
+/// A whole number `key` in 1..=`max` (`default` when absent).
+fn count(p: &Value, key: &str, max: usize, default: usize, cmd: &str) -> Result<usize> {
+    match p.get(key) {
+        None => Ok(default),
+        Some(v) => v
+            .as_f64()
+            .filter(|x| x.fract() == 0.0 && (1.0..=max as f64).contains(x))
+            .map(|x| x as usize)
+            .ok_or_else(|| bad(cmd, format!("`{key}` must be a whole number from 1 to {max}"))),
+    }
+}
+
+/// A number or expression `key` in the constraint's unit (`None` when absent; null refused).
+fn drive_amount(s: &Session, p: &Value, key: &str, angle: bool, cmd: &str) -> Result<Option<f64>> {
+    match p.get(key) {
+        None => Ok(None),
+        Some(Value::Null) => Err(bad(cmd, format!("`{key}` must be a number or an expression"))),
+        Some(v) => amount(s, v, angle, key, cmd).map(|(x, _)| Some(x)),
+    }
+}
+
+/// The values one drive steps through, from its parameters (spec §5): one pass from start to
+/// end by `increment` (the last step short when it doesn't divide) or in `steps`, back again
+/// for start_end_start, `repeat` times.
+fn drive_values(s: &Session, c: &Constraint, p: &Value, cmd: &str) -> Result<Vec<f64>> {
+    let angle = c.kind.is_angle();
+    let start = drive_amount(s, p, "start", angle, cmd)?.unwrap_or_else(|| offset_now(s, c));
+    let end = drive_amount(s, p, "end", angle, cmd)?.unwrap_or(start + 10.0);
+    let increment = drive_amount(s, p, "increment", angle, cmd)?;
+    if increment.is_some() && p.get("steps").is_some() {
+        return Err(bad(cmd, "give `increment` or `steps`, not both"));
+    }
+    let steps = count(p, "steps", MAX_FRAMES, 0, cmd)?;
+    let repeat = count(p, "repeat", 1000, 1, cmd)?;
+    let back = match p.get("cycle") {
+        None => false,
+        Some(Value::String(c)) if c == "start_end" => false,
+        Some(Value::String(c)) if c == "start_end_start" => true,
+        Some(_) => return Err(bad(cmd, "`cycle` must be start_end or start_end_start")),
+    };
+    let too_many = || bad(cmd, "at most 10,000 frames");
+    let span = end - start;
+    let mut pass: Vec<f64> = if steps > 0 {
+        (0..=steps).map(|i| start + span * i as f64 / steps as f64).collect()
+    } else {
+        let inc = increment.unwrap_or(1.0);
+        if inc <= 0.0 {
+            return Err(bad(cmd, "`increment` must be above 0"));
+        }
+        let n = span.abs() / inc;
+        if !(n < MAX_FRAMES as f64) {
+            return Err(too_many());
+        }
+        // Whole steps (a rounding hair short of one counts), then the end when they miss it.
+        let whole = (n * (1.0 + 1e-12)).floor() as usize;
+        let mut v: Vec<f64> = (0..=whole).map(|i| start + span.signum() * inc * i as f64).collect();
+        if v.last().is_some_and(|l| (l - end).abs() > 1e-9 * end.abs().max(1.0)) {
+            v.push(end);
+        }
+        v
+    };
+    if back {
+        let rev: Vec<f64> = pass.iter().rev().skip(1).copied().collect();
+        pass.extend(rev);
+    }
+    if pass.len().saturating_mul(repeat) > MAX_FRAMES {
+        return Err(too_many());
+    }
+    Ok(pass.iter().copied().cycle().take(pass.len() * repeat).collect())
+}
+
+/// Drive a constraint's offset through values (spec §5, §6.6): each frame sets it on the
+/// session's design and places the assembly (no DOF count); the frames say where the moved
+/// occurrences go. It stops past a limit (a last frame at the bound), where a loop the drive
+/// opens no longer closes, and, with `stop_on_contact`, at the last value free of contact
+/// (bisected to 1e-4 of the unit). The design, its revision and the constraint report are
+/// restored before it answers (owner Q17): no undo step.
+fn drive(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "constraint.drive";
+    let id = match p.get("constraint") {
+        Some(v) => constraint_id(s, v, cmd)?,
+        None => return Err(bad(cmd, "`constraint` must be an id or a name")),
+    };
+    let c = s.doc.assembly.constraints.iter().find(|c| c.id == id).cloned().ok_or_else(|| bad(cmd, "no such constraint"))?;
+    if c.suppressed {
+        return Err(bad(cmd, format!("{} is suppressed: unsuppress it to drive it", c.name)));
+    }
+    let values = drive_values(s, &c, p, cmd)?;
+    let contact = flag(p, "stop_on_contact", cmd)?.unwrap_or(false);
+    let (min, max) = limits_now(s, &c);
+    let saved = (s.doc.clone(), s.revision, s.constraint_report.clone(), s.dof_stale);
+    let before = worlds(s);
+    // What is already open or touching at the start does not stop the drive.
+    let open_at_start: BTreeSet<u64> = super::joints::solution(s, &joints::Held::new(), Analysis::Placement).conflicts.iter().map(|c| c.0).collect();
+    let touching_at_start: Vec<(String, String)> =
+        if contact { super::motion::collisions(s).into_iter().map(|(a, b, _)| (a, b)).collect() } else { Vec::new() };
+    // A limited Mate's or Insert's offset is its bounded value's start (Task 7): each frame
+    // starts it again.
+    let restart = matches!(c.kind, ConstraintKind::Mate | ConstraintKind::Insert) && !c.limits.is_empty();
+    // The design `from` (the last placed frame's) with the offset at `v`, placed.
+    let set = |s: &mut Session, from: &Arc<Document>, v: f64| {
+        s.doc = from.clone();
+        if let Some(x) = s.doc_mut().assembly.constraints.iter_mut().find(|x| x.id == id) {
+            x.offset = v;
+            x.exprs.offset = None;
+            if restart {
+                x.state.clear();
+                x.signatures.clear();
+            }
+        }
+        super::joints::place(s)
+    };
+    let frame = |s: &Session, v: f64| {
+        let world: serde_json::Map<String, Value> =
+            worlds(s).into_iter().filter(|(o, m)| before.get(o) != Some(m)).map(|(o, m)| (o.to_string(), json!(m))).collect();
+        json!({"value": v, "world": world})
+    };
+    let hit = |s: &Session| -> Option<(String, String)> {
+        super::motion::collisions(s).into_iter().map(|(a, b, _)| (a, b)).find(|pair| !touching_at_start.contains(pair))
+    };
+    let mut frames: Vec<Value> = Vec::new();
+    // The last frame's value and design.
+    let mut last: Option<(f64, Arc<Document>)> = None;
+    let mut out = json!({});
+    for v in values {
+        let from = last.as_ref().map_or_else(|| saved.0.clone(), |(_, d)| d.clone());
+        let past = match (min, max) {
+            (Some(lo), _) if v < lo => Some((lo, "min")),
+            (_, Some(hi)) if v > hi => Some((hi, "max")),
+            _ => None,
+        };
+        if let Some((bound, which)) = past {
+            if last.as_ref().is_none_or(|(l, _)| *l != bound) {
+                set(s, &from, bound);
+                frames.push(frame(s, bound));
+            }
+            out["stopped_by_limit"] = json!({"value": bound, "limit": which});
+            break;
+        }
+        let sol = set(s, &from, v);
+        if let Some(opened) = sol.conflicts.iter().find(|x| !open_at_start.contains(&x.0)) {
+            out["stopped_by_loop"] = json!({"value": last.as_ref().map(|(l, _)| *l), "constraint": opened.1});
+            break;
+        }
+        if contact && let Some(mut pair) = hit(s) {
+            // Bisect between the last free value and this one, to 1e-4 of the unit.
+            let mut lo = last.as_ref().map(|(l, _)| *l);
+            if let Some((mut at, mut at_doc)) = last.clone() {
+                let mut hi = v;
+                while (hi - at).abs() > 1e-4 {
+                    let mid = (at + hi) / 2.0;
+                    set(s, &at_doc, mid);
+                    match hit(s) {
+                        Some(p) => (hi, pair) = (mid, p),
+                        None => (at, at_doc) = (mid, s.doc.clone()),
+                    }
+                }
+                s.doc = at_doc;
+                if last.as_ref().is_some_and(|(l, _)| *l != at) {
+                    frames.push(frame(s, at));
+                }
+                lo = Some(at);
+            }
+            out["stopped_by_contact"] = json!({"value": lo, "pair": [pair.0, pair.1]});
+            break;
+        }
+        frames.push(frame(s, v));
+        last = Some((v, s.doc.clone()));
+    }
+    (s.doc, s.revision, s.constraint_report, s.dof_stale) = saved;
+    out["frames"] = json!(frames);
+    Ok(out)
+}
+
 /// A constraint as `constraint.list` gives it, with its status after `sol`'s solve.
 fn row(s: &Session, c: &Constraint, status: Option<&ConstraintStatus>) -> Value {
     let mut limits = serde_json::Map::new();
@@ -797,3 +978,7 @@ mod constraints_angle_tests;
 #[cfg(test)]
 #[path = "constraints_limits_tests.rs"]
 mod constraints_limits_tests;
+
+#[cfg(test)]
+#[path = "constraints_drive_tests.rs"]
+mod constraints_drive_tests;

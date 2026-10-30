@@ -721,6 +721,7 @@
   "cmd.config_table": "Display Configuration Table",
   "cmd.constraint_create": "Constrain",
   "cmd.constraint_delete": "Delete Constraint",
+  "cmd.constraint_drive": "Drive Constraint",
   "cmd.constraint_edit": "Edit Constraint",
   "cmd.constraint_hide_all": "Hide All Constraints",
   "cmd.constraint_inspect": "Inspect Constraint",

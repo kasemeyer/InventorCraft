@@ -721,6 +721,7 @@
   "cmd.config_table": "構成テーブルを表示",
   "cmd.constraint_create": "拘束",
   "cmd.constraint_delete": "拘束を削除",
+  "cmd.constraint_drive": "拘束を駆動",
   "cmd.constraint_edit": "拘束を編集",
   "cmd.constraint_hide_all": "すべての拘束を非表示",
   "cmd.constraint_inspect": "拘束を調査",
