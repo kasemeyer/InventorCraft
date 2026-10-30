@@ -1,10 +1,19 @@
 //! Assembly constraints for the UI (Plan E-1): what `constraint.create` measures when asked to
 //! predict (spec §3.4 Predict Offset and Orientation), a pick written back as the command takes
-//! it, and how far a constraint is from met. The commands are `cmd::constraints`.
+//! it, and how far a constraint is from met; each constraint's status after a solve (the
+//! session's report), the over-constraint check, the dry-run preview of a draft and which picks a
+//! type takes. The commands are `cmd::constraints`.
+
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
 use serde_json::{Value, json};
-use solidcraft_doc::constraints::{ConstraintKind, ConstraintSolution, EdgeEnd, Geo, GeoRef, Prim, resolve_world};
+use solidcraft_doc::Mat;
+use solidcraft_doc::constraints::{
+    Compiled, Constraint, ConstraintKind, ConstraintSolution, ConstraintStatus, EdgeEnd, Geo, GeoRef, Prim, PrimKind, resolve, resolve_world,
+    statuses,
+};
+use solidcraft_doc::joints::{self, Analysis, Solution};
 use solidcraft_geom::Vec3;
 
 use crate::{EngineError, Result, Session};
@@ -187,5 +196,419 @@ pub(crate) fn prim_json(p: &Prim) -> Value {
         Prim::Circle { c, axis, r } => json!({"kind": "circle", "c": xyz(c), "axis": xyz(axis), "r": r}),
         Prim::Cylinder { p, d, r } => json!({"kind": "cylinder", "p": xyz(p), "d": xyz(d), "r": r}),
         Prim::Sphere { c, r } => json!({"kind": "sphere", "c": xyz(c), "r": r}),
+    }
+}
+
+// Task 5: status, the session's report, the dry-run preview, pick classification.
+
+/// One constraint as the browser and the glyphs show it (spec §6.4, §6.8).
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Row {
+    pub id: u64,
+    pub name: String,
+    pub kind: ConstraintKind,
+    pub solution: ConstraintSolution,
+    /// Its picks' occurrences, in pick order.
+    pub occurrences: Vec<u64>,
+    /// mm, or degrees for an Angle (its expression's value when it has one).
+    pub offset: f64,
+    /// It has a minimum or a maximum.
+    pub limited: bool,
+    pub status: ConstraintStatus,
+    /// The two picks' points in the world, for glyphs and highlights (`None` when one no longer
+    /// resolves).
+    pub anchors: Option<[Vec3; 2]>,
+}
+
+/// Every constraint's row after the last solve, the occurrences' degrees of freedom from the
+/// last solve that counted them, and whether any is sick or lost. Session state: not saved, not
+/// undone; rebuilt by every solve the session applies, after undo and redo, and after
+/// `edit.restore_checkpoint`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct Report {
+    pub rows: Vec<Row>,
+    /// Every occurrence of the assembly, constrained or not (R141), in the design's order.
+    pub occurrences: Vec<OccurrenceRow>,
+    /// From the last solve that counted them; empty after an undo, redo or restored checkpoint
+    /// that changed the assembly, until the next one.
+    pub dof: BTreeMap<u64, usize>,
+    /// Some row is `Sick` or `Lost`.
+    pub any_sick: bool,
+}
+
+/// What holds an occurrence (R141): nothing (`Empty`), constraints and joints that are all met
+/// (`Ok`), or at least one constraint on it that is sick or lost (`Sick`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OccurrenceStatus {
+    Empty,
+    Ok,
+    Sick,
+}
+
+/// One occurrence as the browser shows its status (R141).
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct OccurrenceRow {
+    pub id: u64,
+    pub name: String,
+    pub grounded: bool,
+    /// Its remaining degrees of freedom: 0 grounded, 6 free and held by nothing; `None` for a
+    /// held one until a solve counts them (see [`Report::dof`]).
+    pub missing: Option<usize>,
+    pub status: OccurrenceStatus,
+}
+
+/// Every occurrence's row from the constraint rows and the DOF counts the report holds.
+fn occurrence_rows(s: &Session, rows: &[Row], dof: &BTreeMap<u64, usize>) -> Vec<OccurrenceRow> {
+    let asm = &s.doc.assembly;
+    let mut held: BTreeSet<u64> = asm.joints.iter().filter(|j| !j.suppressed).flat_map(|j| [j.a.occurrence, j.b.occurrence]).collect();
+    let mut sick = BTreeSet::new();
+    for r in rows {
+        if r.status == ConstraintStatus::Suppressed {
+            continue;
+        }
+        held.extend(r.occurrences.iter().copied());
+        if matches!(r.status, ConstraintStatus::Sick { .. } | ConstraintStatus::Lost { .. }) {
+            sick.extend(r.occurrences.iter().copied());
+        }
+    }
+    s.doc
+        .occurrences
+        .iter()
+        .map(|o| {
+            let (status, missing) = if sick.contains(&o.id) {
+                (OccurrenceStatus::Sick, dof.get(&o.id).copied())
+            } else if held.contains(&o.id) {
+                (OccurrenceStatus::Ok, if o.grounded { Some(0) } else { dof.get(&o.id).copied() })
+            } else {
+                (OccurrenceStatus::Empty, Some(if o.grounded { 0 } else { 6 }))
+            };
+            OccurrenceRow { id: o.id, name: o.name.clone(), grounded: o.grounded, missing, status }
+        })
+        .collect()
+}
+
+/// The report of a design nothing solves: no constraint rows, every occurrence (R141). Run by
+/// the session's refresh when the assembly has no joints or constraints.
+pub(crate) fn rebuild_idle(s: &mut Session) {
+    let occurrences = occurrence_rows(s, &[], &BTreeMap::new());
+    s.constraint_report = Report { occurrences, ..Report::default() };
+    prune_shown(s);
+}
+
+/// The session's constraint report.
+pub fn report(s: &Session) -> &Report {
+    &s.constraint_report
+}
+
+/// Re-solve (placement only) and rebuild the report.
+pub fn refresh(s: &mut Session) {
+    crate::cmd::joints::place(s);
+}
+
+/// A pick's point: a plane's or line's base point, a circle's or sphere's centre.
+fn anchor(p: &Prim) -> Vec3 {
+    match *p {
+        Prim::Plane { p, .. } | Prim::Line { p, .. } | Prim::Point { p } | Prim::Cylinder { p, .. } => p,
+        Prim::Circle { c, .. } | Prim::Sphere { c, .. } => c,
+    }
+}
+
+/// The offset in its unit: its expression's value when it has one that works out.
+pub(crate) fn offset_now(s: &Session, c: &Constraint) -> f64 {
+    let angle = c.kind.is_angle();
+    let kind = if angle { solidcraft_doc::expr::Kind::Angle } else { solidcraft_doc::expr::Kind::Length };
+    match c.exprs.offset.as_deref().map(|e| s.doc.eval(e, kind)) {
+        Some(Ok(v)) if v.is_finite() => {
+            if angle {
+                v.to_degrees()
+            } else {
+                v
+            }
+        }
+        _ => c.offset,
+    }
+}
+
+/// Each constraint's status after `sol`, a solve of the session's design (its own constraints
+/// compiled there: a lost one is a solve error).
+pub(crate) fn status_map(s: &Session, sol: &Solution) -> BTreeMap<u64, ConstraintStatus> {
+    statuses(&s.doc.assembly, &Compiled::default(), sol)
+}
+
+/// Rebuild the report from `sol`, the solve just applied (its DOF only when it counted them).
+pub(crate) fn rebuild(s: &mut Session, sol: &Solution, analysis: Analysis) {
+    let map = status_map(s, sol);
+    let st = s.model.state();
+    let rows: Vec<Row> = s
+        .doc
+        .assembly
+        .constraints
+        .iter()
+        .map(|c| {
+            let point = |i: usize| c.picks.get(i).and_then(|g| resolve_world(&s.doc, &st, g).ok()).map(|p| anchor(&p));
+            Row {
+                id: c.id,
+                name: c.name.clone(),
+                kind: c.kind,
+                solution: c.solution,
+                occurrences: c.picks.iter().map(|g| g.occurrence).collect(),
+                offset: offset_now(s, c),
+                limited: c.limits.min.is_some() || c.limits.max.is_some(),
+                status: map.get(&c.id).cloned().unwrap_or(ConstraintStatus::Ok),
+                anchors: point(0).zip(point(1)).map(|(a, b)| [a, b]),
+            }
+        })
+        .collect();
+    let dof = if analysis == Analysis::DegreesOfFreedom { sol.dof.clone() } else { std::mem::take(&mut s.constraint_report.dof) };
+    let occurrences = occurrence_rows(s, &rows, &dof);
+    let any_sick = rows.iter().any(|r| matches!(r.status, ConstraintStatus::Sick { .. } | ConstraintStatus::Lost { .. }));
+    s.constraint_report = Report { rows, occurrences, dof, any_sick };
+    prune_shown(s);
+}
+
+/// Drop shown glyphs of constraints that no longer exist.
+fn prune_shown(s: &mut Session) {
+    let ids: BTreeSet<u64> = s.doc.assembly.constraints.iter().map(|c| c.id).collect();
+    s.shown_constraints.retain(|id| ids.contains(id));
+}
+
+/// After undo, redo or a restored checkpoint put the design back from `previous`: shown glyphs of
+/// constraints that are gone are dropped; when the assembly changed, the DOF counts go (the next
+/// counting solve gives them) and, with nothing left to solve, the rows too (no solve follows to
+/// rebuild them). Otherwise the session's refresh that follows rebuilds the rows.
+pub(crate) fn after_history(s: &mut Session, previous: &solidcraft_doc::Document) {
+    if previous.assembly != s.doc.assembly {
+        s.constraint_report.dof.clear();
+    }
+    if !s.doc.assembly.solves() {
+        rebuild_idle(s);
+    }
+    prune_shown(s);
+}
+
+/// The design with `constraints` in place of its own, placed by a solve with `analysis` (with a
+/// copy of the session's DOF memo when it counts): the solution and every status.
+fn dry_solve(s: &Session, constraints: Vec<Constraint>, analysis: Analysis) -> (Solution, BTreeMap<u64, ConstraintStatus>) {
+    let mut doc = (*s.doc).clone();
+    doc.assembly.constraints = constraints;
+    let st = s.model.state();
+    let held = joints::Held::new();
+    let memo = if analysis == Analysis::DegreesOfFreedom { s.dof_memo.lock().ok().map(|m| m.clone()) } else { None };
+    let sol = match memo {
+        Some(mut memo) => joints::solve_memo(&doc, &st, &held, analysis, &mut memo),
+        None => joints::solve_holding_with_analysis(&doc, &st, &held, analysis),
+    };
+    let map = statuses(&doc.assembly, &Compiled::default(), &sol);
+    (sol, map)
+}
+
+/// The constraints with `candidate` in place of constraint `replacing` (or added).
+fn with_candidate(s: &Session, candidate: &Constraint, replacing: Option<u64>) -> Vec<Constraint> {
+    let mut all = s.doc.assembly.constraints.clone();
+    match replacing.and_then(|id| all.iter_mut().find(|c| c.id == id)) {
+        Some(slot) => *slot = candidate.clone(),
+        None => all.push(candidate.clone()),
+    }
+    all
+}
+
+/// An id for a candidate that is not in the design yet (above every constraint's).
+fn candidate_id(s: &Session) -> u64 {
+    s.doc.assembly.constraints.iter().map(|c| c.id).max().unwrap_or(0).saturating_add(1)
+}
+
+/// The part an occurrence places, by its component's name (`B`, not the occurrence `B:1`; `the
+/// assembly` for 0).
+fn part_name(s: &Session, id: u64) -> String {
+    if id == 0 {
+        return "the assembly".into();
+    }
+    let Some(o) = s.doc.occurrences.iter().find(|o| o.id == id) else { return id.to_string() };
+    s.doc.components.iter().find(|c| c.id == o.component).map_or_else(|| o.name.clone(), |c| c.name.clone())
+}
+
+/// Would the design with `constraints` in place of its own over-constrain (spec §3.7, owner Q6,
+/// Q16)? Two placement solves, now and with them: every constraint `Sick` with them that was not
+/// before is newly sick. `Some("over-constrains <B>: <newly sick, comma-separated> off by
+/// <largest gap> mm")` (deg when only an angle is off), B being `blame`'s second pick's
+/// occurrence. Only loop-closing members can be sick (R110), so a new constraint that disagrees
+/// names itself; one between two fixed occurrences that is not met closes a loop, so it is
+/// refused the same way. Redundant constraints that agree are not sick, so they pass.
+pub(crate) fn over_constrains_all(s: &Session, constraints: Vec<Constraint>, blame: &Constraint) -> Option<String> {
+    let (_, before) = dry_solve(s, s.doc.assembly.constraints.clone(), Analysis::Placement);
+    let (_, after) = dry_solve(s, constraints.clone(), Analysis::Placement);
+    let (mut mm, mut deg) = (0.0_f64, 0.0_f64);
+    let mut names = Vec::new();
+    for c in &constraints {
+        let Some(ConstraintStatus::Sick { gap_mm, gap_deg, .. }) = after.get(&c.id) else { continue };
+        if matches!(before.get(&c.id), Some(ConstraintStatus::Sick { .. })) {
+            continue;
+        }
+        names.push(c.name.clone());
+        mm = mm.max(*gap_mm);
+        deg = deg.max(*gap_deg);
+    }
+    if names.is_empty() {
+        return None;
+    }
+    let b = blame.picks.get(1).map_or(0, |g| g.occurrence);
+    let gap = if mm > 1e-6 || deg <= 1e-6 { format!("{mm:.3} mm") } else { format!("{deg:.3} deg") };
+    Some(format!("over-constrains {}: {} off by {gap}", part_name(s, b), names.join(", ")))
+}
+
+/// [`over_constrains_all`] for one candidate: added (`replacing: None`) or in place of constraint
+/// `replacing` (an edit, an unsuppress). Used by create, edit and unsuppress.
+pub fn over_constrains(s: &Session, candidate: &Constraint, replacing: Option<u64>) -> Option<String> {
+    let mut c = candidate.clone();
+    if replacing.is_none() {
+        c.id = candidate_id(s);
+    }
+    over_constrains_all(s, with_candidate(s, &c, replacing), &c)
+}
+
+/// A constraint being made or edited in the Place Constraint panel (spec §6.3).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Draft {
+    pub kind: ConstraintKind,
+    /// `None`: the type's default (or the predicted one when `offset` is `None`).
+    pub solution: Option<ConstraintSolution>,
+    pub a: Option<GeoRef>,
+    pub b: Option<GeoRef>,
+    pub reference: Option<GeoRef>,
+    /// A number or an expression; `None` predicts it from where the parts are.
+    pub offset: Option<String>,
+    pub min: Option<String>,
+    pub max: Option<String>,
+    pub lock: bool,
+    pub suppressed: bool,
+    pub name: Option<String>,
+    /// The constraint being edited (`None`: a new one).
+    pub editing: Option<u64>,
+}
+
+/// By hand (R116): a Mate with its type's default solution and nothing picked.
+impl Default for Draft {
+    fn default() -> Draft {
+        Draft {
+            kind: ConstraintKind::Mate,
+            solution: None,
+            a: None,
+            b: None,
+            reference: None,
+            offset: None,
+            min: None,
+            max: None,
+            lock: false,
+            suppressed: false,
+            name: None,
+            editing: None,
+        }
+    }
+}
+
+impl Draft {
+    /// The parameters of the command that makes it: `constraint.create`, or `constraint.edit`
+    /// when `editing` (a pick left out then keeps the constraint's).
+    pub fn params(&self) -> Value {
+        let mut p = json!({"type": self.kind, "suppressed": self.suppressed});
+        for (key, g) in [("a", &self.a), ("b", &self.b), ("ref", &self.reference)] {
+            if let Some(g) = g {
+                p[key] = pick_json(g);
+            }
+        }
+        if let Some(sol) = self.solution {
+            p["solution"] = json!(sol);
+        }
+        match &self.offset {
+            Some(o) => p["offset"] = json!(o),
+            None => p["predict"] = json!(true),
+        }
+        for (key, v) in [("min", &self.min), ("max", &self.max)] {
+            if let Some(v) = v {
+                p[key] = json!(v);
+            }
+        }
+        if self.lock {
+            p["lock"] = json!(true);
+        }
+        if let Some(n) = &self.name {
+            p["name"] = json!(n);
+        }
+        if let Some(id) = self.editing {
+            p["constraint"] = json!(id);
+        }
+        p
+    }
+}
+
+/// What the design would be with a draft (spec §6.3 live preview): the placements and DOF of a
+/// dry solve, the draft's status, the predicted offset and solution when `offset` is `None`, and
+/// why it can't be made (`refused`; then `world` is empty).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Preview {
+    pub world: BTreeMap<u64, Mat>,
+    pub dof: BTreeMap<u64, usize>,
+    pub status: Option<ConstraintStatus>,
+    pub predicted: Option<Prediction>,
+    pub refused: Option<String>,
+}
+
+/// A dry solve of the design with draft `d`, through every check its command makes (the
+/// over-constraint one too). Never changes `s`.
+pub fn preview(s: &Session, d: &Draft) -> Preview {
+    let refused = |why: String| Preview { refused: Some(why), ..Preview::default() };
+    let base = match d.editing {
+        Some(id) => match s.doc.assembly.constraints.iter().find(|c| c.id == id) {
+            Some(c) => Some(c.clone()),
+            None => return refused(format!("no constraint {id}")),
+        },
+        None => None,
+    };
+    let cmd = if base.is_some() { "constraint.edit" } else { "constraint.create" };
+    let mut c = match crate::cmd::constraints::build(s, &d.params(), base.as_ref(), cmd) {
+        Ok(c) => c,
+        Err(EngineError::BadParams { msg, .. }) => return refused(msg),
+        Err(e) => return refused(e.to_string()),
+    };
+    if base.is_none() {
+        c.id = candidate_id(s);
+    }
+    let all = with_candidate(s, &c, d.editing);
+    if !c.suppressed
+        && let Some(why) = over_constrains_all(s, all.clone(), &c)
+    {
+        return refused(why);
+    }
+    let predicted = match (&d.offset, c.picks.first(), c.picks.get(1)) {
+        (None, Some(a), Some(b)) => predict(s, c.kind, a, b).ok(),
+        _ => None,
+    };
+    let (sol, map) = dry_solve(s, all, Analysis::DegreesOfFreedom);
+    Preview { world: sol.world, dof: sol.dof, status: map.get(&c.id).cloned(), predicted, refused: None }
+}
+
+/// What a pick is (`None` when it does not resolve).
+pub fn classify(s: &Session, g: &GeoRef) -> Option<PrimKind> {
+    resolve(&s.doc, &s.model.state(), g).ok().map(|p| p.kind())
+}
+
+/// May a constraint of `kind` take a `candidate` pick in `slot` (0, 1; 2 for an Angle's
+/// reference), `first` being slot 0's pick? Mate: any of the six; Angle: planes, lines and
+/// cylinders; Tangent: a plane, cylinder or sphere, then a curved one after a plane and a plane or
+/// cylinder after a curved one; Insert: circles only.
+pub fn accepts(kind: ConstraintKind, slot: usize, first: Option<PrimKind>, candidate: PrimKind) -> bool {
+    use PrimKind as K;
+    match (kind, slot) {
+        (ConstraintKind::Mate, 0 | 1) => true,
+        (ConstraintKind::Angle, 0..=2) => matches!(candidate, K::Plane | K::Line | K::Cylinder),
+        (ConstraintKind::Tangent, 0) => matches!(candidate, K::Plane | K::Cylinder | K::Sphere),
+        (ConstraintKind::Tangent, 1) => match first {
+            Some(K::Plane) => matches!(candidate, K::Cylinder | K::Sphere),
+            Some(K::Cylinder | K::Sphere) => matches!(candidate, K::Plane | K::Cylinder),
+            _ => matches!(candidate, K::Plane | K::Cylinder | K::Sphere),
+        },
+        (ConstraintKind::Insert, 0 | 1) => candidate == K::Circle,
+        _ => false,
     }
 }

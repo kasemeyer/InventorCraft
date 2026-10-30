@@ -50,7 +50,7 @@ pub use view_dxf::sketch::exportable as view_dxf_exportable;
 pub use view_navigation::standard_view;
 pub(crate) mod component_link;
 mod config;
-mod constraints;
+pub(crate) mod constraints;
 mod file;
 mod frame;
 mod inspect;

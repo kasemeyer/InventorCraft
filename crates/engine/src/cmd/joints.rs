@@ -209,6 +209,8 @@ fn resolve_with_analysis(s: &mut Session, held: &joints::Held, analysis: joints:
             s.revision += 1;
         }
     }
+    // Every constraint's status after this solve (Plan E-1 Task 5).
+    crate::constraints::rebuild(s, &sol, analysis);
     sol
 }
 

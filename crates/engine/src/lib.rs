@@ -297,6 +297,12 @@ pub struct Session {
     /// Loop degrees of freedom the last joint solve worked out, with what each read: a re-solve
     /// after an edit counts again only the occurrences whose loops the edit touched (R130).
     pub(crate) dof_memo: std::sync::Mutex<solidcraft_doc::joints::DofMemo>,
+    /// Every constraint's status after the last solve, with the DOF counts (Plan E-1 Task 5):
+    /// view state, not saved, not undone.
+    pub constraint_report: constraints::Report,
+    /// The constraints whose glyphs are shown (`constraint.show`, `show_sick`, `hide_all`): view
+    /// state, not saved, not undone; a constraint that no longer exists is dropped.
+    pub shown_constraints: std::collections::BTreeSet<u64>,
     occurrence_visibility_cache: std::sync::Mutex<Option<occurrences::VisibilityCache>>,
     removed_later_cache: std::sync::Mutex<Option<occurrences::RemovedLaterCache>>,
     occurrence_bodies_cache: std::sync::Mutex<Option<occurrences::OccurrenceBodiesCache>>,
@@ -484,6 +490,8 @@ impl Session {
             pending_moves: Default::default(),
             world_cache: Default::default(),
             dof_memo: Default::default(),
+            constraint_report: Default::default(),
+            shown_constraints: Default::default(),
             occurrence_visibility_cache: Default::default(),
             removed_later_cache: Default::default(),
             occurrence_bodies_cache: Default::default(),
@@ -739,6 +747,9 @@ impl Session {
         // Joints follow the geometry their origins snap to.
         if self.doc.assembly.solves() {
             cmd::joints::place(self);
+        } else {
+            // Nothing solves: every occurrence still has its status row (R141).
+            constraints::rebuild_idle(self);
         }
         cmd::motion::associative::refresh(self);
         if let Some(id) = self.active_sketch
@@ -1117,6 +1128,8 @@ impl Session {
         self.undo = c.undo;
         self.redo = c.redo;
         self.selection.clear();
+        // The constraint report and its shown glyphs follow (the refresh rebuilds the rows).
+        constraints::after_history(self, &before.doc);
         if self.render_only_change(&before) {
             self.refresh_render(&before.doc);
         } else if self.visibility_only_change(&before) {
@@ -1159,6 +1172,8 @@ impl Session {
             pending_moves: self.pending_moves.clone(),
             world_cache: std::sync::Mutex::new(self.world_cache.lock().ok().and_then(|cache| cache.clone())),
             dof_memo: std::sync::Mutex::new(self.dof_memo.lock().map(|m| m.clone()).unwrap_or_default()),
+            constraint_report: self.constraint_report.clone(),
+            shown_constraints: self.shown_constraints.clone(),
             occurrence_visibility_cache: Default::default(),
             removed_later_cache: Default::default(),
             occurrence_bodies_cache: Default::default(),

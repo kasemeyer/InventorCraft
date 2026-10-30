@@ -8,8 +8,8 @@ use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
 use solidcraft_doc::constraints::{
-    Constraint, ConstraintExprs, ConstraintKind, ConstraintLimits, ConstraintSolution, EdgeEnd, Geo, GeoRef, MAX_CONSTRAINTS, OriginItem, PickWhat,
-    Prim, check_name, compile, geo_at, next_name, owner_of, resolve, resolve_world,
+    Constraint, ConstraintExprs, ConstraintKind, ConstraintLimits, ConstraintSolution, ConstraintStatus, EdgeEnd, Geo, GeoRef, MAX_CONSTRAINTS,
+    OriginItem, PickWhat, Prim, check_name, compile, geo_at, next_name, owner_of, resolve, resolve_world,
 };
 use solidcraft_doc::joints::{self, Analysis, occurrence_world};
 use solidcraft_doc::{DocumentKind, Mat};
@@ -17,7 +17,7 @@ use solidcraft_geom::Vec3;
 
 use super::CommandSpec;
 use super::joints::{occurrence_id, typed, value};
-use crate::constraints::{gaps, is_axis, pick_json, predict_prims, prim_json, word};
+use crate::constraints::{gaps, is_axis, offset_now, over_constrains, over_constrains_all, pick_json, predict_prims, prim_json, status_map, word};
 use crate::params::{bad, vec3};
 use crate::{Result, Session};
 
@@ -40,8 +40,23 @@ pub static COMMANDS: &[CommandSpec] = &[
         "occurrence? (default all) → {constraints: [{id, name, type, solution, occurrences: [a, b, ref?], offset, unit, limits, expressions?, suppressed, status}], dof: {<occurrence>: n}}",
     ),
     CommandSpec::new("constraint.inspect", "Inspect Constraint", inspect).icon("inspect").noundo().params(
-        "constraint? → as list + per pick the resolved primitive in world (picks: [{…, resolved: {kind, p|c, n|d|axis, r?}}]), the compiled joints/equations (compiled: [{id, kind, flip, offset}]), gaps: {mm, deg}",
+        "constraint? → as list (status redundant when it is met and takes no freedom away) + per pick the resolved primitive in world (picks: [{…, resolved: {kind, p|c, n|d|axis, r?}}]), the compiled joints/equations (compiled: [{id, kind, flip, offset}]), gaps: {mm, deg} (how far the picks are from meeting it)",
     ),
+    CommandSpec::new("constraint.show", "Show Constraints", show)
+        .icon("show_relationships")
+        .noundo()
+        .enabled(has_constraints)
+        .params("occurrences: [ids|names] (the constraints picking any of them are added to the shown glyphs; an empty list clears) → {shown: [names]}"),
+    CommandSpec::new("constraint.show_sick", "Show Problems", show_sick)
+        .icon("show_sick")
+        .noundo()
+        .enabled(any_sick)
+        .params("→ {shown: [names]}: every sick or lost constraint, in place of the shown glyphs"),
+    CommandSpec::new("constraint.hide_all", "Hide All Constraints", hide_all)
+        .icon("hide_relationships")
+        .noundo()
+        .enabled(has_constraints)
+        .params("→ {shown: []}: no constraint glyph is shown"),
 ];
 
 const ASSEMBLY: &str = "needs an assembly with components";
@@ -54,6 +69,10 @@ fn has_components(s: &Session) -> std::result::Result<(), String> {
 fn has_constraints(s: &Session) -> std::result::Result<(), String> {
     has_components(s)?;
     if s.doc.assembly.constraints.is_empty() { Err("no constraints yet".into()) } else { Ok(()) }
+}
+
+fn any_sick(s: &Session) -> std::result::Result<(), String> {
+    if s.constraint_report.any_sick { Ok(()) } else { Err("nothing is sick".into()) }
 }
 
 fn occurrence_name(s: &Session, id: u64) -> String {
@@ -210,8 +229,9 @@ fn fits_picks(kind: ConstraintKind, solution: ConstraintSolution, a: &Prim, b: &
 type Typed = (Option<f64>, Option<String>);
 
 /// The constraint `create` (no `base`) or `edit` (`base`) makes from `p`: every check but the
-/// over-constraint one (Task 5) is here, so a refusal changes nothing.
-fn build(s: &Session, p: &Value, base: Option<&Constraint>, cmd: &str) -> Result<Constraint> {
+/// over-constraint one (`crate::constraints::over_constrains`, which needs the candidate) is
+/// here, so a refusal changes nothing.
+pub(crate) fn build(s: &Session, p: &Value, base: Option<&Constraint>, cmd: &str) -> Result<Constraint> {
     let kind = match (kind_param(p, cmd)?, base) {
         (Some(k), _) => k,
         (None, Some(b)) => b.kind,
@@ -332,16 +352,25 @@ fn dof_json(sol: &joints::Solution) -> Value {
     Value::Object(sol.dof.iter().map(|(o, n)| (o.to_string(), json!(n))).collect())
 }
 
-/// Until Task 5's report: suppressed, else ok.
-fn status(c: &Constraint) -> &'static str {
-    if c.suppressed { "suppressed" } else { "ok" }
+/// A status's fields (`{status: "sick", gap_mm, gap_deg, with}`) merged into `row`.
+fn put_status(row: &mut Value, status: Option<&ConstraintStatus>) {
+    match serde_json::to_value(status.unwrap_or(&ConstraintStatus::Ok)) {
+        Ok(Value::Object(m)) => {
+            for (k, v) in m {
+                row[k.as_str()] = v;
+            }
+        }
+        _ => row["status"] = json!("ok"),
+    }
 }
 
 /// The answer of create and edit.
 fn answer(s: &Session, id: u64, sol: &joints::Solution, before: &BTreeMap<u64, Mat>) -> Value {
     let moved: Vec<u64> = worlds(s).into_iter().filter(|(o, m)| before.get(o) != Some(m)).map(|(o, _)| o).collect();
     let c = s.doc.assembly.constraints.iter().find(|c| c.id == id);
-    json!({"id": id, "name": c.map(|c| c.name.clone()), "status": c.map_or("ok", status), "dof": dof_json(sol), "moved": moved})
+    let mut v = json!({"id": id, "name": c.map(|c| c.name.clone()), "dof": dof_json(sol), "moved": moved});
+    put_status(&mut v, status_map(s, sol).get(&id));
+    v
 }
 
 fn create(s: &mut Session, p: &Value) -> Result<Value> {
@@ -350,6 +379,11 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, format!("an assembly holds at most {MAX_CONSTRAINTS} constraints")));
     }
     let mut c = build(s, p, None, cmd)?;
+    if !c.suppressed
+        && let Some(why) = over_constrains(s, &c, None)
+    {
+        return Err(bad(cmd, why));
+    }
     let before = worlds(s);
     let doc = s.doc_mut();
     c.id = doc.allocate_id()?;
@@ -398,6 +432,11 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
         let sol = super::joints::solution(s, &joints::Held::new(), Analysis::DegreesOfFreedom);
         return Ok(answer(s, id, &sol, &before));
     }
+    if !c.suppressed
+        && let Some(why) = over_constrains(s, &c, Some(id))
+    {
+        return Err(bad(cmd, why));
+    }
     if let Some(slot) = s.doc_mut().assembly.constraints.iter_mut().find(|x| x.id == id) {
         *slot = c;
     }
@@ -409,16 +448,33 @@ fn suppress(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "constraint.suppress";
     let ids = constraint_ids(s, p, cmd)?;
     let to = flag(p, "suppressed", cmd)?;
-    if s.doc.assembly.constraints.iter().any(|c| ids.contains(&c.id) && to != Some(c.suppressed)) {
-        for c in s.doc_mut().assembly.constraints.iter_mut().filter(|c| ids.contains(&c.id)) {
+    let sol = if s.doc.assembly.constraints.iter().any(|c| ids.contains(&c.id) && to != Some(c.suppressed)) {
+        let mut next = s.doc.assembly.constraints.clone();
+        for c in next.iter_mut().filter(|c| ids.contains(&c.id)) {
             c.suppressed = to.unwrap_or(!c.suppressed);
         }
-        super::joints::resolve(s);
-    }
+        // Unsuppressing into a conflict is refused (owner Q16), as creating one is.
+        let woken: Vec<&Constraint> =
+            next.iter().filter(|c| !c.suppressed && s.doc.assembly.constraints.iter().any(|b| b.id == c.id && b.suppressed)).collect();
+        if let Some(first) = woken.first()
+            && let Some(why) = over_constrains_all(s, next.clone(), first)
+        {
+            return Err(bad(cmd, why));
+        }
+        s.doc_mut().assembly.constraints = next;
+        super::joints::resolve(s)
+    } else {
+        super::joints::solution(s, &joints::Held::new(), Analysis::Placement)
+    };
+    let map = status_map(s, &sol);
     let rows: Vec<Value> = ids
         .iter()
         .filter_map(|id| s.doc.assembly.constraints.iter().find(|c| c.id == *id))
-        .map(|c| json!({"name": c.name, "suppressed": c.suppressed, "status": status(c)}))
+        .map(|c| {
+            let mut v = json!({"name": c.name, "suppressed": c.suppressed});
+            put_status(&mut v, map.get(&c.id));
+            v
+        })
         .collect();
     Ok(json!({"constraints": rows}))
 }
@@ -431,24 +487,8 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"deleted": ids.len()}))
 }
 
-/// The offset in its unit: its expression's value when it has one that works out.
-fn offset_now(s: &Session, c: &Constraint) -> f64 {
-    let angle = c.kind.is_angle();
-    let kind = if angle { solidcraft_doc::expr::Kind::Angle } else { solidcraft_doc::expr::Kind::Length };
-    match c.exprs.offset.as_deref().map(|e| s.doc.eval(e, kind)) {
-        Some(Ok(v)) if v.is_finite() => {
-            if angle {
-                v.to_degrees()
-            } else {
-                v
-            }
-        }
-        _ => c.offset,
-    }
-}
-
-/// A constraint as `constraint.list` gives it.
-fn row(s: &Session, c: &Constraint) -> Value {
+/// A constraint as `constraint.list` gives it, with its status after `sol`'s solve.
+fn row(s: &Session, c: &Constraint, status: Option<&ConstraintStatus>) -> Value {
     let mut limits = serde_json::Map::new();
     for (k, v) in [("min", c.limits.min), ("max", c.limits.max)] {
         if let Some(v) = v {
@@ -457,7 +497,8 @@ fn row(s: &Session, c: &Constraint) -> Value {
     }
     let mut v = json!({"id": c.id, "name": c.name, "type": c.kind, "solution": c.solution,
         "occurrences": c.picks.iter().map(|g| g.occurrence).collect::<Vec<_>>(), "offset": offset_now(s, c),
-        "unit": if c.kind.is_angle() { "deg" } else { "mm" }, "limits": limits, "suppressed": c.suppressed, "status": status(c)});
+        "unit": if c.kind.is_angle() { "deg" } else { "mm" }, "limits": limits, "suppressed": c.suppressed});
+    put_status(&mut v, status);
     if !c.exprs.is_empty() {
         v["expressions"] = json!(c.exprs);
     }
@@ -472,8 +513,15 @@ fn list(s: &mut Session, p: &Value) -> Result<Value> {
         v => Some(occurrence_id(s, v, cmd)?),
     };
     let sol = super::joints::solution(s, &joints::Held::new(), Analysis::DegreesOfFreedom);
-    let rows: Vec<Value> =
-        s.doc.assembly.constraints.iter().filter(|c| only.is_none_or(|o| c.picks.iter().any(|g| g.occurrence == o))).map(|c| row(s, c)).collect();
+    let map = status_map(s, &sol);
+    let rows: Vec<Value> = s
+        .doc
+        .assembly
+        .constraints
+        .iter()
+        .filter(|c| only.is_none_or(|o| c.picks.iter().any(|g| g.occurrence == o)))
+        .map(|c| row(s, c, map.get(&c.id)))
+        .collect();
     Ok(json!({"constraints": rows, "dof": dof_json(&sol)}))
 }
 
@@ -487,11 +535,18 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
     let st = s.model.state();
     let compiled = compile(&s.doc, &st, &s.doc.assembly);
     let sol = super::joints::solution(s, &joints::Held::new(), Analysis::DegreesOfFreedom);
+    let map = status_map(s, &sol);
+    let total: usize = sol.dof.values().sum();
     let out: Vec<Value> = ids
         .iter()
         .filter_map(|id| s.doc.assembly.constraints.iter().find(|c| c.id == *id))
         .map(|c| {
-            let mut v = row(s, c);
+            // Redundant: met, and the design without it keeps the same freedom (spec §3.7).
+            let status = match map.get(&c.id) {
+                Some(ConstraintStatus::Ok) if redundant(s, &st, c.id, total) => Some(ConstraintStatus::Redundant),
+                other => other.cloned(),
+            };
+            let mut v = row(s, c, status.as_ref());
             let world: Vec<std::result::Result<Prim, String>> =
                 c.picks.iter().map(|g| resolve_world(&s.doc, &st, g).map_err(|e| e.to_string())).collect();
             v["picks"] = c
@@ -528,6 +583,59 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"constraints": out, "dof": dof_json(&sol)}))
 }
 
+/// Is constraint `id` redundant: does the design without it keep `total` degrees of freedom (the
+/// sum over the occurrences, with it)?
+fn redundant(s: &Session, st: &solidcraft_doc::ModelState, id: u64, total: usize) -> bool {
+    let mut doc = (*s.doc).clone();
+    doc.assembly.constraints.retain(|c| c.id != id);
+    let without = joints::solve_holding_with_analysis(&doc, st, &joints::Held::new(), Analysis::DegreesOfFreedom);
+    without.dof.values().sum::<usize>() == total
+}
+
+/// The constraints whose glyphs are shown, by name, in the design's order.
+fn shown(s: &Session) -> Value {
+    let names: Vec<&str> = s.doc.assembly.constraints.iter().filter(|c| s.shown_constraints.contains(&c.id)).map(|c| c.name.as_str()).collect();
+    json!({"shown": names})
+}
+
+/// Most occurrences `constraint.show` takes in one list.
+const MAX_SHOW: usize = 100_000;
+
+fn show(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "constraint.show";
+    let list = match p.get("occurrences") {
+        Some(Value::Array(list)) if list.len() <= MAX_SHOW => list,
+        Some(Value::Array(_)) => return Err(bad(cmd, format!("at most {MAX_SHOW} occurrences"))),
+        _ => return Err(bad(cmd, "`occurrences` must be a list of occurrence ids or names")),
+    };
+    let occurrences = list.iter().map(|v| occurrence_id(s, Some(v), cmd)).collect::<Result<std::collections::BTreeSet<u64>>>()?;
+    if occurrences.is_empty() {
+        s.shown_constraints.clear();
+    } else {
+        let add: Vec<u64> =
+            s.doc.assembly.constraints.iter().filter(|c| c.picks.iter().any(|g| occurrences.contains(&g.occurrence))).map(|c| c.id).collect();
+        s.shown_constraints.extend(add);
+    }
+    Ok(shown(s))
+}
+
+fn show_sick(s: &mut Session, _p: &Value) -> Result<Value> {
+    let sick = s
+        .constraint_report
+        .rows
+        .iter()
+        .filter(|r| matches!(r.status, ConstraintStatus::Sick { .. } | ConstraintStatus::Lost { .. }))
+        .map(|r| r.id)
+        .collect();
+    s.shown_constraints = sick;
+    Ok(shown(s))
+}
+
+fn hide_all(s: &mut Session, _p: &Value) -> Result<Value> {
+    s.shown_constraints.clear();
+    Ok(shown(s))
+}
+
 #[cfg(test)]
 #[path = "constraints_geo_tests.rs"]
 mod constraints_geo_tests;
@@ -547,3 +655,7 @@ mod constraints_copy_tests;
 #[cfg(test)]
 #[path = "constraints_hostile_tests.rs"]
 mod constraints_hostile_tests;
+
+#[cfg(test)]
+#[path = "constraints_status_tests.rs"]
+mod constraints_status_tests;

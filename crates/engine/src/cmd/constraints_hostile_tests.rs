@@ -187,3 +187,30 @@ fn hostile_constraint_params_are_refused() {
     }
     refused(&mut s, create, mate(), "at most 10000 constraints");
 }
+
+#[test]
+fn hostile_show_params_are_refused() {
+    let mut s = blocks();
+    // Nothing to show yet: each is disabled with its reason.
+    for (id, why) in
+        [("constraint.show", "no constraints yet"), ("constraint.hide_all", "no constraints yet"), ("constraint.show_sick", "nothing is sick")]
+    {
+        let e = s.execute(id, &json!({})).unwrap_err().to_string();
+        assert!(e.contains(why), "{id}: {e}");
+    }
+    run(&mut s, "constraint.create", mate());
+    let show = "constraint.show";
+    refused(&mut s, show, json!({"occurrences": null}), "`occurrences` must be a list of occurrence ids or names");
+    refused(&mut s, show, json!({"occurrences": 7}), "`occurrences` must be a list of occurrence ids or names");
+    refused(&mut s, show, json!({"occurrences": [true]}), "an occurrence must be an id or a name");
+    refused(&mut s, show, json!({"occurrences": [1e300]}), "no occurrence `1e+300`");
+    refused(&mut s, show, json!({"occurrences": [-1]}), "no occurrence `-1`");
+    refused(&mut s, show, json!({"occurrences": ["B", "Nobody"]}), "no occurrence `Nobody`");
+    assert!(s.shown_constraints.is_empty(), "a refusal shows nothing");
+    // Extra or odd params are ignored by the two that take none.
+    let steps = s.undo.len();
+    assert_eq!(run(&mut s, "constraint.hide_all", json!({"x": [1, 2], "occurrences": "B"}))["shown"], json!([]));
+    assert!(s.execute("constraint.show_sick", &json!({"x": f64::NAN})).is_err(), "nothing is sick");
+    assert_eq!(s.undo.len(), steps);
+    let _ = occ(&s, "B");
+}
