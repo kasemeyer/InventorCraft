@@ -21,10 +21,12 @@ pub(crate) struct TongModule {
     pub lever: u64,
     /// Pins at A, B, C, D.
     pub pins: [u64; 4],
-    /// The Cylindrical pin-A → jaw joint id.
+    /// The Cylindrical pin-A → jaw joint id (compiled: the axis Mate's constraint id).
     pub crank: u64,
-    /// The jaw → carrier +Z Planar joint id.
+    /// The jaw → carrier +Z Planar joint id (compiled: the XY-plane Flush's constraint id).
     pub carrier_z: u64,
+    /// Every occurrence of the module (its 17 parts).
+    pub parts: Vec<u64>,
 }
 
 pub(crate) struct Tong {
@@ -33,7 +35,11 @@ pub(crate) struct Tong {
     pub modules: Vec<TongModule>,
     /// Degrees of freedom per occurrence, counted by hand.
     pub hand_dof: BTreeMap<u64, usize>,
+    /// Hand rows: joints, or (compiled) the constraint records made one per row.
     pub joints: usize,
+    /// The records build's `constraint.create` parameters, one per hand row in order (empty for
+    /// the joints build).
+    pub records: Vec<serde_json::Value>,
 }
 
 /// `translate(p) · rotZ(theta)`: a component modelled about its own origin, placed.
@@ -66,6 +72,8 @@ struct Builder {
     /// Occurrence → its transform (world: every component is a child of the root).
     place: BTreeMap<u64, Mat>,
     joints: Vec<Joint>,
+    /// Each joint's world point and z, as it was made (the record build picks from them).
+    rows: Vec<(Vec3, Vec3)>,
 }
 
 impl Builder {
@@ -119,7 +127,67 @@ impl Builder {
             exprs: JointExprs::default(),
         };
         self.joints.push(j);
+        self.rows.push((p, z));
         id
+    }
+}
+
+/// What a tong part offers a constraint's picks (R111): its holes, a pin's rod, or neither.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Shape {
+    /// The body (holes, bottom z −8) and the members (holes, bottom at the module's z).
+    Holed,
+    /// Pins and fasteners: a ⌀6 rod from 8 below the module's z.
+    Rod,
+    /// Carriers and dies: blocks.
+    Block,
+}
+
+/// The `constraint.create` parameters standing for one hand row (Task 9 step 2): Rigid → a
+/// locked Insert of the home part's hole rim and the rod's bottom rim (a die: Flush of the XZ
+/// origin planes); Cylindrical → a Mate of the rod's wall and the hole's (axes); Planar → a Flush of
+/// the origin planes square to its z (XY for +Z; YZ / XZ for a member's u / Z × u). Picks are world
+/// points on the built pose, 3 mm from the axis at 37° (off any seam); `predict` measures the
+/// offset and solution there, so nothing moves.
+fn record(b: &Builder, j: &Joint, (p, z): (Vec3, Vec3), shape: &BTreeMap<u64, Shape>, body: u64) -> serde_json::Value {
+    use serde_json::json;
+    let (a, o) = (j.a.occurrence, j.b.occurrence);
+    let rim = |z: f64| {
+        let q = p + Vec3::new(3.0 * 37f64.to_radians().cos(), 3.0 * 37f64.to_radians().sin(), 0.0);
+        json!([q.x, q.y, z])
+    };
+    // The origin plane square to `z` in `occ`'s own coordinates.
+    let plane = |occ: u64| {
+        let local = apply_vector(&mat_inverse(&b.place[&occ]).unwrap(), z);
+        let item = if local.z.abs() > 0.5 {
+            "xy"
+        } else if local.x.abs() > 0.5 {
+            "yz"
+        } else {
+            "xz"
+        };
+        json!({"occurrence": occ, "origin": item})
+    };
+    let flush = |pa: serde_json::Value, pb: serde_json::Value| json!({"type": "mate", "a": pa, "b": pb, "predict": true});
+    let bottom = |occ: u64| match shape[&occ] {
+        Shape::Holed if occ == body => -8.0,
+        Shape::Holed => p.z,
+        _ => p.z - 8.0,
+    };
+    match j.kind {
+        JointKind::Rigid if shape[&o] == Shape::Block => {
+            let xz = |occ: u64| json!({"occurrence": occ, "origin": "xz"});
+            flush(xz(a), xz(o))
+        }
+        JointKind::Rigid => {
+            json!({"type": "insert", "a": {"occurrence": a, "edge": rim(bottom(a))}, "b": {"occurrence": o, "edge": rim(bottom(o))}, "lock": true, "predict": true})
+        }
+        JointKind::Cylindrical => {
+            let wall = |occ: u64| json!({"occurrence": occ, "face": rim(if shape[&occ] == Shape::Holed { p.z + 4.0 } else { p.z + 2.0 })});
+            json!({"type": "mate", "a": wall(a), "b": wall(o), "predict": true})
+        }
+        JointKind::Planar => flush(plane(a), plane(o)),
+        k => panic!("the tong has no {k:?} rows"),
     }
 }
 
@@ -129,8 +197,13 @@ impl Builder {
 /// `meet(B, 50, D, 40)[0]` (crank 20, coupler 50, rocker 40, ground 45). Members jaw J (A–B), link
 /// L (B–C), lever V (C–D); a pin at each pivot; two fasteners per member; a die carrier at the
 /// midpoint of J and of V, each with a die 5 mm above it. 17 occurrences and 46 joints a module.
-pub(crate) fn tong(modules: usize) -> Tong {
-    let mut b = Builder { doc: Document::new("tong"), place: BTreeMap::new(), joints: Vec::new() };
+///
+/// `compiled`: the same mechanism as one constraint record per hand row (Task 9, R111), each made
+/// by `constraint.create` with `predict: true` on the built pose ([`record`]); `crank` and
+/// `carrier_z` are then the records' constraint ids.
+pub(crate) fn tong(modules: usize, compiled: bool) -> Tong {
+    let mut b = Builder { doc: Document::new("tong"), place: BTreeMap::new(), joints: Vec::new(), rows: Vec::new() };
+    let mut shape = BTreeMap::new();
     let height = 40.0 * modules as f64 + 8.0;
     // The body: holes at A and D through every module.
     let through = |x: f64| cylinder(Vec3::new(x, 0.0, -9.0), 6.0, height + 2.0, Operation::Cut);
@@ -139,11 +212,13 @@ pub(crate) fn tong(modules: usize) -> Tong {
         vec![boxed(Vec3::new(-30.0, -20.0, -8.0), 120.0, 60.0, height, Operation::NewBody), through(0.0), through(45.0)],
         solidcraft_doc::IDENTITY,
     );
+    shape.insert(body, Shape::Holed);
     let mut hand_dof = BTreeMap::from([(body, 0)]);
     let mut out = Vec::new();
     let z = Vec3::Z;
     for m in 0..modules {
         let z0 = 40.0 * m as f64;
+        let earlier: std::collections::BTreeSet<u64> = b.place.keys().copied().collect();
         let (pa, pd, pb) = (Vec3::new(0.0, 0.0, z0), Vec3::new(45.0, 0.0, z0), Vec3::new(0.0, 20.0, z0));
         let pc = meet(pb, 50.0, pd, 40.0)[0];
         // Members: (name, from, to).
@@ -161,6 +236,7 @@ pub(crate) fn tong(modules: usize) -> Tong {
                 hole(2.0 * len / 3.0),
             ];
             let occ = b.part(&format!("{name} {m}"), solid, placed_at(p, theta));
+            shape.insert(occ, Shape::Holed);
             members.push((occ, p, q, theta, d * (1.0 / len)));
         }
         let (jaw, link, lever) = (members[0].0, members[1].0, members[2].0);
@@ -173,6 +249,7 @@ pub(crate) fn tong(modules: usize) -> Tong {
             let pin =
                 b.part(&format!("Pin {tag} {m}"), vec![cylinder(Vec3::new(0.0, 0.0, -8.0), 6.0, 20.0, Operation::NewBody)], placed_at(p, theta));
             pins[k] = pin;
+            shape.insert(pin, Shape::Rod);
             b.joint(JointKind::Rigid, home, pin, p, z);
             let cyl = b.joint(JointKind::Cylindrical, pin, other, p, z);
             if k == 0 {
@@ -190,6 +267,7 @@ pub(crate) fn tong(modules: usize) -> Tong {
                     vec![cylinder(Vec3::new(0.0, 0.0, -8.0), 6.0, 12.0, Operation::NewBody)],
                     placed_at(at, theta),
                 );
+                shape.insert(f, Shape::Rod);
                 b.joint(JointKind::Rigid, occ, f, at, z);
                 b.joint(JointKind::Cylindrical, occ, f, at, z);
                 b.joint(JointKind::Planar, occ, f, at, z);
@@ -204,6 +282,7 @@ pub(crate) fn tong(modules: usize) -> Tong {
                 vec![boxed(Vec3::new(-8.0, -5.0, -3.0), 16.0, 10.0, 6.0, Operation::NewBody)],
                 placed_at(mid, theta),
             );
+            shape.insert(k, Shape::Block);
             let up = b.joint(JointKind::Planar, occ, k, mid, z);
             if mi == 0 {
                 carrier_z = up;
@@ -213,6 +292,7 @@ pub(crate) fn tong(modules: usize) -> Tong {
             let at = mid + Vec3::new(0.0, 0.0, 5.0);
             let e =
                 b.part(&format!("Die {m}.{mi}"), vec![boxed(Vec3::new(-6.0, -4.0, -2.0), 12.0, 8.0, 4.0, Operation::NewBody)], placed_at(at, theta));
+            shape.insert(e, Shape::Block);
             b.joint(JointKind::Rigid, k, e, at, z);
             b.joint(JointKind::Planar, k, e, at, z);
             b.joint(JointKind::Planar, k, e, at, u);
@@ -225,11 +305,44 @@ pub(crate) fn tong(modules: usize) -> Tong {
         for occ in b.place.keys().copied().filter(|o| *o != body && !hand_dof.contains_key(o)).collect::<Vec<_>>() {
             hand_dof.insert(occ, usize::from(!fixed.contains(&occ)));
         }
-        out.push(TongModule { jaw, link, lever, pins, crank, carrier_z });
+        let parts = b.place.keys().copied().filter(|o| !earlier.contains(o)).collect();
+        out.push(TongModule { jaw, link, lever, pins, crank, carrier_z, parts });
     }
     let joints = b.joints.len();
-    b.doc.assembly.joints = b.joints;
-    Tong { session: crate::Session::new(b.doc), body, modules: out, hand_dof, joints }
+    if !compiled {
+        b.doc.assembly.joints = std::mem::take(&mut b.joints);
+        return Tong { session: crate::Session::new(b.doc), body, modules: out, hand_dof, joints, records: Vec::new() };
+    }
+    let params: Vec<(u64, serde_json::Value)> = b.joints.iter().zip(&b.rows).map(|(j, r)| (j.id, record(&b, j, *r, &shape, body))).collect();
+    let mut session = crate::Session::new(b.doc);
+    // Each record as `constraint.create` makes it (its parameters read, picks resolved and
+    // offset and solution predicted by the command's own `build`, an id allocated), then one
+    // solve: 414 commands would each solve the growing design several times (the records are the
+    // same: `the_record_tong_is_what_the_hand_count_says` makes them by command too).
+    let mut made = BTreeMap::new();
+    for (joint, p) in &params {
+        let mut c = crate::cmd::constraints::build(&session, p, None, "constraint.create").unwrap_or_else(|e| panic!("{p}: {e}"));
+        let doc = session.doc_mut();
+        c.id = doc.allocate_id().unwrap();
+        made.insert(*joint, c.id);
+        doc.assembly.constraints.push(c);
+    }
+    let sol = crate::cmd::joints::resolve(&mut session);
+    assert!(sol.conflicts.is_empty() && sol.errors.is_empty(), "{:?} {:?}", sol.conflicts, sol.errors);
+    // Measured on the built pose: nothing moved (each part's origin and points 100 mm along its x
+    // and y within 1e-6 mm).
+    for (o, built) in &b.place {
+        let now = solidcraft_doc::joints::occurrence_world(&session.doc, *o);
+        for q in [Vec3::ZERO, Vec3::X * 100.0, Vec3::Y * 100.0] {
+            let d = apply_point(&now, q).dist(apply_point(built, q));
+            assert!(d <= 1e-6, "occurrence {o} moved {d} mm building the records");
+        }
+    }
+    for m in &mut out {
+        (m.crank, m.carrier_z) = (made[&m.crank], made[&m.carrier_z]);
+    }
+    let records = params.into_iter().map(|(_, p)| p).collect();
+    Tong { session, body, modules: out, hand_dof, joints, records }
 }
 
 // Task 2 (assembly constraints): the blocks fixture and its helpers.

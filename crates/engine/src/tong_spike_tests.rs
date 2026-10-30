@@ -26,7 +26,7 @@ fn dof_misses(sol: &joints::Solution, hand: &std::collections::BTreeMap<u64, usi
 
 #[test]
 fn the_tong_is_what_the_hand_count_says() {
-    let t = tong(9);
+    let t = tong(9, false);
     let doc = &t.session.doc;
     assert_eq!(doc.occurrences.len(), 154);
     assert_eq!(t.joints, 414);
@@ -47,6 +47,52 @@ fn the_tong_is_what_the_hand_count_says() {
     }
 }
 
+/// The records build (Task 9): one module as 46 constraint records, every one met, the hand
+/// count's DOF; and `constraint.create` with `predict` makes the same records on the built
+/// pose, moving nothing (the builder makes them with the command's own `build`, solving once).
+#[test]
+fn the_record_tong_is_what_the_hand_count_says() {
+    let t = tong(1, true);
+    let doc = &t.session.doc;
+    assert_eq!((doc.occurrences.len(), t.joints, t.records.len()), (18, 46, 46));
+    assert_eq!((doc.assembly.joints.len(), doc.assembly.constraints.len()), (0, 46));
+    let kinds = |k: &str| doc.assembly.constraints.iter().filter(|c| c.name.starts_with(k)).count();
+    // Rigid: 4 pins + 6 fasteners locked Inserts, 2 dies XZ Flush; Cylindrical: 10 axis Mates;
+    // Planar: 8 + 6 + 6 + 4 Flushes.
+    assert_eq!((kinds("Insert:"), kinds("Mate:")), (10, 36));
+    assert!(doc.assembly.constraints.iter().filter(|c| c.name.starts_with("Insert:")).all(|c| c.lock));
+    let sol = joints::solve(doc, &t.session.model.state());
+    assert_eq!(sol.conflicts, vec![]);
+    assert_eq!(sol.errors, vec![]);
+    assert_eq!(dof_misses(&sol, &t.hand_dof), vec![]);
+    let m = &t.modules[0];
+    assert_eq!(m.parts.len(), 17);
+    let dof = |o: u64| sol.dof.get(&o).copied();
+    assert_eq!([m.jaw, m.link, m.lever, m.pins[1], m.pins[2]].map(dof), [Some(1); 5]);
+    assert_eq!([m.pins[0], m.pins[3]].map(dof), [Some(0); 2]);
+
+    // By command, on the same parts (the joints build's, its joints taken out): the same records.
+    let mut parts = (*tong(1, false).session.doc).clone();
+    parts.assembly.joints.clear();
+    let mut s = Session::new(parts);
+    let before: Vec<_> = s.doc.occurrences.iter().map(|o| joints::occurrence_world(&s.doc, o.id)).collect();
+    for p in &t.records {
+        let r = run(&mut s, "constraint.create", p.clone());
+        assert_eq!(r["status"], "ok", "{p} -> {r}");
+    }
+    let key = |c: &solidcraft_doc::constraints::Constraint| (c.id, c.name.clone(), c.kind, c.solution, c.picks.clone(), c.offset, c.lock);
+    let by_command: Vec<_> = s.doc.assembly.constraints.iter().map(key).collect();
+    let built: Vec<_> = doc.assembly.constraints.iter().map(key).collect();
+    assert_eq!(by_command, built);
+    for (o, was) in s.doc.occurrences.iter().zip(&before) {
+        let now = joints::occurrence_world(&s.doc, o.id);
+        for q in [Vec3::ZERO, Vec3::X * 100.0, Vec3::Y * 100.0] {
+            let d = solidcraft_doc::apply_point(&now, q).dist(solidcraft_doc::apply_point(was, q));
+            assert!(d <= 1e-6, "{} moved {d} mm", o.name);
+        }
+    }
+}
+
 fn median(v: &mut [f64]) -> f64 {
     v.sort_by(f64::total_cmp);
     v[v.len() / 2]
@@ -62,25 +108,63 @@ fn ms(t: Instant) -> f64 {
     t.elapsed().as_secs_f64() * 1000.0
 }
 
-/// The §8.1 pass criteria, every row collected and printed before any is asserted (R109).
+/// The spike's build command (R127, R130; Task 9 records it): the solver crates optimised as a
+/// release build optimises them (the plain `ci` profile builds them at opt-level 1: rows 1-3 run
+/// about ten times slower), and the engine split into 256 codegen units so its test build fits
+/// the 10-minute window (`--release` gives the same optimisation but its test build takes longer).
+const SPIKE: &str = "cargo test -p solidcraft-engine --profile ci --config profile.ci.package.solidcraft-doc.opt-level=3 --config profile.ci.package.solidcraft-geom.opt-level=3 --config profile.ci.package.solidcraft-sketch.opt-level=3 --config profile.ci.package.solidcraft-engine.codegen-units=256 --lib -- tong_spike_tests::spike_meets_spec_8_1 --ignored --nocapture";
+
+/// The §8.1 pass criteria on both builds of the tong: the hand joints (Task 0) and the same
+/// mechanism as 414 constraint records (Task 9), every row of each collected and printed before
+/// any is asserted (R109).
 ///
 /// Timings are wall-clock: on a hybrid CPU (performance and efficiency cores) a test process in
 /// the background can be moved to the slow cores mid-run (every phase of a frame 3-5x slower at
 /// once), so the spike pins itself to the performance cores first ([`pin_to_performance_cores`]),
-/// as the app in the foreground runs. Run (R127) with the solver crates optimised as a release
-/// build optimises them (the plain `ci` profile builds them at opt-level 1: rows 1-3 run about ten
-/// times slower), from one line:
-/// `cargo test -p solidcraft-engine --profile ci --config profile.ci.package.solidcraft-doc.opt-level=3
-/// --config profile.ci.package.solidcraft-geom.opt-level=3 --config
-/// profile.ci.package.solidcraft-sketch.opt-level=3 --lib -- tong_spike --ignored --nocapture`.
-/// (`--release` gives the same optimisation but its test build takes over ten minutes.)
+/// as the app in the foreground runs. Run from one line: [`SPIKE`].
 #[test]
-#[ignore = "spike: cargo test -p solidcraft-engine --profile ci --config profile.ci.package.solidcraft-doc.opt-level=3 --config profile.ci.package.solidcraft-geom.opt-level=3 --config profile.ci.package.solidcraft-sketch.opt-level=3 --lib -- tong_spike --ignored --nocapture"]
+#[ignore = "spike: cargo test -p solidcraft-engine --profile ci --config profile.ci.package.solidcraft-doc.opt-level=3 --config profile.ci.package.solidcraft-geom.opt-level=3 --config profile.ci.package.solidcraft-sketch.opt-level=3 --config profile.ci.package.solidcraft-engine.codegen-units=256 --lib -- tong_spike_tests::spike_meets_spec_8_1 --ignored --nocapture"]
 fn spike_meets_spec_8_1() {
     println!("{}", pin_to_performance_cores());
+    println!("command: {SPIKE}");
+    let mut failed = Vec::new();
+    for compiled in [false, true] {
+        let build = if compiled { "RECORDS" } else { "JOINTS" };
+        for (row, got, bound, pass) in spike(compiled) {
+            println!("{build} ROW {row}: {got} | bound {bound} | {}", if pass { "PASS" } else { "FAIL" });
+            if !pass {
+                failed.push(format!("{build} {row}"));
+            }
+        }
+    }
+    assert!(failed.is_empty(), "failed rows: {failed:?}");
+}
+
+/// The held turn of a records build's crank: its axis Mate's Cylindrical, value 0 (the angle).
+fn crank_turn(crank: u64) -> (u64, usize) {
+    (solidcraft_doc::constraints::compiled_id(crank, 0), 0)
+}
+
+/// One placement frame with `held` (what a drag frame over the compiled chain does: place the
+/// design with the dragged value held, then the constraint statuses).
+fn place_held(s: &mut Session, held: &Held) -> joints::Solution {
+    let sol = crate::cmd::joints::solution(s, held, Analysis::Placement);
+    let mut next = (*s.doc).clone();
+    if next.apply_joint_solution(&sol) {
+        *s.doc_mut() = next;
+    }
+    crate::constraints::rebuild(s, &sol, Analysis::Placement);
+    sol
+}
+
+type Row = (String, String, String, bool);
+
+/// The seven rows on one build of tong(9).
+fn spike(compiled: bool) -> Vec<Row> {
     let built = Instant::now();
-    let t = tong(9);
-    println!("tong(9): {} occurrences, {} joints, built in {:.0} ms", t.session.doc.occurrences.len(), t.joints, ms(built));
+    let t = tong(9, compiled);
+    let what = if compiled { "constraint records" } else { "joints" };
+    println!("tong(9): {} occurrences, {} {what}, built in {:.0} ms", t.session.doc.occurrences.len(), t.joints, ms(built));
     let dir = std::env::temp_dir().join(format!("tcicad-con-{}-spike_meets_spec_8_1", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("tong.tciasm");
@@ -89,7 +173,10 @@ fn spike_meets_spec_8_1() {
     let mut s = Session::default();
     run(&mut s, "doc.open", json!({"path": path.to_string_lossy()}));
     let _ = std::fs::remove_dir_all(&dir);
-    let mut rows: Vec<(String, String, String, bool)> = Vec::new();
+    if compiled {
+        assert!(s.doc.assembly.joints.is_empty() && s.doc.assembly.constraints.len() == t.joints, "the records build saves records only");
+    }
+    let mut rows: Vec<Row> = Vec::new();
     let mut conflicts = 0usize;
 
     // 1. Full solve from file open (placement + DOF).
@@ -108,6 +195,9 @@ fn spike_meets_spec_8_1() {
     let at = Instant::now();
     let placed = joints::solve_holding_with_analysis(&s.doc, &st, &Held::new(), Analysis::Placement);
     println!("placement-only solve: {:.1} ms ({} conflicts)", ms(at), placed.conflicts.len());
+    if compiled {
+        compile_cost(&s);
+    }
 
     // 2. Re-solve after one offset edit (R131): COLD is the open's own DOF solve, which warms the
     // session's memo (recorded, not decisive); WARM are the edits after it, each <= 50 ms (R130).
@@ -117,16 +207,30 @@ fn spike_meets_spec_8_1() {
     crate::cmd::joints::warm_dof(&s);
     let cold = ms(at);
     let carrier_z = t.modules[0].carrier_z;
+    // The carrier's +Z offset: a joint's, or its Flush record's (measured when it was made).
+    let set_offset = |s: &mut Session, v: Option<f64>| -> f64 {
+        let doc = s.doc_mut();
+        let slot = if compiled {
+            &mut doc.assembly.constraints.iter_mut().find(|c| c.id == carrier_z).unwrap().offset
+        } else {
+            &mut doc.assembly.joints.iter_mut().find(|j| j.id == carrier_z).unwrap().offset
+        };
+        let was = *slot;
+        if let Some(v) = v {
+            *slot = v;
+        }
+        was
+    };
+    let home = set_offset(&mut s, None);
     let mut times = Vec::new();
     for k in 0..5 {
-        let offset = if k % 2 == 0 { 0.5 } else { 0.0 };
-        s.doc_mut().assembly.joints.iter_mut().find(|j| j.id == carrier_z).unwrap().offset = offset;
+        set_offset(&mut s, Some(if k % 2 == 0 { home + 0.5 } else { home }));
         let at = Instant::now();
         let r = crate::cmd::joints::resolve(&mut s);
         times.push(ms(at));
         conflicts += r.conflicts.len();
     }
-    s.doc_mut().assembly.joints.iter_mut().find(|j| j.id == carrier_z).unwrap().offset = 0.0;
+    set_offset(&mut s, Some(home));
     conflicts += crate::cmd::joints::resolve(&mut s).conflicts.len();
     let warm = times.iter().copied().fold(0.0, f64::max);
     let in_order = format!("{times:.1?}");
@@ -138,34 +242,66 @@ fn spike_meets_spec_8_1() {
         warm <= 50.0,
     ));
 
-    // 3. Drag frames: module 4's jaw tip B turned about A from 90° to 100° in 60 steps.
+    // 3. Drag frames: module 4's jaw tip B turned about A from 90° to 100° in 60 steps. The joints
+    // build drags with `joint.reach`; `joint.reach` over compiled chains is a follow-up (plan "Not
+    // in this plan"), so the records build places each frame with the crank's turn held, as a
+    // reach frame places with the values it found.
     let jaw = t.modules[4].jaw;
     let a = Vec3::new(0.0, 0.0, 160.0);
+    let tip_deg = |s: &Session| {
+        let tip = solidcraft_doc::apply_point(&joints::occurrence_world(&s.doc, jaw), Vec3::new(20.0, 0.0, 0.0)) - a;
+        tip.y.atan2(tip.x).to_degrees()
+    };
+    let turn = crank_turn(t.modules[4].crank);
+    if compiled {
+        let closing = sol.groups.iter().any(|g| g.members.contains(&turn.0));
+        println!("drag: the crank's compiled joint {} closes a loop: {closing}; its values {:?}", turn.0, sol.compiled.get(&turn.0));
+    }
+    let start = if compiled { s.doc.assembly.constraints.iter().find(|c| c.id == t.modules[4].crank).unwrap().state[0] } else { 0.0 };
     let mut frames = Vec::new();
     let mut last = json!(null);
     let mut reached = 0usize;
+    let mut sense = 0.0f64;
     for k in 1..=60 {
-        let tip = solidcraft_doc::apply_point(&joints::occurrence_world(&s.doc, jaw), Vec3::new(20.0, 0.0, 0.0));
-        let deg = (90.0 + 10.0 * k as f64 / 60.0).to_radians();
-        let to = a + Vec3::new(20.0 * deg.cos(), 20.0 * deg.sin(), 0.0);
-        let p = json!({"occurrence": jaw, "at": [tip.x, tip.y, tip.z], "point": [to.x, to.y, to.z], "continuous": true, "quiet": true});
-        let at = Instant::now();
-        last = run(&mut s, "joint.reach", p);
-        reached += usize::from(last["reached"] == json!(true));
-        frames.push(ms(at));
-        conflicts += last["conflicts"].as_array().map_or(0, Vec::len);
+        if compiled {
+            let held: Held = [(turn, start + 10f64.to_radians() * k as f64 / 60.0)].into_iter().collect();
+            let at = Instant::now();
+            let sol = place_held(&mut s, &held);
+            frames.push(ms(at));
+            conflicts += sol.conflicts.len();
+            // The turn's sense in the world is the Mate's frame's: the tip turns 10° k / 60 one way.
+            let moved = tip_deg(&s) - 90.0;
+            if k == 1 {
+                sense = moved.signum();
+                println!(
+                    "drag frame 1: tip turned {moved:.6}° (held {:.6} rad), {} conflicts",
+                    start + 10f64.to_radians() / 60.0,
+                    sol.conflicts.len()
+                );
+            }
+            reached += usize::from((moved - sense * 10.0 * k as f64 / 60.0).abs() <= 1e-6);
+        } else {
+            let tip = solidcraft_doc::apply_point(&joints::occurrence_world(&s.doc, jaw), Vec3::new(20.0, 0.0, 0.0));
+            let deg = (90.0 + 10.0 * k as f64 / 60.0).to_radians();
+            let to = a + Vec3::new(20.0 * deg.cos(), 20.0 * deg.sin(), 0.0);
+            let p = json!({"occurrence": jaw, "at": [tip.x, tip.y, tip.z], "point": [to.x, to.y, to.z], "continuous": true, "quiet": true});
+            let at = Instant::now();
+            last = run(&mut s, "joint.reach", p);
+            frames.push(ms(at));
+            reached += usize::from(last["reached"] == json!(true));
+            conflicts += last["conflicts"].as_array().map_or(0, Vec::len);
+        }
     }
-    let tip = solidcraft_doc::apply_point(&joints::occurrence_world(&s.doc, jaw), Vec3::new(20.0, 0.0, 0.0)) - a;
     if reached < 60 {
         if let Some(o) = last.as_object_mut() {
             o.remove("values");
         }
-        println!("drag: last reach {last}");
+        println!("drag: {reached}/60 reached; last reach {last}");
     }
     let (med, p) = (median(&mut frames.clone()), p95(&mut frames.clone()));
-    let end = tip.y.atan2(tip.x).to_degrees();
+    let end = tip_deg(&s);
     rows.push((
-        "3 drag frame (60 joint.reach)".into(),
+        format!("3 drag frame (60 {})", if compiled { "placements, crank turn held" } else { "joint.reach" }),
         format!(
             "median {med:.1} ms, p95 {p:.1} ms, max {:.1} ms; {reached}/60 frames reached, tip ends at {end:.4}°",
             frames.iter().fold(0.0f64, |m, v| m.max(*v))
@@ -182,16 +318,34 @@ fn spike_meets_spec_8_1() {
         conflicts == 0,
     ));
 
-    // 5. Recovery from poses perturbed by up to 5 mm / 5°, every crank held.
-    let held: Held = t.modules.iter().map(|m| ((m.crank, 0), 0.0)).collect();
+    // 5. Recovery from poses perturbed by up to 5 mm / 5°, every crank held (a joint's values, or
+    // a record's state: its solved values; a locked Insert's turn is left as it is locked).
+    let held: Held = if compiled {
+        t.modules.iter().map(|m| (crank_turn(m.crank), opened.assembly.constraints.iter().find(|c| c.id == m.crank).unwrap().state[0])).collect()
+    } else {
+        t.modules.iter().map(|m| ((m.crank, 0), 0.0)).collect()
+    };
     let cranks: std::collections::BTreeSet<u64> = t.modules.iter().map(|m| m.crank).collect();
     let base = joints::solve_holding(&opened, &st, &held);
     let mut moved = opened.clone();
+    let nudge = |j: usize, i: usize, angle: bool| {
+        let d = (((7 * j + 3 * i) % 11) as f64 / 10.0 - 0.5) * 10.0;
+        if angle { d.to_radians() } else { d }
+    };
     for (j, joint) in moved.assembly.joints.iter_mut().enumerate().filter(|(_, x)| !cranks.contains(&x.id)) {
         let kind = joint.kind;
         for (i, v) in joint.values.iter_mut().enumerate() {
-            let d = (((7 * j + 3 * i) % 11) as f64 / 10.0 - 0.5) * 10.0;
-            *v += if kind.is_angle(i) { d.to_radians() } else { d };
+            *v += nudge(j, i, kind.is_angle(i));
+        }
+    }
+    for (j, c) in moved.assembly.constraints.iter_mut().enumerate().filter(|(_, x)| !cranks.contains(&x.id)) {
+        // One member each on the tong (no equations): its signature says what each value is.
+        let Some(sig) = c.signatures.first().copied() else { continue };
+        if sig.kind == joints::JointKind::Rigid {
+            continue;
+        }
+        for (i, v) in c.state.iter_mut().enumerate() {
+            *v += nudge(j, i, sig.kind.is_angle(i));
         }
     }
     let at = Instant::now();
@@ -242,11 +396,82 @@ fn spike_meets_spec_8_1() {
         misses.is_empty(),
     ));
 
-    for (row, got, bound, pass) in &rows {
-        println!("ROW {row}: {got} | bound {bound} | {}", if *pass { "PASS" } else { "FAIL" });
+    if compiled {
+        command_costs(&mut s, t.modules[0].carrier_z, &t.records[0]);
     }
-    let failed: Vec<&String> = rows.iter().filter(|r| !r.3).map(|r| &r.0).collect();
-    assert!(failed.is_empty(), "failed rows: {failed:?}");
+    rows
+}
+
+/// What the commands cost on the 414-record design (recorded, not rows): `constraint.edit` of
+/// the carrier's offset (its over-constraint check, solve and refresh around the re-solve of row
+/// 2), and `constraint.create` of one more record (module 0's first row again, redundant and met).
+fn command_costs(s: &mut Session, carrier_z: u64, record: &Value) {
+    let home = s.doc.assembly.constraints.iter().find(|c| c.id == carrier_z).unwrap().offset;
+    let mut times = Vec::new();
+    for k in 0..2 {
+        let at = Instant::now();
+        run(s, "constraint.edit", json!({"constraint": carrier_z, "offset": if k % 2 == 0 { home + 0.5 } else { home }}));
+        times.push(ms(at));
+    }
+    println!("constraint.edit (offset) on {} records: {times:.1?} ms", s.doc.assembly.constraints.len());
+    let at = Instant::now();
+    let r = run(s, "constraint.create", record.clone());
+    println!("constraint.create (predict) on {} records: {:.1} ms, status {}", s.doc.assembly.constraints.len() - 1, ms(at), r["status"]);
+    run(s, "constraint.delete", json!({"constraint": r["id"]}));
+}
+
+/// Where a solve of the records build spends its time: `compile` of the 414 records, and the
+/// world resolution of their picks by kind (recorded, not rows).
+fn compile_cost(s: &Session) {
+    use solidcraft_doc::constraints::{Geo, compile, resolve_world};
+    let st = s.model.state();
+    let at = Instant::now();
+    let compiled = compile(&s.doc, &st, &s.doc.assembly);
+    println!("compile: {:.1} ms ({} joints, {} equations, {} lost)", ms(at), compiled.joints.len(), compiled.equations.len(), compiled.lost.len());
+    let mut by_kind: std::collections::BTreeMap<&str, (usize, f64)> = Default::default();
+    for g in s.doc.assembly.constraints.iter().flat_map(|c| &c.picks) {
+        let kind = match g.geo {
+            Geo::Face { .. } => "face",
+            Geo::Edge { .. } => "edge",
+            Geo::Vertex { .. } => "vertex",
+            Geo::Origin { .. } => "origin",
+        };
+        let at = Instant::now();
+        resolve_world(&s.doc, &st, g).unwrap();
+        let e = by_kind.entry(kind).or_default();
+        *e = (e.0 + 1, e.1 + ms(at));
+    }
+    for (kind, (n, total)) in by_kind {
+        println!("resolve_world {kind}: {n} picks in {total:.1} ms ({:.3} ms each)", total / n as f64);
+    }
+}
+
+/// R155: what `stop_on_contact` costs a drive on the tong's records build. Module 0's carrier
+/// lifted 10 mm off its jaw in 100 frames (its +Z Flush driven) with a contact set of the
+/// module's 17 parts, then 10 frames without contact; ms per frame of each (recorded).
+#[test]
+#[ignore = "spike (R155), as spike_meets_spec_8_1: cargo test -p solidcraft-engine --profile ci --config profile.ci.package.solidcraft-doc.opt-level=3 --config profile.ci.package.solidcraft-geom.opt-level=3 --config profile.ci.package.solidcraft-sketch.opt-level=3 --config profile.ci.package.solidcraft-engine.codegen-units=256 --lib -- tong_spike_tests::spike_drive --ignored --nocapture"]
+fn spike_drive_stops_on_contact_r155() {
+    println!("{}", pin_to_performance_cores());
+    let mut t = tong(9, true);
+    let s = &mut t.session;
+    let m = &t.modules[0];
+    run(s, "contact.create", json!({"occurrences": m.parts, "name": "Module 0"}));
+    let home = s.doc.assembly.constraints.iter().find(|c| c.id == m.carrier_z).unwrap().offset;
+    for (contact, steps) in [(true, 99), (false, 9)] {
+        let p = json!({"constraint": m.carrier_z, "start": home, "end": home + 10.0, "steps": steps, "stop_on_contact": contact});
+        let at = Instant::now();
+        let r = run(s, "constraint.drive", p);
+        let total = ms(at);
+        let frames = r["frames"].as_array().map_or(0, Vec::len);
+        let stops: Vec<&str> =
+            ["stopped_by_contact", "stopped_by_limit", "stopped_by_loop"].into_iter().filter(|k| r.get(*k).is_some_and(|v| !v.is_null())).collect();
+        println!(
+            "R155 drive (stop_on_contact {contact}, contact set of {} parts): {frames} frames in {total:.0} ms = {:.1} ms/frame; stops {stops:?}",
+            m.parts.len(),
+            total / frames.max(1) as f64
+        );
+    }
 }
 
 /// Pin this process to the performance cores at high priority (Windows; elsewhere nothing), and
@@ -283,7 +508,7 @@ fn pin_to_performance_cores() -> String {
 /// counts equal a fresh solve's either way.
 #[test]
 fn a_memo_re_solve_counts_as_a_fresh_one() {
-    let mut t = tong(3);
+    let mut t = tong(3, false);
     let fresh = |s: &Session| joints::solve(&s.doc, &s.model.state()).dof;
     let first = crate::cmd::joints::resolve(&mut t.session);
     assert_eq!(dof_misses(&first, &t.hand_dof), vec![]);
@@ -310,7 +535,7 @@ fn a_memo_re_solve_counts_as_a_fresh_one() {
 /// design-wide cap of 100, yet the jaw's chain is in few of them, so a drag frame reaches.
 #[test]
 fn joints_reach_drags_a_design_with_more_loops_than_the_cap() {
-    let mut t = tong(4);
+    let mut t = tong(4, false);
     let sol = joints::solve(&t.session.doc, &t.session.model.state());
     assert_eq!(sol.groups.iter().map(|g| g.members.len()).sum::<usize>(), 116);
     let jaw = t.modules[2].jaw;
@@ -332,7 +557,7 @@ fn joints_reach_drags_a_design_with_more_loops_than_the_cap() {
 /// the jaw's chain (no values of their own), and the reach is refused, saying why.
 #[test]
 fn joints_reach_refuses_a_chain_in_more_than_100_loops() {
-    let mut t = tong(1);
+    let mut t = tong(1, false);
     let jaw = t.modules[0].jaw;
     let crank = t.session.doc.assembly.joints.iter().find(|j| j.id == t.modules[0].crank).unwrap().clone();
     let doc = t.session.doc_mut();
