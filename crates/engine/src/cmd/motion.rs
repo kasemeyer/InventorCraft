@@ -158,6 +158,39 @@ fn placed(s: &Session) -> Vec<(Vec<u64>, Body)> {
     out
 }
 
+/// The active contact sets' bodies tessellated once (R158), for checking the frames of a drive:
+/// each check places the cached meshes where the frame has the parts instead of moving and
+/// tessellating every body again (what [`collisions`] does). Contact sets the cache can't hold
+/// (a mesh body, the sweep's budgets) are checked by [`collisions`] on every frame.
+pub(crate) enum ContactCheck {
+    /// Contact is off: nothing collides.
+    Off,
+    Cached(contact_sweep::ContactGeometry),
+    Uncached,
+}
+
+impl ContactCheck {
+    pub(crate) fn new(s: &Session) -> Self {
+        if !s.doc.assembly.contact_enabled {
+            return Self::Off;
+        }
+        contact_sweep::ContactGeometry::new(s).map_or(Self::Uncached, Self::Cached)
+    }
+
+    /// The pairs of set members (occurrence names) whose bodies pass through each other where `s`
+    /// has them now, each pair in the design's occurrence order (as [`collisions`] names them).
+    pub(crate) fn pairs(&self, s: &Session) -> Vec<(String, String)> {
+        let hits = match self {
+            Self::Off => return Vec::new(),
+            Self::Cached(g) => g.hits(s, &mut 0, usize::MAX, true),
+            Self::Uncached => return collisions(s).into_iter().map(|(a, b, _)| (a, b)).collect(),
+        };
+        let Ok(hits) = hits else { return collisions(s).into_iter().map(|(a, b, _)| (a, b)).collect() };
+        let order = |id: u64| s.doc.occurrences.iter().position(|o| o.id == id).unwrap_or(usize::MAX);
+        hits.into_iter().map(|(a, b, _)| if order(b.0) < order(a.0) { (b.1, a.1) } else { (a.1, b.1) }).collect()
+    }
+}
+
 /// Pairs of bodies in one active contact set that pass through each other: (occurrence names).
 pub fn collisions(s: &Session) -> Vec<(String, String, f64)> {
     let a = &s.doc.assembly;

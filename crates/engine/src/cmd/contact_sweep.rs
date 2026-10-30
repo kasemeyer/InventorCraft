@@ -94,7 +94,7 @@ fn contact_mesh(body: &solidcraft_doc::ModelBody) -> Result<ContactMesh> {
 /// A member of a contact set: (occurrence id, name).
 pub(super) type Member = (u64, String);
 
-pub(super) struct ContactGeometry {
+pub(crate) struct ContactGeometry {
     bodies: Vec<CachedBody>,
     /// Body indices, and the set members (occurrence id, name) they are under.
     pairs: Vec<(usize, usize, Member, Member)>,
