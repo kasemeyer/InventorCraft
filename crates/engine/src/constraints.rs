@@ -399,20 +399,41 @@ pub(crate) fn rebuild(s: &mut Session, sol: &Solution, analysis: Analysis) {
     let dof = if analysis == Analysis::DegreesOfFreedom { sol.dof.clone() } else { std::mem::take(&mut s.constraint_report.dof) };
     let occurrences = occurrence_rows(s, &rows, &dof);
     let any_sick = rows.iter().any(|r| matches!(r.status, ConstraintStatus::Sick { .. } | ConstraintStatus::Lost { .. }));
+    let on = counted_on(s, &st);
     if analysis == Analysis::DegreesOfFreedom {
         s.dof_stale = false;
+        s.dof_counted_on = on;
     } else {
         // A placement solve keeps the last counts; they are stale when what holds the parts
-        // changed (a status, a grounding): the session's refresh counts again (R144).
+        // changed (a status, a grounding), or what they were counted on (a part edit, a
+        // constraint value) when no status changed: the session's refresh counts again (R144).
         let was = &s.constraint_report;
         let statuses = |rows: &[Row]| rows.iter().map(|r| (r.id, r.status.clone())).collect::<Vec<_>>();
         let grounding = |o: &[OccurrenceRow]| o.iter().map(|o| (o.id, o.grounded)).collect::<Vec<_>>();
-        if statuses(&was.rows) != statuses(&rows) || grounding(&was.occurrences) != grounding(&occurrences) {
+        if statuses(&was.rows) != statuses(&rows) || grounding(&was.occurrences) != grounding(&occurrences) || on != s.dof_counted_on {
             s.dof_stale = true;
         }
     }
     s.constraint_report = Report { rows, occurrences, dof, any_sick };
     prune_shown(s);
+}
+
+/// What DOF counts are counted on, as a hash: each model body's geometry key and name, and each
+/// constraint's offset and limits as they work out now (a parameter changes them). Not the
+/// placements: a part moved within its freedom keeps its count, and a drag frame does not count
+/// again. A body the evaluation cache does not key is hashed by its name only.
+pub(crate) fn counted_on(s: &Session, st: &solidcraft_doc::ModelState) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for b in &st.bodies {
+        b.geometry_key().hash(&mut h);
+        b.name.hash(&mut h);
+    }
+    for c in &s.doc.assembly.constraints {
+        let (min, max) = limits_now(s, c);
+        (c.id, offset_now(s, c).to_bits(), min.map(f64::to_bits), max.map(f64::to_bits)).hash(&mut h);
+    }
+    h.finish()
 }
 
 /// Drop shown glyphs of constraints that no longer exist.

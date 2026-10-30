@@ -430,6 +430,35 @@ fn dof_counts_follow_undo_part_edits_and_grounding() {
     assert_eq!(report(&s).dof.get(&occ(&s, "Pin")), Some(&6));
 }
 
+/// R144 gap: a part edit can change what the constraints leave free without changing any status
+/// or grounding; the placement solve after it marks the counts stale when the parts' geometry or
+/// the constraints' values changed since they were counted, so the refresh counts again.
+#[test]
+fn a_part_edit_that_changes_no_status_counts_again() {
+    let mut s = blocks();
+    let b = occ(&s, "B");
+    let p = mate_top_bottom(&s, 50.0, 25.0, json!(0));
+    run(&mut s, "constraint.create", p);
+    assert_eq!(report(&s).dof.get(&b), Some(&3));
+    // Counts a part edit would leave behind (a count that no longer holds).
+    s.constraint_report.dof.insert(b, 99);
+    // A command that changes neither geometry nor a constraint value does not count again.
+    run(&mut s, "parameters.add", json!({"name": "t", "expression": "1 mm"}));
+    assert_eq!(report(&s).dof.get(&b), Some(&99));
+    // A taller A: B follows, every status stays Ok, and the counts are counted again.
+    let c = s.doc.find_component("A").unwrap();
+    let a_box = s.doc.features.iter().find(|f| f.component == c).unwrap().id;
+    run(&mut s, "timeline.edit", json!({"feature": a_box, "set": {"height": "30 mm"}}));
+    assert_eq!(status(&s, "Mate:1"), ConstraintStatus::Ok);
+    assert_eq!(report(&s).dof.get(&b), Some(&3));
+    assert_eq!(occ_row(&s, "B").missing, Some(3));
+    // So does a parameter that changes a constraint's value.
+    run(&mut s, "constraint.edit", json!({"constraint": "Mate:1", "offset": "t"}));
+    s.constraint_report.dof.insert(b, 99);
+    run(&mut s, "parameters.change", json!({"name": "t", "expression": "2 mm"}));
+    assert_eq!(report(&s).dof.get(&b), Some(&3));
+}
+
 #[test]
 fn a_small_conflict_reports_its_gap() {
     // R145: 2e-5 mm is a conflict (above 1e-6 mm); the message's 4 decimals would read 0.

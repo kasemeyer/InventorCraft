@@ -312,6 +312,9 @@ pub struct Session {
     /// `constraint_report.dof` no longer counts the design (undo, redo, a status or grounding
     /// change after a placement-only solve): the next refresh counts again (R144).
     pub(crate) dof_stale: bool,
+    /// What the DOF counts were counted on ([`constraints::counted_on`]): a placement solve on
+    /// other geometry or constraint values marks them stale (R144).
+    pub(crate) dof_counted_on: u64,
     occurrence_visibility_cache: std::sync::Mutex<Option<occurrences::VisibilityCache>>,
     removed_later_cache: std::sync::Mutex<Option<occurrences::RemovedLaterCache>>,
     occurrence_bodies_cache: std::sync::Mutex<Option<occurrences::OccurrenceBodiesCache>>,
@@ -503,6 +506,7 @@ impl Session {
             constraint_report: Default::default(),
             shown_constraints: Default::default(),
             dof_stale: false,
+            dof_counted_on: 0,
             occurrence_visibility_cache: Default::default(),
             removed_later_cache: Default::default(),
             occurrence_bodies_cache: Default::default(),
@@ -1193,6 +1197,7 @@ impl Session {
             constraint_report: self.constraint_report.clone(),
             shown_constraints: self.shown_constraints.clone(),
             dof_stale: self.dof_stale,
+            dof_counted_on: self.dof_counted_on,
             occurrence_visibility_cache: Default::default(),
             removed_later_cache: Default::default(),
             occurrence_bodies_cache: Default::default(),
