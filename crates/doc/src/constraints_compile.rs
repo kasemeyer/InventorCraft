@@ -354,16 +354,6 @@ pub enum ConstraintStatus {
     Suppressed,
 }
 
-/// The gap a conflict's message gives ("off by X mm and Y° …"): (mm, deg); (0, 0) for a loop
-/// that meets but can't stay closed on the way.
-fn gap_of(why: &str) -> (f64, f64) {
-    let Some(rest) = why.strip_prefix("off by ") else { return (0.0, 0.0) };
-    let mut words = rest.split_whitespace();
-    let mm = words.next().and_then(|w| w.parse::<f64>().ok()).unwrap_or(0.0);
-    let deg = words.nth(2).and_then(|w| w.trim_end_matches('°').parse::<f64>().ok()).unwrap_or(0.0);
-    (mm, deg)
-}
-
 /// Every constraint's status after solve `sol` of the constraints `compiled` from `asm`:
 /// `Suppressed`; `Lost` when it compiled to nothing or a member is a solve error; `Unsolved` when
 /// a member is in a capped loop group; `Sick` when a member is in `sol.conflicts`; else `Ok`.
@@ -377,7 +367,7 @@ pub fn statuses(asm: &Assembly, compiled: &Compiled, sol: &Solution) -> BTreeMap
         .chain(sol.errors.iter().filter_map(|(id, _, why)| owner_of(*id).map(|c| (c, why.as_str()))))
         .collect();
     let capped: BTreeSet<u64> = sol.groups.iter().filter(|g| g.capped).flat_map(|g| g.members.iter().copied()).collect();
-    let conflicts: BTreeMap<u64, (&str, &str)> = sol.conflicts.iter().map(|(id, name, why)| (*id, (name.as_str(), why.as_str()))).collect();
+    let conflicts: BTreeMap<u64, &str> = sol.conflicts.iter().map(|(id, name, _)| (*id, name.as_str())).collect();
     let members = |c: u64| (0..4).map(move |k| compiled_id(c, k));
     asm.constraints
         .iter()
@@ -390,10 +380,11 @@ pub fn statuses(asm: &Assembly, compiled: &Compiled, sol: &Solution) -> BTreeMap
                 ConstraintStatus::Unsolved
             } else if members(c.id).any(|id| conflicts.contains_key(&id)) {
                 let (mut gap_mm, mut gap_deg) = (0.0_f64, 0.0_f64);
-                for (_, why) in members(c.id).filter_map(|id| conflicts.get(&id)) {
-                    let (mm, deg) = gap_of(why);
-                    gap_mm = gap_mm.max(mm);
-                    gap_deg = gap_deg.max(deg);
+                // As the solver measured them (R145); a loop that meets but can't stay closed on
+                // the way has no gap (NaN, which `max` passes over).
+                for (mm, rad) in members(c.id).filter_map(|id| sol.conflict_gaps.get(&id)) {
+                    gap_mm = gap_mm.max(*mm);
+                    gap_deg = gap_deg.max(rad.to_degrees());
                 }
                 // The other closing members of its loop groups that are off too.
                 let own: BTreeSet<u64> = members(c.id).collect();
@@ -403,7 +394,7 @@ pub fn statuses(asm: &Assembly, compiled: &Compiled, sol: &Solution) -> BTreeMap
                     .filter(|g| g.members.iter().any(|id| own.contains(id)))
                     .flat_map(|g| g.members.iter())
                     .filter(|id| !own.contains(id))
-                    .filter_map(|id| conflicts.get(id).map(|(name, _)| (*name).to_string()))
+                    .filter_map(|id| conflicts.get(id).map(|name| (*name).to_string()))
                     .collect::<BTreeSet<_>>()
                     .into_iter()
                     .collect();

@@ -961,6 +961,10 @@ pub struct Solution {
     pub values: BTreeMap<u64, Vec<f64>>,
     /// Joints that disagree with the placement found through others: (joint id, name, why).
     pub conflicts: Vec<(u64, String, String)>,
+    /// Each conflict's gap as measured (R145): (mm, rad); `(NaN, NaN)` for a loop that meets but
+    /// can't stay closed on the way. Read this, never the message text.
+    #[serde(skip)]
+    pub conflict_gaps: BTreeMap<u64, (f64, f64)>,
     /// Joints that could not be applied (bad origin…): (joint id, name, why).
     pub errors: Vec<(u64, String, String)>,
     /// Remaining degrees of freedom per occurrence (6 = free, 0 = fixed): how many independent
@@ -2310,12 +2314,14 @@ fn solve_core(doc: &Document, st: &ModelState, held: &Held, analysis: Analysis, 
                 // An angle's gap in degrees, a distance's in mm, as a joint's conflict says them.
                 let (mm, rad) = if e.eq.is_angle() { (0.0, r.abs()) } else { (r.abs(), 0.0) };
                 if mm > CONFLICT_MM || rad > CONFLICT_RAD {
+                    sol.conflict_gaps.insert(e.id, (mm, rad));
                     sol.conflicts.push((
                         e.id,
                         e.name.clone(),
                         format!("off by {mm:.4} mm and {:.3}° from the placement the other joints give", rad.to_degrees()),
                     ));
                 } else if stuck.contains(&e.id) {
+                    sol.conflict_gaps.insert(e.id, (f64::NAN, f64::NAN));
                     sol.conflicts.push((e.id, e.name.clone(), "the loop can't stay closed on the way to these values".into()));
                 }
                 continue;
@@ -2327,6 +2333,7 @@ fn solve_core(doc: &Document, st: &ModelState, held: &Held, analysis: Analysis, 
         // Measured at the joint, where the loop solver closes it.
         let (dt, da) = mismatch(&mat_mul(&want, &frames.b), &mat_mul(tb, &frames.b));
         if dt > CONFLICT_MM || da > CONFLICT_RAD {
+            sol.conflict_gaps.insert(j.id, (dt, da));
             sol.conflicts.push((
                 j.id,
                 j.name.clone(),
@@ -2335,6 +2342,7 @@ fn solve_core(doc: &Document, st: &ModelState, held: &Held, analysis: Analysis, 
         } else if stuck.contains(id) {
             // It meets there, but the loop would have to come apart on the way (a rocker
             // driven a full turn ends where it started).
+            sol.conflict_gaps.insert(j.id, (f64::NAN, f64::NAN));
             sol.conflicts.push((j.id, j.name.clone(), "the loop can't stay closed on the way to these values".into()));
         }
     }
