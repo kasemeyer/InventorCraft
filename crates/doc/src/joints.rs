@@ -2280,8 +2280,19 @@ pub fn solve_with(doc: &Document, st: &ModelState, held: &Held, analysis: Analys
 fn solve_core(doc: &Document, st: &ModelState, held: &Held, analysis: Analysis, extra: &Compiled, memo: Option<&mut DofMemo>) -> Solution {
     let asm = &doc.assembly;
     let mut sol = Solution::default();
+    // A constraint that compiles to nothing (a pick gone, kinds it can't join) is an error of its
+    // first compiled id, named as the constraint.
+    for (c, why) in &extra.lost {
+        let name = asm.constraints.iter().find(|x| x.id == *c).map(|x| x.name.clone()).unwrap_or_default();
+        sol.errors.push((crate::constraints::compiled_id(*c, 0), name, why.clone()));
+    }
+    // The joints' frames first: only those that resolve place a part (R151).
+    let mut frames = Frames::default();
+    let real: Vec<&Joint> = asm.joints.iter().chain(&extra.joints).filter(|j| !j.suppressed).take(MAX_JOINTS).collect();
+    frames.resolve(doc, st, &real, &mut sol);
+    let unresolved: BTreeSet<u64> = real.iter().map(|j| j.id).filter(|id| !frames.ok.contains_key(id)).collect();
     // A part only equations hold gets a provisional `Free` member from the root (spec §3.5).
-    let free = free_members(doc, extra);
+    let free = free_members(doc, extra, &frames);
     let with_free;
     let extra = if free.is_empty() {
         extra
@@ -2291,13 +2302,7 @@ fn solve_core(doc: &Document, st: &ModelState, held: &Held, analysis: Analysis, 
         &with_free
     };
     let mut vals = joint_values(asm, extra);
-    // A constraint that compiles to nothing (a pick gone, kinds it can't join) is an error of its
-    // first compiled id, named as the constraint.
-    for (c, why) in &extra.lost {
-        let name = asm.constraints.iter().find(|x| x.id == *c).map(|x| x.name.clone()).unwrap_or_default();
-        sol.errors.push((crate::constraints::compiled_id(*c, 0), name, why.clone()));
-    }
-    let Built { tree, mut placed, closing, mut dof } = build(doc, st, &vals, extra, &mut sol);
+    let Built { tree, mut placed, closing, mut dof } = build(doc, st, &vals, extra, &mut sol, frames);
     let mut stuck = BTreeSet::new();
     if !closing.is_empty() {
         (sol.values, stuck) = close_loops(&tree, &closing, asm, held, &mut vals, &mut sol.groups);
@@ -2310,7 +2315,10 @@ fn solve_core(doc: &Document, st: &ModelState, held: &Held, analysis: Analysis, 
             Closing::Joint(id) => id,
             Closing::Equation(i) => {
                 let Some(e) = extra.equations.get(*i) else { continue };
-                let Some(r) = e.eq.residual(&|o| placed.get(&o).copied()) else { continue };
+                let Some(r) = e.eq.residual(&|o| placed.get(&o).copied()) else {
+                    sol.errors.push((e.id, e.name.clone(), not_placed(&e.eq, &placed, &real, &unresolved)));
+                    continue;
+                };
                 // An angle's gap in degrees, a distance's in mm, as a joint's conflict says them.
                 let (mm, rad) = if e.eq.is_angle() { (0.0, r.abs()) } else { (r.abs(), 0.0) };
                 if mm > CONFLICT_MM || rad > CONFLICT_RAD {
@@ -2346,6 +2354,12 @@ fn solve_core(doc: &Document, st: &ModelState, held: &Held, analysis: Analysis, 
             sol.conflicts.push((j.id, j.name.clone(), "the loop can't stay closed on the way to these values".into()));
         }
     }
+    // An equation that closes no loop reads a part nothing placed (R151): Lost, not a silent Ok.
+    for (i, e) in extra.equations.iter().enumerate() {
+        if !closing.contains(&Closing::Equation(i)) {
+            sol.errors.push((e.id, e.name.clone(), not_placed(&e.eq, &placed, &real, &unresolved)));
+        }
+    }
     // Every compiled joint's final values (R114): a tree member's are the ones it was seeded with,
     // a closing one's what the loops moved it to. A locked Insert keeps its turn.
     for j in extra.joints.iter().filter(|j| j.kind != JointKind::Free && tree.frames.contains_key(&j.id)) {
@@ -2374,6 +2388,25 @@ fn solve_core(doc: &Document, st: &ModelState, held: &Held, analysis: Analysis, 
     sol
 }
 
+/// Why equation `eq` can't be measured (R151): a part it reads is not placed, named through the
+/// nearest joint (along `joints` from such a part) whose frames don't resolve.
+fn not_placed(eq: &Equation, placed: &BTreeMap<u64, Mat>, joints: &[&Joint], unresolved: &BTreeSet<u64>) -> String {
+    let mut seen: BTreeSet<u64> = eq.occurrences().into_iter().filter(|o| !placed.contains_key(o)).collect();
+    let mut queue: VecDeque<u64> = seen.iter().copied().collect();
+    while let Some(o) = queue.pop_front() {
+        for j in joints.iter().filter(|j| j.a.occurrence == o || j.b.occurrence == o) {
+            if unresolved.contains(&j.id) {
+                return format!("a part it reads is not placed ({} doesn't resolve)", j.name);
+            }
+            let other = if j.a.occurrence == o { j.b.occurrence } else { j.a.occurrence };
+            if seen.insert(other) {
+                queue.push_back(other);
+            }
+        }
+    }
+    "a part it reads is not placed".into()
+}
+
 /// The joint graph laid out for a solve: the tree, where it places each occurrence for the
 /// values it was built with, the joints that close loops, and each occurrence's degrees of
 /// freedom along the tree.
@@ -2387,38 +2420,13 @@ struct Built<'a> {
 /// Lay out the joint graph: the spanning tree out from the fixed occurrences (the root, grounded
 /// ones; with neither involved, the first joint's A side) and the joints left over, which close
 /// loops. Joints whose origins can't be resolved go to `sol.errors`; `sol.fixed` is set.
-fn build<'a>(doc: &'a Document, st: &ModelState, vals: &Values, extra: &'a Compiled, sol: &mut Solution) -> Built<'a> {
+fn build<'a>(doc: &'a Document, st: &ModelState, vals: &Values, extra: &'a Compiled, sol: &mut Solution, mut frames: Frames) -> Built<'a> {
     let asm = &doc.assembly;
     // The saved joints, then those the constraints compile to.
     let joints: Vec<&Joint> = asm.joints.iter().chain(&extra.joints).filter(|j| !j.suppressed).take(MAX_JOINTS).collect();
-    // Joint frames in component coordinates (errors leave the joint out). An origin several joints
-    // share (a panel face every part sits on) is found once.
-    let mut frames: BTreeMap<u64, JointFrames> = BTreeMap::new();
-    let mut found: BTreeMap<(u64, String), std::result::Result<Mat, String>> = BTreeMap::new();
-    let mut resolve = |o: &JointOrigin| -> Result<Mat> {
-        let Ok(comp) = component_of(doc, o.occurrence) else { return resolve_origin(doc, st, o) };
-        found
-            .entry((comp, format!("{:?}", o.snap)))
-            .or_insert_with(|| resolve_origin(doc, st, o).map_err(|e| e.to_string()))
-            .clone()
-            .map_err(DocError::Invalid)
-    };
-    for j in &joints {
-        // A joint whose expressions can't be worked out (a parameter gone) is left out rather
-        // than placed by numbers that no longer say what it was defined by.
-        if !j.exprs.is_empty()
-            && let Err(e) = expressed(doc, j)
-        {
-            sol.errors.push((j.id, j.name.clone(), e.to_string()));
-            continue;
-        }
-        match (resolve(&j.a), resolve(&j.b)) {
-            (Ok(fa), Ok(fb)) => {
-                frames.insert(j.id, JointFrames::new(fa, fb));
-            }
-            (Err(e), _) | (_, Err(e)) => sol.errors.push((j.id, j.name.clone(), e.to_string())),
-        }
-    }
+    // Joint frames in component coordinates (errors leave the joint out), those not found yet.
+    frames.resolve(doc, st, &joints, sol);
+    let frames = frames.ok;
     // Fixed: the root, grounded occurrences; with neither involved, the first joint's A side.
     let mut placed: BTreeMap<u64, Mat> = BTreeMap::new();
     let mut dof: BTreeMap<u64, usize> = BTreeMap::new();
@@ -2523,6 +2531,50 @@ fn build<'a>(doc: &'a Document, st: &ModelState, vals: &Values, extra: &'a Compi
     Built { tree, placed, closing, dof }
 }
 
+/// Joint frames in component coordinates, found once per joint: the joints `tried`, and the
+/// frames of those that resolve (`ok`).
+#[derive(Default)]
+struct Frames {
+    ok: BTreeMap<u64, JointFrames>,
+    tried: BTreeSet<u64>,
+}
+
+impl Frames {
+    /// Find the frames of the joints not tried yet. One whose expressions can't be worked out or
+    /// whose origin does not resolve goes to `sol.errors` and is left out. An origin several
+    /// joints share (a panel face every part sits on) is found once.
+    fn resolve(&mut self, doc: &Document, st: &ModelState, joints: &[&Joint], sol: &mut Solution) {
+        let mut found: BTreeMap<(u64, String), std::result::Result<Mat, String>> = BTreeMap::new();
+        let mut resolve = |o: &JointOrigin| -> Result<Mat> {
+            let Ok(comp) = component_of(doc, o.occurrence) else { return resolve_origin(doc, st, o) };
+            found
+                .entry((comp, format!("{:?}", o.snap)))
+                .or_insert_with(|| resolve_origin(doc, st, o).map_err(|e| e.to_string()))
+                .clone()
+                .map_err(DocError::Invalid)
+        };
+        for j in joints {
+            if !self.tried.insert(j.id) {
+                continue;
+            }
+            // A joint whose expressions can't be worked out (a parameter gone) is left out rather
+            // than placed by numbers that no longer say what it was defined by.
+            if !j.exprs.is_empty()
+                && let Err(e) = expressed(doc, j)
+            {
+                sol.errors.push((j.id, j.name.clone(), e.to_string()));
+                continue;
+            }
+            match (resolve(&j.a), resolve(&j.b)) {
+                (Ok(fa), Ok(fb)) => {
+                    self.ok.insert(j.id, JointFrames::new(fa, fb));
+                }
+                (Err(e), _) | (_, Err(e)) => sol.errors.push((j.id, j.name.clone(), e.to_string())),
+            }
+        }
+    }
+}
+
 /// With no fixed occurrence among the joints' and the equations' (the `Free` members aside), the
 /// first joint's A side is held where it is. An equation touching a fixed occurrence counts
 /// (R148): a loose pair angled to a grounded part turns as a pair, no side of it held.
@@ -2540,15 +2592,18 @@ fn floating_anchor(placed: &BTreeMap<u64, Mat>, joints: &[&Joint], equations: &[
 const FREE_BASE: u64 = 1 << 62;
 
 /// The provisional members of a solve with loop equations (spec §3.5): an occurrence an equation
-/// reads that no joint can place from a fixed occurrence gets a `Free` member from the root,
+/// reads that no joint (whose frames resolve) can place from a fixed occurrence gets a `Free` member from the root,
 /// seeded where it is (its translation and rotation vector). One per group of occurrences the
 /// joints tie together: the rest of the group is placed through it.
-fn free_members(doc: &Document, extra: &Compiled) -> Vec<Joint> {
+fn free_members(doc: &Document, extra: &Compiled, frames: &Frames) -> Vec<Joint> {
     if extra.equations.is_empty() {
         return Vec::new();
     }
     let asm = &doc.assembly;
-    let joints: Vec<&Joint> = asm.joints.iter().chain(&extra.joints).filter(|j| !j.suppressed).take(MAX_JOINTS).collect();
+    // Only joints whose frames resolve place anything (R151): a part reached only through one
+    // that doesn't is placed by its own Free member.
+    let joints: Vec<&Joint> =
+        asm.joints.iter().chain(&extra.joints).filter(|j| !j.suppressed).take(MAX_JOINTS).filter(|j| frames.ok.contains_key(&j.id)).collect();
     let mut fixed: BTreeMap<u64, Mat> = BTreeMap::from([(0, IDENTITY)]);
     for o in doc.occurrences.iter().filter(|o| o.grounded) {
         fixed.insert(o.id, IDENTITY);
@@ -3011,5 +3066,39 @@ mod tests {
         assert!((a - 1e-9).abs() < 1e-15, "{a}");
         let (_, a) = mismatch(&rot_z(3.0), &IDENTITY);
         assert!((a - 3.0).abs() < 1e-12, "{a}");
+    }
+    /// R151: an equation reading a part nothing places is an error naming the joint that would
+    /// have placed it, not a silent pass.
+    #[test]
+    fn an_equation_over_an_unplaced_part_is_an_error() {
+        let mut doc = Document::new("ghost");
+        let comp = doc.add_component(Some("A"), 0).unwrap();
+        let a = doc.occurrences.iter().find(|o| o.component == comp).unwrap().id;
+        doc.occurrences.iter_mut().for_each(|o| o.grounded = true);
+        let ghost = 999_999;
+        let joint = Joint {
+            id: COMPILED_BASE + 4,
+            name: "Ghost".into(),
+            kind: JointKind::Rigid,
+            a: JointOrigin { occurrence: a, snap: Snap::Frame { origin: Vec3::ZERO, z: Vec3::Z, x: None } },
+            b: JointOrigin { occurrence: ghost, snap: Snap::FaceCenter { pick: Vec3::ZERO, face: Some("gone".into()), x: None } },
+            values: Vec::new(),
+            limits: Vec::new(),
+            flip: true,
+            offset: 0.0,
+            angle: 0.0,
+            suppressed: false,
+            exprs: JointExprs::default(),
+        };
+        let plane = |occurrence| Side { occurrence, prim: crate::constraints::Prim::Plane { p: Vec3::ZERO, n: Vec3::Z } };
+        let eq = Eq {
+            id: COMPILED_BASE + 8,
+            name: "Angle:1".into(),
+            eq: Equation::Angle { a: plane(a), b: plane(ghost), axis: None, target: 0.5, bounds: None },
+        };
+        let extra = Compiled { joints: vec![joint], equations: vec![eq], lost: Vec::new() };
+        let sol = solve_with(&doc, &ModelState::default(), &Held::new(), Analysis::Placement, &extra);
+        let why: Vec<&str> = sol.errors.iter().filter(|(id, ..)| *id == COMPILED_BASE + 8).map(|(_, _, w)| w.as_str()).collect();
+        assert_eq!(why, ["a part it reads is not placed (Ghost doesn't resolve)"], "{:?}", sol.errors);
     }
 }

@@ -428,3 +428,29 @@ fn a_turned_drum_is_pulled_back_to_tangent() {
     assert_eq!(l["constraints"][0]["status"], "ok", "{l}");
     assert!((axes_apart(&s, "Tangent:1") - 25.0).abs() <= TOL, "{}", axes_apart(&s, "Tangent:1"));
 }
+
+/// R151: a saved joint whose origin no longer resolves (its hole suppressed) places nothing, so
+/// the part the Angle reads is placed by its own Free member and the Angle is solved there (the
+/// joint reports its error). Before, the part was left unplaced and the Angle a silent Ok. (Where
+/// nothing at all can place a part, the Angle is Lost: doc's
+/// `an_equation_over_an_unplaced_part_is_an_error`.)
+#[test]
+fn an_angle_over_a_part_whose_joint_fails() {
+    let mut s = blocks();
+    let weld = json!({"type": "rigid", "a": {"occurrence": "A", "face": [50.0, 25.0, 20.0]}, "b": {"occurrence": "Plate", "circle": [200.0, 0.0, 10.0]}, "name": "Weld"});
+    run(&mut s, "joint.create", weld);
+    // Plate's top, parallel to A's (the Weld put it there): a Directed 180 meets it as it is.
+    let top = crate::test_support::at(&s, "Plate", Vec3::new(170.0, 20.0, 10.0));
+    let p = json!({"type": "angle", "solution": "directed", "a": face("A", [50.0, 25.0, 20.0]), "b": face("Plate", [top.x, top.y, top.z]), "offset": 180});
+    assert_eq!(run(&mut s, "constraint.create", p)["status"], "ok");
+    run(&mut s, "timeline.suppress", json!({"feature": "Hole", "suppressed": true}));
+    let solved = run(&mut s, "joint.solve", json!({}));
+    assert!(solved["errors"].to_string().contains("Weld"), "{solved}");
+    let e = run(&mut s, "constraint.edit", json!({"constraint": "Angle:1", "offset": 30}));
+    assert_eq!(e["status"], "ok", "{e}");
+    assert_eq!(dof_of(&e, &s, "Plate"), 5, "{e}");
+    assert!(e["moved"].as_array().unwrap().contains(&json!(occ(&s, "Plate"))), "{e}");
+    let axis = apply_vector(&occurrence_world(&s.doc, occ(&s, "A")), constraint(&s, "Angle:1").axis.unwrap());
+    let (na, nb) = normals(&s, "Angle:1");
+    assert!((signed(na, nb, axis) - 30.0).abs() <= ANG, "{}", signed(na, nb, axis));
+}

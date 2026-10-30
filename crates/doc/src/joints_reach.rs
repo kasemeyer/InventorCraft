@@ -9,8 +9,8 @@ use solidcraft_geom::Vec3;
 use solidcraft_sketch::linalg;
 
 use super::{
-    Assembly, Held, MAX_CLOSING, MAX_LOOP_VALUES, MAX_LOOP_WORK, MAX_LOOPS, Solution, Tree, Values, apply_links, build, close_within, jacobian,
-    joint_values, largest, least_squares, limit_bounds, link_chains, loop_groups, loop_scale, loose_gap, unknowns,
+    Assembly, Frames, Held, MAX_CLOSING, MAX_LOOP_VALUES, MAX_LOOP_WORK, MAX_LOOPS, Solution, Tree, Values, apply_links, build, close_within,
+    jacobian, joint_values, largest, least_squares, limit_bounds, link_chains, loop_groups, loop_scale, loose_gap, unknowns,
 };
 use crate::constraints::Compiled;
 use crate::{Document, ModelState, apply_point, apply_vector, mat_mul};
@@ -65,7 +65,7 @@ pub fn reach(doc: &Document, st: &ModelState, r: &Reach) -> Result<Reached, Stri
     let asm = &doc.assembly;
     let vals = joint_values(asm, &Compiled::default());
     let none = Compiled::default();
-    let built = build(doc, st, &vals, &none, &mut Solution::default());
+    let built = build(doc, st, &vals, &none, &mut Solution::default(), Frames::default());
     let tree = &built.tree;
     if tree.fixed.contains_key(&r.occurrence) {
         return Err("it is fixed in place (grounded, or the part its joints are placed from)".into());
