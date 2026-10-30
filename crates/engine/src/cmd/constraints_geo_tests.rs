@@ -166,3 +166,51 @@ fn a_reversed_edge_keeps_the_picked_vertex() {
     let p = resolve(&s.doc, &s.model.state(), &reversed).unwrap();
     assert!(p.point().is_some_and(|p| close(p, v(100.0, 50.0, 20.0), TOL)), "reversed end {p:?}");
 }
+
+/// Final wave item 5: a component of two bodies (a 10 mm box and a copy of it moved 30 mm along
+/// x, whose names carry the copy's `@F23.1`). An edge only the second body has (the name index
+/// looks at the first body's edges only) resolves through the search. A face name two bodies
+/// have exactly (only a damaged state has one: here the model state with the box's body twice)
+/// is not taken from the index (two hits): the pick is found by the nearest-match search. Each
+/// as the uncached `resolve` finds it.
+#[test]
+fn a_two_body_component_resolves_through_the_search() {
+    let mut s = blocks();
+    run(&mut s, "component.create", json!({"name": "Twin", "grounded": true}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 300, 0]}));
+    let r = run(&mut s, "solid.move", json!({"bodies": ["Body7"], "translate": [30, 0, 0], "copy": true}));
+    assert_eq!(r["created_bodies"], json!(["Body7 (2)"]), "{r}");
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let st = s.model.state();
+    let twin = occ(&s, "Twin");
+    let body = |name: &str| st.bodies.iter().find(|b| b.name == name).unwrap();
+    let (first, second) = (body("Body7"), body("Body7 (2)"));
+
+    // The copy's top front edge: the second body's only.
+    let g = geo_at(&s.doc, &st, twin, PickWhat::Edge, v(35.0, 300.0, 10.0)).unwrap();
+    let Geo::Edge { name: edge_name, .. } = &g.geo else { panic!("{g:?}") };
+    let has = |b| solidcraft_doc::naming::edge_names(b).contains(edge_name);
+    assert_eq!((has(first), has(second)), (false, true), "{edge_name}");
+    let cache = solidcraft_doc::constraints::PickCache::default();
+    let edge = cache.picks(&s.doc, &st).resolve(&g).unwrap_or_else(|e| panic!("{g:?}: {e}"));
+    assert_eq!(edge, resolve(&s.doc, &st, &g).unwrap());
+    match edge {
+        Prim::Line { p, d } => assert!(along(d, Vec3::X) && (p.y - 300.0).abs() <= TOL && (p.z - 10.0).abs() <= TOL, "{p:?} {d:?}"),
+        other => panic!("{other:?}"),
+    }
+
+    // The box's body twice in one component: `F22:+z` is an exact name of both.
+    let mut twice = (*st).clone();
+    let mut again = first.clone();
+    again.name = "Body7 (again)".into();
+    twice.bodies.push(again);
+    let tops = |b| solidcraft_doc::naming::face_names(b).iter().filter(|n| *n == "F22:+z").count();
+    assert_eq!(twice.bodies.iter().filter(|b| b.component == first.component).map(tops).sum::<usize>(), 2);
+    let top = GeoRef { occurrence: twin, geo: Geo::Face { name: "F22:+z".into(), pick: v(5.0, 305.0, 10.0) } };
+    let found = cache.picks(&s.doc, &twice).resolve(&top).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(found, resolve(&s.doc, &twice, &top).unwrap());
+    match found {
+        Prim::Plane { p, n } => assert!(along(n, Vec3::Z) && (p.z - 10.0).abs() <= TOL, "{p:?} {n:?}"),
+        other => panic!("{other:?}"),
+    }
+}
