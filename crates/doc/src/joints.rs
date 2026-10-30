@@ -2410,9 +2410,13 @@ fn solve_core(doc: &Document, st: &ModelState, held: &Held, analysis: Analysis, 
 }
 
 /// Why equation `eq` can't be measured (R151): a part it reads is not placed, named through the
-/// nearest joint (along `joints` from such a part) whose frames don't resolve.
+/// nearest joint (along `joints` from such a part) whose frames don't resolve; with every part
+/// placed, a side gives no direction (a point or a sphere where an angle needs one).
 fn not_placed(eq: &Equation, placed: &BTreeMap<u64, Mat>, joints: &[&Joint], unresolved: &BTreeSet<u64>) -> String {
     let mut seen: BTreeSet<u64> = eq.occurrences().into_iter().filter(|o| !placed.contains_key(o)).collect();
+    if seen.is_empty() {
+        return "a side has no direction".into();
+    }
     let mut queue: VecDeque<u64> = seen.iter().copied().collect();
     while let Some(o) = queue.pop_front() {
         for j in joints.iter().filter(|j| j.a.occurrence == o || j.b.occurrence == o) {
@@ -2457,8 +2461,10 @@ fn build<'a>(doc: &'a Document, st: &ModelState, vals: &Values, extra: &'a Compi
         placed.insert(o.id, occurrence_world(doc, o.id));
         dof.insert(o.id, 0);
     }
-    // `Free` members (from the root) are left out: they place what the joints don't.
-    if let Some(a) = floating_anchor(&placed, &joints, &extra.equations) {
+    // `Free` members (from the root) are left out: they place what the joints don't. Only joints
+    // whose frames resolve can hold a side still, as `free_members` reckons it.
+    let resolved: Vec<&Joint> = joints.iter().copied().filter(|j| frames.contains_key(&j.id)).collect();
+    if let Some(a) = floating_anchor(&placed, &resolved, &extra.equations) {
         placed.insert(a, occurrence_world(doc, a));
         dof.insert(a, 0);
     }
@@ -3121,5 +3127,86 @@ mod tests {
         let sol = solve_with(&doc, &ModelState::default(), &Held::new(), Analysis::Placement, &extra);
         let why: Vec<&str> = sol.errors.iter().filter(|(id, ..)| *id == COMPILED_BASE + 8).map(|(_, _, w)| w.as_str()).collect();
         assert_eq!(why, ["a part it reads is not placed (Ghost doesn't resolve)"], "{:?}", sol.errors);
+    }
+    /// A compiled joint `name` (id `id`) from a frame on `a` to `b`'s face `face` (`None`: a
+    /// frame too, so it resolves; `Some`: a face no model has, so it does not).
+    fn rigid(id: u64, name: &str, a: u64, b: u64, face: Option<&str>) -> Joint {
+        let frame = |occurrence| JointOrigin { occurrence, snap: Snap::Frame { origin: Vec3::ZERO, z: Vec3::Z, x: None } };
+        Joint {
+            id,
+            name: name.into(),
+            kind: JointKind::Rigid,
+            a: frame(a),
+            b: match face {
+                None => frame(b),
+                Some(f) => JointOrigin { occurrence: b, snap: Snap::FaceCenter { pick: Vec3::ZERO, face: Some(f.into()), x: None } },
+            },
+            values: Vec::new(),
+            limits: Vec::new(),
+            flip: true,
+            offset: 0.0,
+            angle: 0.0,
+            suppressed: false,
+            exprs: JointExprs::default(),
+        }
+    }
+
+    /// Final wave item 10: with nothing grounded, the side held still is the first joint whose
+    /// frames resolve, in the tree as in the `Free` members, so a part a resolved joint places
+    /// from it is placed and the equation over it is solved (before, the tree held the failed
+    /// joint's side and the equation was Lost).
+    #[test]
+    fn a_failed_first_joint_does_not_anchor_the_tree() {
+        let mut doc = Document::new("anchor");
+        let ids: Vec<u64> = ["X", "Y", "A", "B", "C"]
+            .into_iter()
+            .map(|n| {
+                let comp = doc.add_component(Some(n), 0).unwrap();
+                doc.occurrences.iter().find(|o| o.component == comp).unwrap().id
+            })
+            .collect();
+        let [x, y, a, b, c] = ids[..] else { panic!("{ids:?}") };
+        doc.occurrences.iter_mut().for_each(|o| o.grounded = false);
+        let plane = |occurrence| Side { occurrence, prim: crate::constraints::Prim::Plane { p: Vec3::ZERO, n: Vec3::Z } };
+        let eq = Eq {
+            id: COMPILED_BASE + 16,
+            name: "Angle:1".into(),
+            eq: Equation::Angle { a: plane(b), b: plane(c), axis: None, target: 0.5, bounds: None },
+        };
+        let joints = vec![rigid(COMPILED_BASE + 4, "Ghost", x, y, Some("gone")), rigid(COMPILED_BASE + 8, "Weld", a, b, None)];
+        let extra = Compiled { joints, equations: vec![eq], lost: Vec::new() };
+        let sol = solve_with(&doc, &ModelState::default(), &Held::new(), Analysis::Placement, &extra);
+        let errors: Vec<u64> = sol.errors.iter().map(|(id, ..)| *id).collect();
+        assert_eq!(errors, [COMPILED_BASE + 4], "only the failed joint: {:?}", sol.errors);
+        assert!(sol.fixed.contains(&a) && !sol.fixed.contains(&x), "{:?}", sol.fixed);
+        assert!(sol.world.contains_key(&b) && sol.world.contains_key(&c), "{:?}", sol.world.keys());
+    }
+
+    /// Final wave item 10: an equation whose parts are placed but a side of which gives no
+    /// direction (a point picked for an angle) says so, not that a part is not placed.
+    #[test]
+    fn an_equation_without_a_direction_says_so() {
+        let mut doc = Document::new("point");
+        let mut add = |n| {
+            let comp = doc.add_component(Some(n), 0).unwrap();
+            doc.occurrences.iter().find(|o| o.component == comp).unwrap().id
+        };
+        let (a, b) = (add("A"), add("B"));
+        doc.occurrences.iter_mut().for_each(|o| o.grounded = true);
+        let eq = Eq {
+            id: COMPILED_BASE + 8,
+            name: "Angle:1".into(),
+            eq: Equation::Angle {
+                a: Side { occurrence: a, prim: crate::constraints::Prim::Point { p: Vec3::ZERO } },
+                b: Side { occurrence: b, prim: crate::constraints::Prim::Plane { p: Vec3::ZERO, n: Vec3::Z } },
+                axis: None,
+                target: 0.5,
+                bounds: None,
+            },
+        };
+        let extra = Compiled { joints: Vec::new(), equations: vec![eq], lost: Vec::new() };
+        let sol = solve_with(&doc, &ModelState::default(), &Held::new(), Analysis::Placement, &extra);
+        let why: Vec<&str> = sol.errors.iter().filter(|(id, ..)| *id == COMPILED_BASE + 8).map(|(_, _, w)| w.as_str()).collect();
+        assert_eq!(why, ["a side has no direction"], "{:?}", sol.errors);
     }
 }
