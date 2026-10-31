@@ -132,6 +132,9 @@ pub struct ViewportState {
     pub hover_bodies: Vec<String>,
     /// The model point an orbit turns around (Preferences: orbit around the cursor).
     pub orbit_pivot: Option<Vec3>,
+    /// Where the pivot glyph marks the centre of the orbit under way (the profile's
+    /// `pivot_glyph`), set by `navigation::handle` while an orbit drags.
+    pub pivot_glyph: Option<Vec3>,
     /// The orbit drag under way, summed from where it began (see [`crate::navigation::orbit`]).
     pub orbit_from: Option<crate::navigation::OrbitFrom>,
     /// Continuous orbit: the view turns about the vertical until the next click or key.
@@ -3687,6 +3690,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     if let Some(bx) = app.viewport.boxsel {
         paint_box_selection(&painter, bx, app.session.active_sketch.is_some());
     }
+    crate::navigation::paint_pivot(app, &painter, &proj);
     if let Some(tl) = app.tool.as_ref() {
         crate::tools::preview(app, tl, &painter, &proj);
     }
@@ -4744,6 +4748,9 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
                 crate::i18n::tr("nav.touchpad.orbit")
             } else if app.preferences.nav == crate::prefs::OPENSCAD_NAV {
                 "Orbit (left drag on empty space; Shift+left drag box-selects)"
+            } else if !crate::navigation::bindings(app).iter().any(|b| b.button == crate::prefs::NavButton::Right && b.mode == NavMode::Orbit) {
+                // Inventor's right button is the marking menu's: Shift+middle orbits.
+                "Orbit (Shift+middle drag)"
             } else if crate::navigation::free_orbit(app) {
                 "Orbit (right drag)"
             } else {

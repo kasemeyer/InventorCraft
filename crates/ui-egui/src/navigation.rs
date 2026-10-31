@@ -641,9 +641,10 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         } else {
             None
         };
-        // Ctrl+left drag from empty space orbits in every preset (Cmd on macOS). A Ctrl+click
-        // still selects, and Ctrl on geometry still drags it without snapping.
-        let ctrl_orbit = (mods.ctrl || mods.command) && !mods.shift && !mods.alt && empty_space(app);
+        // Ctrl+left drag from empty space orbits in every preset (Cmd on macOS) where the
+        // profile says so (`ctrl_left_drag_orbit`: SolidCraft, not Inventor). A Ctrl+click still
+        // selects, and Ctrl on geometry still drags it without snapping.
+        let ctrl_orbit = scheme(app).ctrl_left_drag_orbit && (mods.ctrl || mods.command) && !mods.shift && !mods.alt && empty_space(app);
         app.viewport.primary_nav = preset.or(ctrl_orbit.then_some(NavMode::Orbit));
     } else if !primary_down && !primary_released {
         app.viewport.primary_nav = None;
@@ -731,6 +732,10 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         app.viewport.orbit_pivot = None;
         app.viewport.orbit_from = None;
     }
+    // The pivot glyph (the profile's `pivot_glyph`) marks where an orbit under way turns: its
+    // chosen point, or the view's centre.
+    let orbiting = caps.orbit && (mode == Some(NavMode::Orbit) || motion.is_some_and(|(m, _)| m == NavMode::Orbit));
+    app.viewport.pivot_glyph = (orbiting && scheme(app).pivot_glyph).then(|| app.viewport.orbit_pivot.unwrap_or(app.cam.target));
     if app.viewport.spin {
         // A click on the navigation bar (its own button) is not a stop.
         let bar = app
@@ -759,6 +764,17 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         app.fit_view();
     }
     CameraInput { hover, scroll, mods, middle, secondary_down, primary_down, primary_pressed, delta, inside, axes, pinch, pan, primary_nav, mode }
+}
+
+/// The pivot glyph over the view while an orbit turns (`ViewportState::pivot_glyph`): a ring
+/// with a dot in the accent colour on a contrasting halo, from the theme's tokens.
+pub(crate) fn paint_pivot(app: &SolveApp, painter: &egui::Painter, proj: &crate::viewport::Proj) {
+    let Some(at) = app.viewport.pivot_glyph.and_then(|p| proj.to_screen(p)).filter(|p| p.is_finite()) else { return };
+    let t = crate::theme::Tokens::get();
+    painter.circle_stroke(at, t.space_6, egui::Stroke::new(t.space_4, t.on_accent));
+    painter.circle_stroke(at, t.space_6, egui::Stroke::new(t.space_2, t.accent));
+    painter.circle_filled(at, t.space_3, t.on_accent);
+    painter.circle_filled(at, t.space_2, t.accent);
 }
 
 /// The 3D mouse's motion this frame (#1336), on a page `rect` whose camera may do `caps`: the cap

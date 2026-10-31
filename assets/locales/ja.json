@@ -375,6 +375,7 @@
   "Opens your browser and copies the report text for you to paste into GitHub.": "ブラウザーを開き、GitHubに貼り付ける報告本文をコピーします。",
   "Opens your browser. Review and submit your report on GitHub.": "ブラウザーを開きます。GitHubで内容を確認して投稿してください。",
   "Operator": "演算子",
+  "Orbit (Shift+middle drag)": "回転（Shift+中ドラッグ）",
   "Orbit (right drag)": "回転（右ドラッグ）",
   "Other side": "反対側",
   "Other surface (mutual trim)": "相手のサーフェス（相互トリム）",

@@ -290,3 +290,107 @@ fn a_drawing_sheet_zooms_each_profiles_way() {
         assert!((ratio - want).abs() < 1e-9, "{profile}: a notch away on the sheet {ratio}");
     }
 }
+
+// ---- F-2 item 3: the orbit ----
+
+/// `profile` with a 40 × 30 × 20 box, looked at from `start_camera` (orthographic), its top face
+/// under the view's centre.
+fn boxed(profile: &str) -> Harness {
+    let mut h = on(profile);
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20, "corner": [-20, -15, -10]})).unwrap();
+    h.frames(3);
+    h.app.cam_anim = None;
+    h.app.cam = Camera { target: Vec3::ZERO, yaw: 0.6, pitch: 0.5, roll: 0.0, distance: 200.0, fov: 0.0, ..Default::default() };
+    h.frames(2);
+    h
+}
+
+fn press(button: egui::PointerButton, at: egui::Pos2, mods: egui::Modifiers) -> Vec<egui::Event> {
+    vec![
+        egui::Event::ModifiersChanged(mods),
+        egui::Event::PointerMoved(at),
+        egui::Event::PointerButton { pos: at, button, pressed: true, modifiers: mods },
+    ]
+}
+
+fn release(button: egui::PointerButton, at: egui::Pos2, mods: egui::Modifiers) -> Vec<egui::Event> {
+    vec![egui::Event::PointerButton { pos: at, button, pressed: false, modifiers: mods }, egui::Event::ModifiersChanged(egui::Modifiers::NONE)]
+}
+
+/// A Shift+middle drag from `from` by `by`, held at its end: the camera mid-drag is left to look at.
+fn orbit_held(h: &mut Harness, from: egui::Pos2, by: egui::Vec2) {
+    let (mid, shift) = (egui::PointerButton::Middle, egui::Modifiers::SHIFT);
+    h.frame_with(press(mid, from, shift));
+    for k in 1..=8 {
+        h.frame_with(vec![egui::Event::PointerMoved(from + by * (k as f32 / 8.0))]);
+    }
+}
+
+fn let_go(h: &mut Harness, at: egui::Pos2) {
+    h.frame_with(release(egui::PointerButton::Middle, at, egui::Modifiers::SHIFT));
+    h.frames(2);
+}
+
+#[test]
+fn inventor_orbits_freely_about_the_model_point_under_the_cursor() {
+    let mut h = boxed("inventor");
+    let rect = h.app.viewport.rect.unwrap();
+    let c = rect.center();
+    let proj = crate::viewport::projection(&h.app, rect);
+    let point = crate::prefs::model_point_under(&h.app, &proj, c + egui::vec2(30.0, 10.0)).expect("the box is under the cursor");
+    let before = h.app.cam;
+    orbit_held(&mut h, c + egui::vec2(30.0, 10.0), egui::vec2(0.0, 300.0));
+    assert_eq!(h.app.viewport.orbit_pivot, Some(point), "the pivot is the model point the drag began on");
+    // The pivot stays where it was on screen, and the turn went over the top (free orbit).
+    let on_screen = crate::viewport::projection(&h.app, rect).to_screen(point).unwrap();
+    assert!(on_screen.distance(proj.to_screen(point).unwrap()) < 0.5, "{on_screen:?}");
+    assert!((h.app.cam.back().dot(before.back()) - (300.0_f64 * 0.008).cos()).abs() < 1e-6, "a free turn of 300 × 0.008 rad");
+    // The glyph marks it while the drag lasts, and goes with the release.
+    assert_eq!(h.app.viewport.pivot_glyph, Some(point));
+    let_go(&mut h, c + egui::vec2(30.0, 310.0));
+    assert_eq!(h.app.viewport.pivot_glyph, None);
+    // Over empty space the pivot is the view's centre at the start of the drag.
+    let target = h.app.cam.target;
+    let corner = rect.left_top() + egui::vec2(300.0, 160.0);
+    assert!(crate::prefs::model_point_under(&h.app, &crate::viewport::projection(&h.app, rect), corner).is_none());
+    orbit_held(&mut h, corner, egui::vec2(40.0, 0.0));
+    assert_eq!(h.app.viewport.orbit_pivot, Some(target));
+    assert_eq!(h.app.viewport.pivot_glyph, Some(target));
+    let_go(&mut h, corner + egui::vec2(40.0, 0.0));
+}
+
+#[test]
+fn solidcraft_keeps_its_turntable_about_the_view_centre_without_a_glyph() {
+    let mut h = boxed("solidcraft");
+    let rect = h.app.viewport.rect.unwrap();
+    let c = rect.center();
+    orbit_held(&mut h, c + egui::vec2(30.0, 10.0), egui::vec2(0.0, 600.0));
+    assert_eq!(h.app.viewport.orbit_pivot, None);
+    assert_eq!(h.app.viewport.pivot_glyph, None);
+    assert!(h.app.cam.pitch <= std::f64::consts::FRAC_PI_2 + 1e-9 && h.app.cam.roll == 0.0, "turntable: {:?}", h.app.cam);
+    let_go(&mut h, c);
+}
+
+#[test]
+fn the_right_button_and_ctrl_left_orbit_only_under_solidcraft() {
+    for (profile, orbits) in [("solidcraft", true), ("inventor", false)] {
+        let mut h = boxed(profile);
+        let rect = h.app.viewport.rect.unwrap();
+        let empty = rect.left_top() + egui::vec2(300.0, 160.0);
+        let before = h.app.cam;
+        drag(&mut h, rect.center(), egui::vec2(60.0, 30.0), "right", json!({}));
+        assert_eq!(h.app.cam != before, orbits, "{profile}: right drag");
+        h.call("ui.menu", json!({"close": true}));
+        let before = h.app.cam;
+        drag(&mut h, empty, egui::vec2(80.0, 0.0), "left", json!({"ctrl": true}));
+        assert_eq!(h.app.cam != before, orbits, "{profile}: Ctrl+left drag on empty space");
+        // A right-click still opens the menu (Inventor's marking menu).
+        h.call("ui.menu", json!({"close": true}));
+        h.frames(2);
+        let (right, none) = (egui::PointerButton::Secondary, egui::Modifiers::NONE);
+        h.frame_with(press(right, rect.center(), none));
+        h.frame_with(release(right, rect.center(), none));
+        h.frames(2);
+        assert!(h.app.viewport.context_menu.is_some(), "{profile}: right-click opens the menu");
+    }
+}
