@@ -12,7 +12,7 @@ use egui::Pos2;
 use serde_json::{Value, json};
 use solidcraft_engine::Session;
 use solidcraft_engine::doc::{IDENTITY, Mat, mat_inverse, mat_mul};
-use solidcraft_engine::geom::{Aabb3, Mesh, Vec3};
+use solidcraft_engine::geom::{Aabb3, Mesh};
 
 use crate::SolveApp;
 use crate::gpu::GpuScene;
@@ -45,7 +45,8 @@ pub(crate) fn live(app: &SolveApp) -> bool {
     app.viewport.place.is_some()
 }
 
-/// The ghost's placement in the active component (tests and the screenshot).
+/// The ghost's placement in the active component (tests).
+#[cfg(test)]
 pub(crate) fn ghost(app: &SolveApp) -> Option<Mat> {
     app.viewport.place.as_ref()?.ghost.map(|g| g.local)
 }
@@ -166,10 +167,10 @@ pub(crate) fn scene(app: &SolveApp, colors: Colors) -> Option<(u64, Built)> {
 
 /// The world point of the ghost's origin (tests).
 #[cfg(test)]
-pub(crate) fn ghost_world(app: &SolveApp) -> Option<Vec3> {
+pub(crate) fn ghost_world(app: &SolveApp) -> Option<solidcraft_engine::geom::Vec3> {
     let p = app.viewport.place.as_ref()?;
     let g = p.ghost?;
-    Some(solidcraft_engine::doc::apply_point(&mat_mul(&p.frame, &g.local), Vec3::ZERO))
+    Some(solidcraft_engine::doc::apply_point(&mat_mul(&p.frame, &g.local), solidcraft_engine::geom::Vec3::ZERO))
 }
 
 #[cfg(test)]

@@ -115,6 +115,7 @@ mod origin_auto_hide_tests;
 #[cfg(test)]
 mod sketch_dimension_reference_tests;
 
+pub mod audio;
 #[cfg(test)]
 mod measurement_ui_tests;
 #[cfg(test)]
@@ -406,6 +407,9 @@ pub struct Services {
     pub agent_http: Option<agent_chat::backend::HttpFn>,
     /// The system keychain, for API agents' keys; None: keys can't be stored.
     pub secrets: Option<std::sync::Arc<dyn agent_chat::backend::Secrets>>,
+    /// Play mono samples at a rate (Hz): the constraint pop ([`audio`], R175). None: silent (the
+    /// browser, tests, a build without the desktop app's `audio` feature).
+    pub play_samples: Option<Box<dyn Fn(Vec<f32>, u32)>>,
 }
 
 pub struct SolveApp {

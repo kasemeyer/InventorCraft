@@ -3342,6 +3342,10 @@ pub(crate) fn run_dialog(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
                 if let Some(warning) = crate::dialogs_constraint::warnings(&cmd, &reply) {
                     app.set_status(warning, false);
                 }
+                // A constraint made (not edited) pops (R175).
+                if cmd == "constraint.create" {
+                    crate::audio::constraint_made(app);
+                }
             }
             Err(error) => {
                 if let Some((id, _)) = d.editing {

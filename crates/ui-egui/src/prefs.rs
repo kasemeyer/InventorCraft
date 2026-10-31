@@ -688,6 +688,9 @@ preference_settings! {
     selection_shift_add_only: bool = false, PAGE_SKETCH;
     /// Drive Joints shows the moved parts' old place as a ghost (its Show ghost box, #5905).
     drive_joints_ghost: bool = true, PAGE_DESIGN;
+    /// A short pop when a constraint is made (R175; on by default, as Inventor's Application
+    /// Options).
+    constraint_audio: bool = true, PAGE_DESIGN => check("Constraint audio notification", "A short click when a constraint is made");
     /// Plugin ids turned off (Preferences › Plugins). An installed plugin whose id is absent is on.
     disabled_plugins: std::collections::BTreeSet<String> = std::collections::BTreeSet::new(), PAGE_PLUGINS;
 }

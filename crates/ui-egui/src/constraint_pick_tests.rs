@@ -524,3 +524,69 @@ fn solidcraft_picks_and_commits_the_same() {
     enter(&mut h);
     assert!(h.app.session.doc.assembly.constraint("Mate:1").is_some());
 }
+
+/// R175: OK and Apply that make a constraint each ask for the pop once, on both profiles; none
+/// with the preference off, none for a refused draft, none for an edit (no sound device needed:
+/// the requests are counted).
+#[test]
+fn a_made_constraint_pops_once() {
+    use crate::audio::requests;
+    for inventor_profile in [true, false] {
+        let mut h = if inventor_profile { opened() } else { Harness::new() };
+        if !inventor_profile {
+            constraint_blocks(&mut h);
+            h.app.start("constraint.create");
+            h.frames(3);
+        }
+        let before = requests();
+        picks(&mut h, A_TOP, B_TOP);
+        enter(&mut h);
+        assert_eq!(requests(), before + 1, "OK made Mate:1: one pop");
+        h.app.start("constraint.create");
+        h.frames(3);
+        picks(&mut h, PLATE_TOP, PIN_TOP_FACE);
+        press(&mut h, "Apply");
+        assert_eq!(h.app.session.doc.assembly.constraints.len(), 2);
+        assert_eq!(requests(), before + 2, "Apply made Mate:2: one pop");
+        press(&mut h, "Cancel");
+        // An edit is not a new constraint.
+        let mate = constraint_id(&h, "Mate:1");
+        crate::dialogs_constraint::open_edit(&mut h.app, mate);
+        h.frames(3);
+        form_mut(&mut h).value = "3".into();
+        form_mut(&mut h).touched.insert("offset");
+        h.frames(3);
+        enter(&mut h);
+        assert_eq!(h.app.session.doc.assembly.constraint("Mate:1").map(|c| c.offset), Some(3.0), "the edit ran");
+        assert_eq!(requests(), before + 2, "no pop for an edit");
+        // The preference off: silent.
+        h.app.preferences.constraint_audio = false;
+        h.app.start("constraint.create");
+        h.frames(3);
+        picks(&mut h, A_TOP, PLATE_TOP);
+        enter(&mut h);
+        assert_eq!(h.app.session.doc.assembly.constraints.len(), 3);
+        assert_eq!(requests(), before + 2, "no pop with the preference off");
+    }
+}
+
+#[test]
+fn a_refused_create_does_not_pop() {
+    let mut h = inventor(Assembly);
+    constraint_blocks(&mut h);
+    h.app
+        .run(
+            "constraint.create",
+            json!({"type": "mate", "solution": "flush", "a": {"occurrence": "A:1", "face": A_TOP}, "b": {"occurrence": "B:1", "face": B_TOP}, "offset": 7}),
+        )
+        .unwrap();
+    let before = crate::audio::requests();
+    alias(&mut h, "C");
+    picks(&mut h, A_TOP, B_TOP);
+    pick_solution(&mut h, "Flush");
+    form_mut(&mut h).value = "2".into();
+    h.frames(3);
+    enter(&mut h);
+    assert_eq!(h.app.session.doc.assembly.constraints.len(), 1, "refused");
+    assert_eq!(crate::audio::requests(), before, "no pop for a refusal");
+}

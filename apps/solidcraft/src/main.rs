@@ -21,6 +21,8 @@
 #[cfg(not(target_os = "macos"))]
 #[path = "../../../assets/icons/app/shared/source/app_icon.rs"]
 mod app_icon;
+#[cfg(any(all(feature = "audio", any(target_os = "windows", target_os = "macos")), all(feature = "audio-linux", target_os = "linux")))]
+mod audio;
 mod control_server;
 mod device_lost;
 #[cfg(target_os = "windows")]
@@ -296,6 +298,9 @@ fn services(cc: &eframe::CreationContext<'_>) -> Services {
             Box::pin(async move { future.await.map(|p| p.path().to_string_lossy().into_owned()) })
         })),
         graphics_path: graphics_path().map(|p| p.to_string_lossy().to_string()),
+        // The constraint pop (R175); silent in a build without the audio feature.
+        #[cfg(any(all(feature = "audio", any(target_os = "windows", target_os = "macos")), all(feature = "audio-linux", target_os = "linux")))]
+        play_samples: audio::player(),
         window_system: window_system_now(),
         http_get: Some(std::sync::Arc::new(http_get)),
         http_download: Some(std::sync::Arc::new(http_download)),
