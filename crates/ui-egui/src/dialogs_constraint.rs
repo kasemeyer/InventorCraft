@@ -394,9 +394,9 @@ pub(crate) fn rows_keys(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut Constrain
         let label = tr(if f.kind.is_angle() { "ui.constraint.angle" } else { "ui.constraint.offset" });
         let recent = recent(app, f.kind.is_angle());
         ui_kit::row(ui, label, |ui| {
-            let width = (ui.available_width() - t.control_height - t.space_4).max(0.0);
+            let width = (ui.available_width() - t.control_height - t.space_12 - ui.spacing().item_spacing.x).max(0.0);
             ui.allocate_ui(egui::vec2(width, t.control_height), |ui| enter |= ui_kit::field(ui, &mut f.value));
-            ui.allocate_ui(egui::vec2(t.control_height + t.space_4, t.control_height), |ui| {
+            ui.allocate_ui(egui::vec2(t.control_height + t.space_12, t.control_height), |ui| {
                 ui_kit::dropdown_menu(ui, "constraint_value_menu", "", |ui| {
                     if ui_kit::list_picker(ui, "constraint_measure", tr("ui.constraint.measure"), false).clicked() {
                         f.value.clear();
