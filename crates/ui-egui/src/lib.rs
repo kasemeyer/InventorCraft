@@ -124,6 +124,7 @@ pub mod messages;
 pub mod occurrence_drag;
 #[cfg(test)]
 mod pattern_arrow_tests;
+mod place_component;
 #[cfg(test)]
 mod prompt_cards_tests;
 #[cfg(test)]
@@ -1102,6 +1103,7 @@ impl SolveApp {
         }
         dim_view::cancel();
         self.tool = None;
+        place_component::end(self);
         self.home.open = false;
         if let Some(ext) = id.strip_prefix("sketch.insert_").filter(|e| matches!(*e, "dxf" | "svg")) {
             self.pick_open_command(id, json!({}), &[ext]);
@@ -1113,9 +1115,8 @@ impl SolveApp {
             self.pick_open(|app, path| {
                 let Some(path) = path else { return };
                 if solidcraft_engine::io::is_design_path(&path) {
-                    if app.run("component.insert_design", json!({ "path": path })).is_ok() {
-                        app.fit_view();
-                    }
+                    // Placed where the ghost is, one click per copy (R171).
+                    place_component::begin(app, path);
                 } else {
                     app.insert_path_async(&path);
                 }

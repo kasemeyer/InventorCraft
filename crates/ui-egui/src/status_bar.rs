@@ -26,6 +26,7 @@ pub(crate) fn texts(app: &SolveApp) -> StatusTexts {
     // A running drawing tool's prompt stays while it runs (General Dimension, Task 8).
     let idle = crate::drawing_ui::prompt(app)
         .or_else(|| crate::dialogs_constraint::prompt(app))
+        .or_else(|| crate::place_component::prompt(app))
         .or_else(|| crate::constraint_overlay::prompt(app))
         .unwrap_or("ui.status_ready");
     let left = fresh.map_or_else(|| crate::i18n::tr(idle).to_string(), |(text, _, _)| crate::i18n::tr_dyn(text));

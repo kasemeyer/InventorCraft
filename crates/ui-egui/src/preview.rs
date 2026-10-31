@@ -309,6 +309,20 @@ fn stream_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> Option
 /// Keep the preview in step with the open dialog: start a computation when its inputs changed,
 /// take finished results. Called once per frame.
 pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
+    // Place Component's ghost under the pointer (R171).
+    if crate::place_component::live(app) {
+        let colors = Colors::for_tool(&Tokens::get(), &app.ui.tab, true);
+        match crate::place_component::scene(app, colors) {
+            Some((key, built)) if app.preview.shown_key != Some(key) => {
+                app.preview.started = crate::now_ms();
+                app.preview.apply(key, Ok(built));
+                app.preview.busy = false;
+            }
+            Some(_) => {}
+            None => app.preview.clear(),
+        }
+        return;
+    }
     // The Constrain panel previews E-1's dry solve: the occurrences it moves drawn at their
     // preview poses through the joints' moved-component scene (spec §6.3, R137).
     if let Some(moved) = crate::dialogs_constraint::frame(app) {

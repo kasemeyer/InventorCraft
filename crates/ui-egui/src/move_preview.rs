@@ -119,7 +119,7 @@ impl MovePreview {
 }
 
 /// `mesh` moved by `m`, in the colour of geometry the feature adds, with its shaded edges.
-fn draw(scene: &mut GpuScene, mesh: &Mesh, m: &Mat, colors: Colors, bounds: &mut Aabb3) {
+pub(crate) fn draw(scene: &mut GpuScene, mesh: &Mesh, m: &Mat, colors: Colors, bounds: &mut Aabb3) {
     for t in &mesh.triangles {
         for k in t {
             let i = *k as usize;

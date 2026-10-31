@@ -96,6 +96,10 @@ pub(crate) fn holds_keys(app: &SolveApp) -> bool {
 /// ring (R72; spec §6.7: these panels have no capture). Only where the profile has marking menus.
 fn kind_list(app: &SolveApp) -> Option<&'static [&'static str]> {
     layout(app)?;
+    // Place Component's list (R171): Done ends it.
+    if crate::place_component::live(app) {
+        return Some(&["ui.placeDone"]);
+    }
     match &app.dialog.as_ref()?.kind {
         Kind::Assembly(Asm::Constraint(_)) => Some(&["ui.ok", "ui.applyContinue", "ui.cancel"]),
         Kind::Assembly(Asm::DriveConstraint(_)) => Some(&["ui.ok", "ui.cancel"]),
@@ -255,6 +259,7 @@ pub(crate) fn item(app: &SolveApp, id: &str, ctx: MenuContext) -> Item {
         // Inventor's tool ring says OK for ending the running command.
         "ui.done" => act("ui.done", "OK", "finish").on(app.tool.is_some()),
         "ui.ok" => act("ui.ok", "OK", "finish").key("Enter").on(panel_can(app, PanelAction::Ok)),
+        "ui.placeDone" => act("ui.placeDone", "Done", "finish").key("Esc"),
         "ui.applyContinue" => act("ui.applyContinue", "Apply", "plus").on(panel_can(app, PanelAction::ApplyAndContinue)),
         "ui.cancel" => {
             let can = if app.dialog.is_some() { panel_can(app, PanelAction::Cancel) } else { app.tool.is_some() };

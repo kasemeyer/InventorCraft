@@ -168,6 +168,8 @@ pub struct ViewportState {
     pub(crate) text_drag: Option<(u64, String)>,
     /// A part that joints place, being dragged.
     pub(crate) joint_drag: Option<crate::joint_drag::Drag>,
+    /// Place Component's ghost (R171).
+    pub(crate) place: Option<crate::place_component::Place>,
     /// A free part being dragged to a new place (#2804).
     pub(crate) occurrence_drag: Option<crate::occurrence_drag::Drag>,
     /// Extrude by pulling a face or profile.
@@ -3055,6 +3057,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         candidate(app, &hits).map(|(h, s)| (h, Some(s)))
     };
     app.viewport.hover = cand.as_ref().map(|c| c.0.clone());
+    // Place Component's ghost follows the pointer over the view, holding still while it navigates.
+    if !navigating {
+        crate::place_component::hover(app, hover.filter(|p| inside && !crate::shell::covered(app, *p)));
+    }
     // Select Other: a press held still opens the list of everything under it; while the list is
     // open its row under the pointer is what lights up.
     let held =
@@ -3271,7 +3277,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             && app.dialog.is_none()
             && crate::dim_view::pick_reference(ui.ctx(), p, resp.double_clicked());
         if resp.clicked() && !held && !reference_pick {
-            if app.tool.is_some() {
+            if crate::place_component::live(app) {
+                crate::place_component::click(app);
+            } else if app.tool.is_some() {
                 crate::tools::on_click(app, &proj, p, mods.shift);
             } else if app.dialog.as_ref().is_some_and(|d| d.wants_picks()) {
                 if let Some((hit, Some(sel))) = cand {
@@ -3376,6 +3384,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 crate::context_menu::open(app, p);
             } else if app.tool.is_some() {
                 crate::tools::finish(app);
+            } else if crate::place_component::end(app) {
+                // Without a marking menu the right-click is Place's Done, as it ends a tool.
             } else if app.dialog.is_none() {
                 crate::context_menu::open(app, p);
             }
@@ -3547,7 +3557,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     // Dragging a part moves its free chain (outside sketches), or reaches within its joints
     // when the chain is anchored. Shift, Ctrl/Cmd or Alt held as the drag starts
     // draws a selection box instead, as a drag from empty space does.
-    if app.tool.is_none() && app.dialog.is_none() && primary_nav.is_none() && mode.is_none() && app.session.active_sketch.is_none() && !held {
+    if app.tool.is_none()
+        && app.dialog.is_none()
+        && app.viewport.place.is_none()
+        && primary_nav.is_none()
+        && mode.is_none()
+        && app.session.active_sketch.is_none()
+        && !held
+    {
         if resp.drag_started_by(egui::PointerButton::Primary)
             // Physical Ctrl on macOS is not the primary click-selection modifier, but must
             // still keep a modified drag from moving a part.

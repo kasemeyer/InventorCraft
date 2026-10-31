@@ -1334,6 +1334,9 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             crate::drawing_notes_tool::continue_leader(app)
         }
         "ui.done" | "ui.cancel" if crate::sheet_canvas::shows(app) && app.drawing.tool.is_some() => crate::drawing_ui::end_tool(app),
+        "ui.placeDone" => {
+            crate::place_component::end(app);
+        }
         "ui.done" => {
             crate::tools::finish(app);
             app.tool = None;

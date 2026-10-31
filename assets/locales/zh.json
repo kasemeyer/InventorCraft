@@ -3211,6 +3211,8 @@
   "ui.pinToShortcuts": "固定到快捷方式",
   "ui.pinToToolbar": "固定到工具栏",
   "ui.pipe": "管道",
+  "ui.place.prompt": "单击放置零部件的副本；按 Esc 或右键 ▸ 完成以结束",
+  "ui.place.unreadable": "该设计没有可放置的实体",
   "ui.placement": "放置",
   "ui.plane": "平面",
   "ui.plane_at_angle": "角度平面",

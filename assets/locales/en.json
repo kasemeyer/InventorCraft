@@ -3211,6 +3211,8 @@
   "ui.pinToShortcuts": "Pin to Shortcuts",
   "ui.pinToToolbar": "Pin to Toolbar",
   "ui.pipe": "Pipe",
+  "ui.place.prompt": "Click to place a copy of the component; Esc or right-click ▸ Done to finish",
+  "ui.place.unreadable": "That design has no solid bodies to place",
   "ui.placement": "Placement",
   "ui.plane": "Plane",
   "ui.plane_at_angle": "Plane at Angle",
