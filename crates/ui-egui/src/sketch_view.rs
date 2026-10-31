@@ -80,3 +80,7 @@ fn look_at(app: &mut SolveApp) {
 #[cfg(test)]
 #[path = "sketch_view_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "sketch_resume_tests.rs"]
+mod resume_tests;

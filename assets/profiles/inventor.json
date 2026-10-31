@@ -19,6 +19,7 @@
     "sticky_split_buttons": true,
     "origin_auto_hide": true,
     "create_drawing_in_root_menu": true,
+    "finish_sketch_resumes_feature": true,
     "marking_menu": {
       "face":   {"ring": ["ui.lookAt", "solid.extrude", "ui.selectOther", "", "sketch.create", "construct.plane.offset", "edit.undo", "inspect.measure"],
                  "overflow": ["ui.repeat", "-", "ui.previousView", "ui.home", "-", "ui.properties"],

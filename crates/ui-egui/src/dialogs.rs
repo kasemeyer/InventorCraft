@@ -2891,6 +2891,18 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
 }
 
+/// A new Extrude, Revolve or Hole panel that has nothing picked yet: its command, which Start
+/// 2D Sketch parks for Finish Sketch to reopen (`workflow.finish_sketch_resumes_feature`).
+pub(crate) fn waits_for_profile(d: &Dialog) -> Option<&'static str> {
+    let command = match d.kind {
+        Kind::Extrude { .. } => "solid.extrude",
+        Kind::Revolve { .. } => "solid.revolve",
+        Kind::Hole { .. } => "solid.hole",
+        _ => return None,
+    };
+    (d.editing.is_none() && d.inputs.first().is_some_and(|i| i.items.is_empty())).then_some(command)
+}
+
 /// Close the dialog without applying it (Esc, Cancel). An edit puts the timeline marker back.
 pub fn cancel(app: &mut SolveApp) {
     app.applying = None;

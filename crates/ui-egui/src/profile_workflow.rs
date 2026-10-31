@@ -52,6 +52,10 @@ pub struct Workflow {
     /// The browser root's menu offers Create Drawing View (spec §2.1 path 2c, R23). File › New
     /// Drawing and Home's tile are in every profile.
     pub create_drawing_in_root_menu: bool,
+    /// Start 2D Sketch from an Extrude, Revolve or Hole panel still waiting for its profile
+    /// parks that feature, and Finish Sketch reopens it with the new sketch's profiles picked
+    /// (Inventor). Off: the sketch replaces the panel and Finish ends at the model.
+    pub finish_sketch_resumes_feature: bool,
 }
 
 impl Default for Workflow {
@@ -74,6 +78,7 @@ impl Default for Workflow {
             sticky_split_buttons: false,
             origin_auto_hide: false,
             create_drawing_in_root_menu: false,
+            finish_sketch_resumes_feature: false,
         }
     }
 }

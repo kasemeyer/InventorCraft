@@ -25,6 +25,8 @@ pub struct DocSlot {
     pub(crate) big_operation: bool,
     cam: Camera,
     pre_sketch_marker: Option<Option<usize>>,
+    /// The feature its sketch will return to (`SolveApp::waiting_feature`).
+    waiting_feature: Option<crate::WaitingFeature>,
     view: DocView,
     occurrence_move: Option<crate::browser::OccMove>,
     /// The sketch its view looked at and the view to return to (a tab switch is not a finish).
@@ -46,6 +48,7 @@ impl DocSlot {
             big_operation: false,
             cam: Camera::default(),
             pre_sketch_marker: None,
+            waiting_feature: None,
             view: DocView::default(),
             occurrence_move: None,
             sketch_view: Default::default(),
@@ -127,6 +130,7 @@ fn swap_in(app: &mut SolveApp, slot: DocSlot) -> DocSlot {
         big_operation: std::mem::replace(&mut app.big_operation, slot.big_operation),
         cam: std::mem::replace(&mut app.cam, slot.cam),
         pre_sketch_marker: std::mem::replace(&mut app.pre_sketch_marker, slot.pre_sketch_marker),
+        waiting_feature: std::mem::replace(&mut app.waiting_feature, slot.waiting_feature),
         view: take_view(app),
         occurrence_move: std::mem::replace(&mut app.tree.occurrence_move, slot.occurrence_move),
         sketch_view: std::mem::replace(&mut app.sketch_view, slot.sketch_view),

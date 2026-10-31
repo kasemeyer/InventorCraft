@@ -412,6 +412,15 @@ pub struct Services {
     pub play_samples: Option<Box<dyn Fn(Vec<f32>, u32)>>,
 }
 
+/// A feature panel parked by Start 2D Sketch (see `SolveApp::waiting_feature`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WaitingFeature {
+    /// The feature's command (Extrude, Revolve or Hole).
+    pub command: &'static str,
+    /// The newest feature id when it was parked: only a sketch made after it resumes it.
+    pub after: u64,
+}
+
 pub struct SolveApp {
     pub session: Session,
     pub ui: UiState,
@@ -428,6 +437,9 @@ pub struct SolveApp {
     /// The history marker before Edit Sketch rolled the timeline to the sketch; Finish Sketch
     /// restores it.
     pub pre_sketch_marker: Option<Option<usize>>,
+    /// The feature parked by Start 2D Sketch while its panel waited for a profile
+    /// (`workflow.finish_sketch_resumes_feature`): Finish Sketch reopens it.
+    pub waiting_feature: Option<WaitingFeature>,
     pub services: Services,
     file_picker: Option<file_picker::Pending>,
     /// A Save or Save As being written on a worker (see [`save_job`]).
@@ -604,6 +616,7 @@ impl SolveApp {
             cam_anim: None,
             now: 0.0,
             pre_sketch_marker: None,
+            waiting_feature: None,
             views: Default::default(),
             sketch_view: Default::default(),
             services,
@@ -1134,6 +1147,15 @@ impl SolveApp {
             sketch_palette::toggle_construction(self);
             return;
         }
+        // Start 2D Sketch from a panel still waiting for its profile parks that feature for
+        // Finish Sketch to reopen; any other command outside a sketch forgets it.
+        if self.session.active_sketch.is_none() {
+            self.waiting_feature = (id == "sketch.create" && profile::active(self).workflow.finish_sketch_resumes_feature)
+                .then(|| self.dialog.as_ref().and_then(dialogs::waits_for_profile))
+                .flatten()
+                .map(|command| WaitingFeature { command, after: self.session.doc.features.iter().map(|f| f.id).max().unwrap_or(0) })
+                .or_else(|| self.waiting_feature.take().filter(|_| id == "sketch.create"));
+        }
         dim_view::cancel();
         self.tool = None;
         place_component::end(self);
@@ -1407,11 +1429,24 @@ impl SolveApp {
         }
         dim_view::cancel();
         self.tool = None;
+        let sketch = self.session.active_sketch;
         if self.run(command, json!({})).is_err() && command != "sketch.finish" {
             return;
         }
         if let Some(marker) = self.pre_sketch_marker.take() {
             self.restore_marker(marker);
+        }
+        // The feature that waited for this (new) sketch opens again with its profiles picked.
+        if let Some(waiting) = self.waiting_feature.take()
+            && command == "sketch.finish"
+            && self.session.active_sketch.is_none()
+            && let Some(sketch) = sketch.filter(|s| *s > waiting.after)
+        {
+            let profiles =
+                if waiting.command == "solid.hole" { 0 } else { self.session.world_state().sketch(sketch).map_or(0, |s| s.profiles.len()) };
+            let items: Vec<serde_json::Value> = (0..profiles).map(|i| json!({"type": "profile", "sketch": sketch, "index": i})).collect();
+            let _ = self.run("select.set", json!({ "items": items }));
+            self.start(waiting.command);
         }
     }
 
