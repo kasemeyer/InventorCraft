@@ -24,8 +24,8 @@ use crate::test_support::{
 const A_TOP: [f64; 3] = [50.0, 25.0, 20.0];
 const B_TOP: [f64; 3] = [50.0, 95.0, 27.0];
 const A_RIGHT: [f64; 3] = [100.0, 25.0, 10.0];
-/// B's own left face, in B's component space (x = 0, half way up B's 7..27).
-const B_SIDE: [f64; 3] = [0.0, 95.0, 17.0];
+/// B's own right face, in B's component space (x = 100, half way up B's 7..27).
+const B_SIDE: [f64; 3] = [100.0, 95.0, 17.0];
 const HOLE_RIM: [f64; 3] = [200.0, 0.0, 10.0];
 const PIN_RIM: [f64; 3] = [310.0, 0.0, 110.0];
 
@@ -137,24 +137,33 @@ fn the_first_minute_under_inventor() {
     let dof = |h: &Harness| solidcraft_engine::constraints::report(&h.app.session).dof.get(&b).copied();
     let dof_after_mate1 = dof(&h).expect("B's DOF after Mate:1");
 
-    // 3. C again: Flush A's right face with B's side face where B now is (R142; B turned over
-    //    about Y, so B's own left face, component x = 0, now faces +x at x = 100); Apply; Insert
-    //    the pin's top rim into the hole's top rim; Apply; Cancel.
-    //    The brief's pick is B's right face (component [100, 95, 17]), which needs B turned a
-    //    half-turn about Z; E-1 refuses that antiparallel Flush ("over-constrains B"), ledgered
-    //    for E-1 wave 1 ("a Flush/Mate whose dry solve needs a half-turn must not be refused —
-    //    solve from the flipped seed"). Restore the brief's pick and B's turn about Z then.
+    // 3. C again: Flush A's right face with B's right face (the brief's pick; R142: picked where
+    //    B now is: turned over about Y, its right face faces -x at x = 0) — B turns a half-turn
+    //    about Z to meet it, not refused (wave 1 item 14); Apply; Insert the pin's top rim into
+    //    the hole's top rim; Apply; Cancel.
     alias(&mut h, "C");
     press_role(&mut h, "Flush", Role::Button, true);
     let b_side = world_at(&h, "B", B_SIDE);
-    assert!((20.0..=40.0).contains(&b_side[2]) && (b_side[0] - 100.0).abs() <= 1e-9, "the pick lies on B, at z 20..40: {b_side:?}");
-    let b_pose = world(&h, "B");
-    picks(&mut h, A_RIGHT, b_side);
+    assert!((20.0..=40.0).contains(&b_side[2]) && b_side[0].abs() <= 1e-9, "the pick lies on B, at z 20..40: {b_side:?}");
+    // B's right face faces away from the home view: turn the view to it for the second pick,
+    // as a user would, and back.
+    click_world(&mut h, A_RIGHT);
+    clicks_expire(&mut h);
+    assert_eq!(h.call("ui.view", json!({"view": "left"}))["ok"], json!(true));
+    h.settle();
+    click_world(&mut h, b_side);
+    clicks_expire(&mut h);
+    assert_eq!(h.call("ui.view", json!({"view": "home"}))["ok"], json!(true));
+    h.settle();
     press(&mut h, "Apply");
     assert!(constrain_open(&h), "Apply keeps the panel open");
     let mate2 = h.app.session.doc.assembly.constraint("Mate:2").expect("Mate:2");
     assert_eq!(mate2.solution, ConstraintSolution::Flush);
-    assert!(near(&world(&h, "B"), &b_pose, 1e-9), "already flush (x = 100): B stays");
+    let right = world_at(&h, "B", B_SIDE);
+    assert!((right[0] - 100.0).abs() <= 1e-9, "B half-turned about Z: its right face flush at x = 100: {right:?}");
+    let top = world_at(&h, "B", B_TOP);
+    assert!((top[2] - 20.0).abs() <= 1e-9, "still on A's top: {top:?}");
+    assert_eq!(status(&h, "Mate:1"), ConstraintStatus::Ok, "Mate:1 holds");
     assert_eq!(status(&h, "Mate:2"), ConstraintStatus::Ok, "Mate:2 holds");
     let dof_after_mate2 = dof(&h).expect("B's DOF after Mate:2");
     assert!(dof_after_mate2 < dof_after_mate1, "Mate:2 takes B's freedom: {dof_after_mate1} -> {dof_after_mate2}");

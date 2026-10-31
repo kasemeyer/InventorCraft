@@ -507,9 +507,24 @@ fn part_name(s: &Session, id: u64) -> String {
 pub(crate) fn over_constrains_all(s: &Session, constraints: Vec<Constraint>, blame: &Constraint) -> Option<String> {
     let (_, before) = dry_solve(s, s.doc.assembly.constraints.clone(), Analysis::Placement);
     let (_, after) = dry_solve(s, constraints.clone(), Analysis::Placement);
+    let (names, mm, deg) = newly_sick(&constraints, &before, &after);
+    if names.is_empty() {
+        return None;
+    }
+    let b = blame.picks.get(1).map_or(0, |g| g.occurrence);
+    let gap = if mm > 1e-6 || deg <= 1e-6 { format!("{mm:.3} mm") } else { format!("{deg:.3} deg") };
+    Some(format!("over-constrains {}: {} off by {gap}", part_name(s, b), names.join(", ")))
+}
+
+/// The constraints `Sick` in `after` that were not in `before`, and their largest gaps (mm, deg).
+fn newly_sick(
+    constraints: &[Constraint],
+    before: &BTreeMap<u64, ConstraintStatus>,
+    after: &BTreeMap<u64, ConstraintStatus>,
+) -> (Vec<String>, f64, f64) {
     let (mut mm, mut deg) = (0.0_f64, 0.0_f64);
     let mut names = Vec::new();
-    for c in &constraints {
+    for c in constraints {
         let Some(ConstraintStatus::Sick { gap_mm, gap_deg, .. }) = after.get(&c.id) else { continue };
         if matches!(before.get(&c.id), Some(ConstraintStatus::Sick { .. })) {
             continue;
@@ -518,12 +533,65 @@ pub(crate) fn over_constrains_all(s: &Session, constraints: Vec<Constraint>, bla
         mm = mm.max(*gap_mm);
         deg = deg.max(*gap_deg);
     }
-    if names.is_empty() {
-        return None;
+    (names, mm, deg)
+}
+
+/// A half-turn of the part a constraint moves (wave 1 item 14, E-1): where the parts are, a Flush
+/// whose normals oppose (or a Mate that needs the part turned over) can't close, since a solve
+/// from there never turns it half round; so before refusing, the part `blame` moves (its second
+/// pick's occurrence, else its first's, when not grounded) is tried turned a half-turn about each
+/// world axis and each of its own, through its origin, the constraints on it seeded afresh from
+/// there. The first turn whose dry solve makes nothing newly sick: (occurrence, its new
+/// placement in its parent).
+pub(crate) fn half_turn(s: &Session, constraints: &[Constraint], blame: &Constraint) -> Option<(u64, Mat)> {
+    use solidcraft_doc::{apply_point, apply_vector, mat_inverse, mat_mul, rigid};
+    let movable = |o: u64| o != 0 && s.doc.occurrences.iter().any(|x| x.id == o && !x.grounded);
+    let o = [blame.picks.get(1), blame.picks.first()].into_iter().flatten().map(|g| g.occurrence).find(|o| movable(*o))?;
+    let parent = s.doc.occurrences.iter().find(|x| x.id == o)?.parent;
+    let parent_world = if parent == 0 { solidcraft_doc::IDENTITY } else { s.doc.component_transform(parent) };
+    let to_parent = mat_inverse(&parent_world)?;
+    let world = joints::occurrence_world(&s.doc, o);
+    let centre = apply_point(&world, Vec3::ZERO);
+    let (_, before) = dry_solve(s, s.doc.assembly.constraints.clone(), Analysis::Placement);
+    let mut axes: Vec<Vec3> = Vec::new();
+    for axis in [Vec3::X, Vec3::Y, Vec3::Z].into_iter().chain([Vec3::X, Vec3::Y, Vec3::Z].map(|v| apply_vector(&world, v))) {
+        let Some(axis) = axis.normalized() else { continue };
+        if !axes.iter().any(|a| a.dot(axis).abs() > 1.0 - 1e-9) {
+            axes.push(axis);
+        }
     }
-    let b = blame.picks.get(1).map_or(0, |g| g.occurrence);
-    let gap = if mm > 1e-6 || deg <= 1e-6 { format!("{mm:.3} mm") } else { format!("{deg:.3} deg") };
-    Some(format!("over-constrains {}: {} off by {gap}", part_name(s, b), names.join(", ")))
+    let fresh: Vec<Constraint> = constraints.iter().cloned().map(|c| forget_state(c, o)).collect();
+    for axis in axes {
+        let turned = mat_mul(&to_parent, &mat_mul(&rigid(Vec3::ZERO, centre, axis, std::f64::consts::PI), &world));
+        let mut t = s.scratch();
+        turn(&mut t, o, turned);
+        let (_, after) = dry_solve(&t, fresh.clone(), Analysis::Placement);
+        if newly_sick(&fresh, &before, &after).0.is_empty() {
+            return Some((o, turned));
+        }
+    }
+    None
+}
+
+/// `c` with its state forgotten when it holds occurrence `o` (it seeds from where `o` is then).
+fn forget_state(mut c: Constraint, o: u64) -> Constraint {
+    if c.picks.iter().any(|p| p.occurrence == o) {
+        c.state.clear();
+        c.signatures.clear();
+    }
+    c
+}
+
+/// Put occurrence `o` at `placement` (in its parent) and seed the constraints on it afresh from
+/// there: a [`half_turn`] taken.
+pub(crate) fn turn(s: &mut Session, o: u64, placement: Mat) {
+    s.pending_moves.remove(&o);
+    let d = s.doc_mut();
+    if let Some(x) = d.occurrences.iter_mut().find(|x| x.id == o) {
+        x.transform = placement;
+    }
+    let all = std::mem::take(&mut d.assembly.constraints);
+    d.assembly.constraints = all.into_iter().map(|c| forget_state(c, o)).collect();
 }
 
 /// [`over_constrains_all`] for one candidate: added (`replacing: None`) or in place of constraint
@@ -717,12 +785,20 @@ pub fn preview(s: &Session, d: &Draft) -> Preview {
     if base.is_none() {
         c.id = candidate_id(s);
     }
-    let all = with_candidate(s, &c, d.editing);
+    let mut all = with_candidate(s, &c, d.editing);
+    // A part that must turn a half round to meet it is shown turned (wave 1 item 14).
+    let mut turned_session = None;
     if !c.suppressed
         && let Some(why) = over_constrains_all(s, all.clone(), &c)
     {
-        return refused(why);
+        let Some((o, placement)) = half_turn(s, &all, &c) else { return refused(why) };
+        let mut t = s.scratch();
+        t.doc_mut().assembly.constraints = all;
+        turn(&mut t, o, placement);
+        all = t.doc.assembly.constraints.clone();
+        turned_session = Some(t);
     }
+    let s = turned_session.as_ref().unwrap_or(s);
     let predicted = if d.offset.is_none() { predict(s, &c).ok() } else { None };
     // R160: a limited Angle made, or its offset edited, starts at its offset first (R153), as
     // the command does, so the preview shows the pose the command makes.

@@ -546,7 +546,13 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
     if !c.suppressed
         && let Some(why) = over_constrains(s, &c, None)
     {
-        return Err(bad(cmd, why));
+        // A part that must turn a half round to meet it turns (wave 1 item 14).
+        let mut probe = c.clone();
+        probe.id = s.doc.assembly.constraints.iter().map(|x| x.id).max().unwrap_or(0).saturating_add(1);
+        let mut all = s.doc.assembly.constraints.clone();
+        all.push(probe.clone());
+        let Some((o, placement)) = crate::constraints::half_turn(s, &all, &probe) else { return Err(bad(cmd, why)) };
+        crate::constraints::turn(s, o, placement);
     }
     let before = worlds(s);
     let doc = s.doc_mut();
@@ -600,7 +606,9 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     if !c.suppressed
         && let Some(why) = over_constrains(s, &c, Some(id))
     {
-        return Err(bad(cmd, why));
+        let all: Vec<_> = s.doc.assembly.constraints.iter().map(|x| if x.id == id { c.clone() } else { x.clone() }).collect();
+        let Some((o, placement)) = crate::constraints::half_turn(s, &all, &c) else { return Err(bad(cmd, why)) };
+        crate::constraints::turn(s, o, placement);
     }
     // R153: an edit that changes a limited Angle's offset starts it there.
     let started = c.offset != base.offset || c.exprs.offset != base.exprs.offset;
@@ -626,12 +634,16 @@ fn suppress(s: &mut Session, p: &Value) -> Result<Value> {
         // Unsuppressing into a conflict is refused (owner Q16), as creating one is.
         let woken: Vec<&Constraint> =
             next.iter().filter(|c| !c.suppressed && s.doc.assembly.constraints.iter().any(|b| b.id == c.id && b.suppressed)).collect();
+        let mut turned = None;
         if let Some(first) = woken.first()
             && let Some(why) = over_constrains_all(s, next.clone(), first)
         {
-            return Err(bad(cmd, why));
+            turned = Some(crate::constraints::half_turn(s, &next, first).ok_or_else(|| bad(cmd, why))?);
         }
         s.doc_mut().assembly.constraints = next;
+        if let Some((o, placement)) = turned {
+            crate::constraints::turn(s, o, placement);
+        }
         super::joints::resolve(s)
     } else {
         super::joints::solution(s, &joints::Held::new(), Analysis::Placement)

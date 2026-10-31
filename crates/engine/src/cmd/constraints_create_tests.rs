@@ -389,3 +389,50 @@ fn a_lost_constraint_can_be_renamed_and_given_an_offset() {
     assert!(e.contains("`b`:"), "{e}");
     assert_eq!(s.undo.len(), steps + 2);
 }
+
+/// Wave 1 item 14 (E-1): after Mate:1 turns B over onto A's top, a Flush of A's right face with
+/// B's own right face (now facing −x) needs B a half-turn about Z: it is made, not refused as
+/// over-constraining, and B turns.
+#[test]
+fn an_antiparallel_flush_turns_the_part_a_half_turn() {
+    let mut s = blocks();
+    run(&mut s, "constraint.create", json!({"type": "mate", "a": face("A", [50.0, 25.0, 20.0]), "b": face("B", [50.0, 25.0, 60.0])}));
+    let top = apply_point(&transform(&s, "B"), Vec3::new(50.0, 25.0, 60.0));
+    assert!((top.z - 20.0).abs() <= TOL, "Mate:1 put B's top on A's: {top:?}");
+    let side = apply_point(&transform(&s, "B"), Vec3::new(100.0, 25.0, 50.0));
+    let n = apply_vector(&transform(&s, "B"), Vec3::X);
+    assert!(n.x < -0.999, "B's right face faces −x after the turn over: {n:?} at {side:?}");
+    let r = run(
+        &mut s,
+        "constraint.create",
+        json!({"type": "mate", "solution": "flush", "a": face("A", [100.0, 25.0, 10.0]), "b": face("B", [side.x, side.y, side.z])}),
+    );
+    assert_eq!(r["status"], "ok", "{r}");
+    let m = transform(&s, "B");
+    let n = apply_vector(&m, Vec3::X);
+    assert!(n.dist(Vec3::X) <= TOL, "B half-turned about Z: its right face faces +x: {n:?}");
+    assert!((apply_point(&m, Vec3::new(100.0, 25.0, 50.0)).x - 100.0).abs() <= TOL, "flush at x = 100");
+    assert!((apply_point(&m, Vec3::new(50.0, 25.0, 60.0)).z - 20.0).abs() <= TOL, "still on A's top");
+    for row in run(&mut s, "constraint.list", json!({}))["constraints"].as_array().unwrap() {
+        assert_eq!(row["status"], "ok", "{row}");
+    }
+}
+
+/// A Mate closing a loop that needs a half-turn: B's right face flush with A's (as it is), then
+/// B's top mated onto A's top — B turns over about X, its right face still flush.
+#[test]
+fn a_mate_needing_a_half_turn_is_made() {
+    let mut s = blocks();
+    let r = run(
+        &mut s,
+        "constraint.create",
+        json!({"type": "mate", "solution": "flush", "a": face("A", [100.0, 25.0, 10.0]), "b": face("B", [100.0, 25.0, 50.0])}),
+    );
+    assert_eq!(r["status"], "ok", "{r}");
+    let r = run(&mut s, "constraint.create", json!({"type": "mate", "a": face("A", [50.0, 25.0, 20.0]), "b": face("B", [50.0, 25.0, 60.0])}));
+    assert_eq!(r["status"], "ok", "{r}");
+    let m = transform(&s, "B");
+    assert!(apply_vector(&m, Vec3::X).dist(Vec3::X) <= TOL && apply_vector(&m, Vec3::Z).dist(-Vec3::Z) <= TOL, "{m:?}");
+    assert!((apply_point(&m, Vec3::new(50.0, 25.0, 60.0)).z - 20.0).abs() <= TOL, "B's top on A's");
+    assert!((apply_point(&m, Vec3::new(100.0, 25.0, 50.0)).x - 100.0).abs() <= TOL, "still flush");
+}
