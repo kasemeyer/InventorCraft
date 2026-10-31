@@ -111,6 +111,18 @@ pub(crate) fn constraint_id(h: &Harness, name: &str) -> u64 {
     h.app.session.doc.assembly.constraint(name).map(|c| c.id).unwrap_or_else(|| panic!("no constraint {name}"))
 }
 
+/// The id of `name`'s first occurrence (`<name>:1`).
+pub(crate) fn occ(h: &Harness, name: &str) -> u64 {
+    h.app.session.doc.occurrences.iter().find(|o| o.name == format!("{name}:1")).map(|o| o.id).unwrap_or_else(|| panic!("no occurrence {name}"))
+}
+
+/// The world point of `name`'s component point `p`, through its occurrence's current transform.
+pub(crate) fn world_at(h: &Harness, name: &str, p: [f64; 3]) -> [f64; 3] {
+    let m = solidcraft_engine::doc::joints::occurrence_world(&h.app.session.doc, occ(h, name));
+    let w = solidcraft_engine::doc::apply_point(&m, solidcraft_engine::geom::Vec3::new(p[0], p[1], p[2]));
+    [w.x, w.y, w.z]
+}
+
 /// Let the last clicks expire (egui's double-click delay), so the next click is a new one.
 pub(crate) fn clicks_expire(h: &mut Harness) {
     let delay = h.ctx.options(|o| o.input_options.max_double_click_delay);

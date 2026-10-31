@@ -14,7 +14,7 @@ use crate::context_menu::{Item, Target};
 use crate::dialogs::Kind;
 use crate::dialogs_assembly::Asm;
 use crate::scenario::{Harness, handle_at};
-use crate::test_support::{click, click_world, clicks_expire, constraint_blocks, constraint_id, frames_for, menu_pick, right_click};
+use crate::test_support::{click, click_world, clicks_expire, constraint_blocks, constraint_id, frames_for, menu_pick, occ, right_click, world_at};
 
 const A_TOP: [f64; 3] = [50.0, 25.0, 20.0];
 const B_TOP: [f64; 3] = [50.0, 95.0, 27.0];
@@ -41,21 +41,10 @@ fn blocks() -> Harness {
     h
 }
 
-fn occ(h: &Harness, name: &str) -> u64 {
-    h.app.session.doc.occurrences.iter().find(|o| o.name == format!("{name}:1")).map(|o| o.id).unwrap_or_else(|| panic!("no occurrence {name}"))
-}
-
 fn run(h: &mut Harness, id: &str, p: Value) -> Value {
     let r = h.app.run(id, p.clone()).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
     h.frames(2);
     r
-}
-
-/// The world point of `name`'s component point `p` (where the part is now).
-fn at(h: &Harness, name: &str, p: [f64; 3]) -> [f64; 3] {
-    let m = solidcraft_engine::doc::joints::occurrence_world(&h.app.session.doc, occ(h, name));
-    let w = solidcraft_engine::doc::apply_point(&m, solidcraft_engine::geom::Vec3::new(p[0], p[1], p[2]));
-    [w.x, w.y, w.z]
 }
 
 fn drawn(name: &str) -> Vec<DrawnConstraint> {
@@ -86,7 +75,8 @@ fn row_menu(h: &mut Harness, id: u64, under: u64) -> Vec<Item> {
     clicks_expire(h);
     right_click(h, json!({"handle": format!("row:constraint:{id}:{under}")}));
     assert_eq!(h.app.menu.target, Target::Constraint { id, under }, "the right-click opened the constraint's list");
-    assert!(h.app.viewport.context_menu.is_some(), "the list is open");
+    let open = h.app.viewport.context_menu.is_some();
+    assert!(open, "the list is open");
     crate::context_menu::items(&h.app, &h.app.menu.target.clone())
 }
 
@@ -120,7 +110,7 @@ fn solidcraft_makes_a_mate_from_its_joints_panel() {
     assert_eq!(under, want, "in the joints folder and under A and B");
     assert!(drawn("Mate:1").iter().all(|r| r.id == mate));
     // B's top now lies on A's top (z = 20).
-    assert!((at(&h, "B", B_TOP)[2] - 20.0).abs() < 1e-6, "{:?}", at(&h, "B", B_TOP));
+    assert!((world_at(&h, "B", B_TOP)[2] - 20.0).abs() < 1e-6, "{:?}", world_at(&h, "B", B_TOP));
 }
 
 /// Test 2 (§8.3 10 → 5): the row's menu is a list with Task 5's rows; Suppress dims all three
@@ -169,7 +159,7 @@ fn solidcraft_show_problems_and_hide_all() {
         "constraint.create",
         json!({"type": "insert", "a": {"occurrence": "Plate", "edge": [200.0, 0.0, 10.0]}, "b": {"occurrence": "Pin", "edge": [310.0, 0.0, 50.0]}}),
     );
-    let mate = |h: &Harness, x: f64, y: f64| json!({"type": "mate", "a": {"occurrence": "A", "face": at(h, "A", [x, y, 20.0])}, "b": {"occurrence": "B", "face": at(h, "B", [x, y + 70.0, 7.0])}});
+    let mate = |h: &Harness, x: f64, y: f64| json!({"type": "mate", "a": {"occurrence": "A", "face": world_at(h, "A", [x, y, 20.0])}, "b": {"occurrence": "B", "face": world_at(h, "B", [x, y + 70.0, 7.0])}});
     let p = mate(&h, 50.0, 25.0);
     run(&mut h, "constraint.create", p);
     let p = mate(&h, 30.0, 15.0);
