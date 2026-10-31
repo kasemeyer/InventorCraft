@@ -2207,6 +2207,8 @@ pub fn now_ms() -> f64 {
 }
 
 #[cfg(test)]
+mod first_minute_constraints_tests;
+#[cfg(test)]
 mod picker_test_support;
 #[cfg(test)]
 mod solidcraft_constraint_tests;
