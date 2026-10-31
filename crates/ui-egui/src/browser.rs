@@ -2688,6 +2688,8 @@ pub(crate) struct DrawnConstraint {
     /// Modify's message, and its colour, under the row.
     pub(crate) error: Option<String>,
     pub(crate) error_color: Option<Color32>,
+    /// Lit because the pointer is on its glyph in the 3D view (`Mark::Here`).
+    pub(crate) hot: bool,
 }
 
 /// The constraint rows drawn in the last frame, in order.
@@ -2814,6 +2816,8 @@ pub(crate) fn constraint_row(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, und
     let tip = (!tips.is_empty()).then(|| tips.join("\n"));
     let handle = std::format!("constraint:{id}:{under}");
     let selected = app.tree.picked_constraints.contains(&id);
+    // The pointer on its glyph in the 3D view lights the row (spec §6.8).
+    let hot = app.viewport.constraint_hover == Some(id);
     let icon = crate::dialogs_constraint::type_icon(row.kind);
     let look = Row {
         depth,
@@ -2825,6 +2829,7 @@ pub(crate) fn constraint_row(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, und
         color: problem.then_some(t.error),
         badges: &badges,
         handle: Some(&handle),
+        mark: if hot { Mark::Here } else { Mark::None },
         ..Default::default()
     };
     let r = draw_row(ui, ui.id().with(("constraint", id, under)), &look);
@@ -2861,6 +2866,7 @@ pub(crate) fn constraint_row(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, und
             modify: typed.map(|m| m.text.clone()),
             error_color: error.as_ref().map(|_| t.error),
             error,
+            hot,
         })
     });
     if let (Some(resp), Some(tip)) = (&r.resp, tip) {

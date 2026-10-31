@@ -58,6 +58,11 @@ pub struct ViewportState {
     pub(crate) tool_click: bool,
     /// A Trim drag is drawing its path (`sketch_tools::trim_drag_*`).
     pub(crate) trim_drag: bool,
+    /// Show (`constraint.show`) with no component selected waits for a component click
+    /// ([`crate::constraint_overlay::pick`]).
+    pub(crate) show_pick: bool,
+    /// The constraint glyph under the pointer: its browser rows light up.
+    pub(crate) constraint_hover: Option<u64>,
     /// Per-body boxes of one world state, held (not just its address, which a later state can
     /// reuse once the old one is freed, so stale boxes would come back).
     pick_bounds: std::sync::Mutex<Option<BodyBounds>>,
@@ -3294,7 +3299,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     .filter(|_| sketching && !off("dimensions"));
                 let on_midpoint = matches!(cand.as_ref().map(|c| &c.0), Some(Hit::SketchMidpoint { .. }));
                 let on_glyph = crate::sketch_tools::glyph_at(p).filter(|_| sketching && !off("constraints") && !on_midpoint);
-                if crate::sketch_text_handles::over(app, &proj, p) {
+                if let Some(id) = crate::constraint_overlay::hit(app, &proj, p).filter(|_| !sketching) {
+                    // A constraint glyph sits on top of the model: its rows are picked.
+                    crate::browser::pick_constraint(app, id, add);
+                } else if crate::constraint_overlay::pick(app, cand.as_ref().and_then(|c| c.1.as_ref())) {
+                    // Show was waiting for a component.
+                } else if crate::sketch_text_handles::over(app, &proj, p) {
                     // A text's resize or rotation handle: the text stays selected.
                 } else if !crate::sketch3d::click(app, &proj, p) {
                     match on_dim.or(on_glyph) {
@@ -3617,6 +3627,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::ref_images::show(app, ui, &painter, &proj);
     crate::dialogs_assembly::origins(app, &painter, &proj);
     crate::dialogs_assembly::joint_glyphs(app, &painter, &proj);
+    app.viewport.constraint_hover = hover.filter(|_| inside).and_then(|p| crate::constraint_overlay::hit(app, &proj, p));
+    crate::constraint_overlay::draw(app, &painter, &proj);
     overlays(app, &painter, &proj);
     crate::dim_view::show(app, ui, &painter, &proj);
     crate::sketch_text_handles::show(app, ui, &painter, &proj, hover);

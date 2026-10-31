@@ -23,6 +23,7 @@ mod colour_tokens_tests;
 #[cfg(test)]
 mod colour_vision_tests;
 pub mod command_help;
+pub(crate) mod constraint_overlay;
 pub mod constraint_settings;
 pub mod context_menu;
 pub mod control;
@@ -995,6 +996,8 @@ impl SolveApp {
     }
 
     fn start_with_variant_memory(&mut self, id: &str, remember_variant: bool) {
+        // Any command ends Show's wait for a component click.
+        self.viewport.show_pick = false;
         if id == "ui.palette" {
             shortcut_box::open(self, None);
             return;
@@ -1151,6 +1154,10 @@ impl SolveApp {
         }
         if id == "assembly.bom" {
             bom_panel::open(self);
+            return;
+        }
+        if id == "constraint.show" {
+            constraint_overlay::start_show(self);
             return;
         }
         if id == "sketch.finish" {

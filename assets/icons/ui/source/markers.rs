@@ -145,3 +145,60 @@ pub(crate) fn status(painter: &egui::Painter, r: egui::Rect, name: &str, col: Co
         }
     }
 }
+
+/// An assembly constraint's on-model glyph (spec §6.8): a 16-point plate with the type's own
+/// symbol, outlined and drawn in `col` (the relationship colour, or the error colour for a
+/// problem). Our own marks, not a vendor's: two facing bars (Mate), an opened corner with its arc
+/// (Angle), a circle on a line (Tangent), a ring on its axis (Insert), mirrored wedges about a
+/// centre line (Symmetry).
+pub(crate) fn constraint_glyph(painter: &egui::Painter, at: Pos2, kind: solidcraft_engine::doc::constraints::ConstraintKind, col: Color32) {
+    use solidcraft_engine::doc::constraints::ConstraintKind as K;
+    let t = Tokens::get();
+    let ic = t.icons;
+    let half = crate::constraint_overlay::GLYPH_SIZE / 2.0;
+    let plate = egui::Rect::from_center_size(at, vec2(half * 2.0, half * 2.0));
+    painter.rect_filled(plate.expand(1.5), 3.5, ic.marker_halo);
+    painter.rect(plate, 3.0, t.panel, Stroke::new(1.2, col), egui::StrokeKind::Inside);
+    let ink = Stroke::new(1.6, col);
+    let p = |x: f32, y: f32| at + vec2(x, y);
+    match kind {
+        K::Mate => {
+            painter.line_segment([p(-4.5, -2.0), p(4.5, -2.0)], ink);
+            painter.line_segment([p(-4.5, 2.0), p(4.5, 2.0)], ink);
+        }
+        K::Angle => {
+            painter.line_segment([p(-4.5, 4.0), p(4.5, 4.0)], ink);
+            painter.line_segment([p(-4.5, 4.0), p(3.0, -4.5)], ink);
+            let arc: Vec<Pos2> = (0..=8)
+                .map(|k| {
+                    let a = -(k as f32 / 8.0) * 0.85;
+                    p(-4.5 + 5.5 * a.cos(), 4.0 + 5.5 * a.sin())
+                })
+                .collect();
+            painter.add(egui::Shape::line(arc, Stroke::new(1.1, col)));
+        }
+        K::Tangent => {
+            painter.line_segment([p(-5.0, 4.5), p(5.0, 4.5)], ink);
+            painter.circle_stroke(p(0.0, 0.5), 3.6, ink);
+        }
+        K::Insert => {
+            painter.circle_stroke(at, 3.8, ink);
+            painter.line_segment([p(0.0, -5.5), p(0.0, 5.5)], Stroke::new(1.1, col));
+        }
+        K::Symmetry => {
+            for y in [-5.0, -1.5, 2.0] {
+                painter.line_segment([p(0.0, y), p(0.0, y + 2.0)], Stroke::new(1.1, col));
+            }
+            painter.add(egui::Shape::convex_polygon(vec![p(-1.8, -3.0), p(-1.8, 3.0), p(-5.0, 0.0)], col, Stroke::NONE));
+            painter.add(egui::Shape::convex_polygon(vec![p(1.8, -3.0), p(5.0, 0.0), p(1.8, 3.0)], col, Stroke::NONE));
+        }
+    }
+}
+
+/// Where a picked constraint's pick sits on the model: a ring with a dot, over a halo.
+pub(crate) fn constraint_anchor(painter: &egui::Painter, c: Pos2, col: Color32) {
+    let ic = Tokens::get().icons;
+    painter.circle_stroke(c, 5.5, Stroke::new(4.0, ic.marker_halo));
+    painter.circle_stroke(c, 5.5, Stroke::new(1.8, col));
+    painter.circle_filled(c, 2.0, col);
+}

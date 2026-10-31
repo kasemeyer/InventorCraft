@@ -2786,6 +2786,7 @@
   "ui.constraint.prompt_3": "基準軸を選択",
   "ui.constraint.prompt_part": "選択するコンポーネントを選択",
   "ui.constraint.rest_at_offset": "オフセットで静止",
+  "ui.constraint.show_prompt": "拘束を表示するコンポーネントを選択",
   "ui.constraint.solution": "解",
   "ui.constraint.suppress": "抑制",
   "ui.constraint.suppressed": "抑制",

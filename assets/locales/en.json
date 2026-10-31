@@ -2786,6 +2786,7 @@
   "ui.constraint.prompt_3": "Pick the reference axis",
   "ui.constraint.prompt_part": "Pick the component to pick on",
   "ui.constraint.rest_at_offset": "Rest at offset",
+  "ui.constraint.show_prompt": "Pick components to show their constraints",
   "ui.constraint.solution": "Solution",
   "ui.constraint.suppress": "Suppress",
   "ui.constraint.suppressed": "Suppressed",
