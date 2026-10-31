@@ -1447,6 +1447,10 @@ impl SolveApp {
             let items: Vec<serde_json::Value> = (0..profiles).map(|i| json!({"type": "profile", "sketch": sketch, "index": i})).collect();
             let _ = self.run("select.set", json!({ "items": items }));
             self.start(waiting.command);
+            // Hole takes the finished sketch's points as its placements (Inventor's From Sketch).
+            if waiting.command == "solid.hole" {
+                dialogs::place_hole_at_sketch_points(self, sketch);
+            }
         }
     }
 

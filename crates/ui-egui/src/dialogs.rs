@@ -2993,6 +2993,48 @@ fn remember_preset(app: &mut SolveApp, d: &Dialog) {
     }
 }
 
+/// An open new Hole panel placed at a sketch's points through the existing Points placement
+/// (Multiple): its standalone points (Inventor's centre points), else its circles' and arcs'
+/// centres, else all its points. A sketch with no points leaves the panel as it is.
+pub(crate) fn place_hole_at_sketch_points(app: &mut SolveApp, sketch: u64) {
+    use solidcraft_engine::sketch::CurveKind;
+    let ids: Vec<String> = {
+        let st = app.session.world_state();
+        let Some(sk) = st.sketch(sketch).map(|ss| &ss.sketch) else { return };
+        let used: std::collections::BTreeSet<usize> = sk.curves.iter().flat_map(|c| c.kind.point_ids()).collect();
+        let centres: Vec<usize> = sk
+            .curves
+            .iter()
+            .filter_map(|c| match c.kind {
+                CurveKind::Circle { c, .. } | CurveKind::Arc { c, .. } => Some(c),
+                _ => None,
+            })
+            .collect();
+        // Not the projected origin or other reference points.
+        let own = |i: &usize| sk.points.get(*i).is_some_and(|p| p.link.is_none() && p.id != "origin");
+        let standalone: Vec<usize> = (0..sk.points.len()).filter(|i| !used.contains(i) && own(i)).collect();
+        let pick = if !standalone.is_empty() {
+            standalone
+        } else if !centres.is_empty() {
+            centres
+        } else {
+            (0..sk.points.len()).filter(own).collect()
+        };
+        pick.into_iter().filter_map(|i| sk.points.get(i).map(|p| p.id.clone())).collect()
+    };
+    if ids.is_empty() {
+        return;
+    }
+    let Some(d) = app.dialog.as_mut().filter(|d| d.editing.is_none()) else { return };
+    let Kind::Hole { opts, .. } = &mut d.kind else { return };
+    opts.multiple = true;
+    let mut points = SelInput::new("Points", selection::POINTS, true);
+    points.items = ids.into_iter().map(|id| Sel::SketchPoint { id: format!("{sketch}:{id}") }).collect();
+    d.inputs = vec![points];
+    d.active = 0;
+    d.extra.remove("direction");
+}
+
 /// A new Extrude, Revolve or Hole panel that has nothing picked yet: its command, which Start
 /// 2D Sketch parks for Finish Sketch to reopen (`workflow.finish_sketch_resumes_feature`).
 pub(crate) fn waits_for_profile(d: &Dialog) -> Option<&'static str> {
