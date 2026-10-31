@@ -293,6 +293,16 @@ mod tests {
         h.frames(2);
     }
 
+    /// Every constraint still holds after the drag: each `constraint.list` row is `ok`.
+    fn assert_all_ok(h: &mut Harness) {
+        let list = run(h, "constraint.list", json!({}));
+        let rows = list["constraints"].as_array().expect("rows");
+        assert!(!rows.is_empty());
+        for r in rows {
+            assert_eq!(r["status"], "ok", "{r}");
+        }
+    }
+
     /// A free, unconstrained part keeps its free drag: the grabbed point lands where it is dropped.
     #[test]
     fn r163_a_free_part_moves_to_the_dropped_point() {
@@ -327,8 +337,7 @@ mod tests {
             assert!((after[3][2] - before[3][2]).abs() < 1e-9, "the mate's normal component is unchanged: {before:?} -> {after:?}");
             let moved = Vec3::new(after[3][0] - before[3][0], after[3][1] - before[3][1], 0.0);
             assert!(moved.len() > 5.0, "B slid in the plane: {moved:?}");
-            let report = run(&mut h, "constraint.list", json!({}));
-            assert!(report.to_string().contains("\"ok\""), "the Mate still holds: {report}");
+            assert_all_ok(&mut h);
         }
     }
 
@@ -353,6 +362,7 @@ mod tests {
             release(&mut h, b);
             assert!(axis_point(&h).dist(p0) < 1e-9 && axis_dir(&h).dist(d0) < 1e-9, "the axis stays: {:?} {:?}", axis_point(&h), axis_dir(&h));
             assert!(world(&h, "Pin") != before, "the pin turned");
+            assert_all_ok(&mut h);
         }
     }
 

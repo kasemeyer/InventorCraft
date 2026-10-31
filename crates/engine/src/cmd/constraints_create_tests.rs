@@ -408,6 +408,7 @@ fn an_antiparallel_flush_turns_the_part_a_half_turn() {
         json!({"type": "mate", "solution": "flush", "a": face("A", [100.0, 25.0, 10.0]), "b": face("B", [side.x, side.y, side.z])}),
     );
     assert_eq!(r["status"], "ok", "{r}");
+    assert_eq!(r["moved"], json!([occ(&s, "B")]), "the half-turned part is named as moved: {r}");
     let m = transform(&s, "B");
     let n = apply_vector(&m, Vec3::X);
     assert!(n.dist(Vec3::X) <= TOL, "B half-turned about Z: its right face faces +x: {n:?}");

@@ -96,6 +96,12 @@ thread_local! {
     static PLACED: RefCell<Option<(u64, Vec<Placed>)>> = const { RefCell::new(None) };
 }
 
+thread_local! {
+    /// Each drawn anchor's depth check (in draw order), for the view, rows and model it was
+    /// made on: a still view checks none again.
+    static DEPTH: RefCell<Option<(u64, Vec<bool>)>> = const { RefCell::new(None) };
+}
+
 /// What [`placed_world`] depends on: the camera and viewport, the shown set and the rows.
 fn placed_key(app: &SolveApp, proj: &Proj) -> u64 {
     use std::hash::{Hash, Hasher};
@@ -173,6 +179,11 @@ pub(crate) fn draw(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let hot = app.viewport.constraint_hover;
     let mut drawn = Vec::new();
     let mut checks = 0;
+    // The depth checks hold while the view, the rows and the model are as they were.
+    let depth_key =
+        placed_key(app, proj) ^ app.session.revision.rotate_left(17) ^ (app.session.visibility.hidden_bodies.len() as u64).rotate_left(41);
+    let cached: Option<Vec<bool>> = DEPTH.with(|d| d.borrow().as_ref().filter(|(k, _)| *k == depth_key).map(|(_, v)| v.clone()));
+    let mut hidden_all: Vec<bool> = Vec::new();
     for (id, at, anchors, sick) in placed_world(app, proj) {
         let Some((kind, suppressed)) = report_rows(app).find(|r| r.id == id).map(|r| (r.kind, r.status == ConstraintStatus::Suppressed)) else {
             continue;
@@ -191,7 +202,11 @@ pub(crate) fn draw(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         for (w, a) in &leaders {
             // An anchor behind a face fades, with its leader (R176).
             checks += 1;
-            let hidden = checks <= MAX_DEPTH_CHECKS && behind(app, proj, *w, *a);
+            let hidden = match cached.as_ref().and_then(|c| c.get(checks - 1)) {
+                Some(h) => *h,
+                None => checks <= MAX_DEPTH_CHECKS && behind(app, proj, *w, *a),
+            };
+            hidden_all.push(hidden);
             let c = if hidden { colour.gamma_multiply(HIDDEN_ALPHA) } else { colour };
             faded += usize::from(hidden);
             painter.line_segment([at, *a], Stroke::new(1.0, c));
@@ -208,6 +223,7 @@ pub(crate) fn draw(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         drawn.push(DrawnGlyph { id, at, colour, leaders: leaders.len(), hot: hot == Some(id), faded, lit });
     }
     DRAWN.with(|d| *d.borrow_mut() = drawn);
+    DEPTH.with(|d| *d.borrow_mut() = Some((depth_key, hidden_all)));
 }
 
 /// The occurrence a picked body, face, edge, vertex or placement belongs to (not the root's).

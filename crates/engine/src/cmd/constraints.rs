@@ -543,6 +543,9 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, format!("an assembly holds at most {MAX_CONSTRAINTS} constraints")));
     }
     let mut c = build(s, p, None, cmd)?;
+    // Where the parts are before anything moves (a half-turn below moves one): the answer's
+    // `moved` names it.
+    let before = worlds(s);
     if !c.suppressed
         && let Some(why) = over_constrains(s, &c, None)
     {
@@ -554,7 +557,6 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
         let Some((o, placement)) = crate::constraints::half_turn(s, &all, &probe) else { return Err(bad(cmd, why)) };
         crate::constraints::turn(s, o, placement);
     }
-    let before = worlds(s);
     let doc = s.doc_mut();
     c.id = doc.allocate_id()?;
     let id = c.id;
