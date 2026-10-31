@@ -134,10 +134,16 @@ fn the_first_minute_under_inventor() {
     assert!((bottom[2] - 40.0).abs() <= 1e-9, "B spans z 20..40, flipped: {bottom:?}");
     assert_eq!(status_marker(&h.app, b), "status_half");
     assert!(handle_at("marker:status_half:B:1").is_some());
+    let dof = |h: &Harness| solidcraft_engine::constraints::report(&h.app.session).dof.get(&b).copied();
+    let dof_after_mate1 = dof(&h).expect("B's DOF after Mate:1");
 
     // 3. C again: Flush A's right face with B's side face where B now is (R142; B turned over
     //    about Y, so B's own left face, component x = 0, now faces +x at x = 100); Apply; Insert
     //    the pin's top rim into the hole's top rim; Apply; Cancel.
+    //    The brief's pick is B's right face (component [100, 95, 17]), which needs B turned a
+    //    half-turn about Z; E-1 refuses that antiparallel Flush ("over-constrains B"), ledgered
+    //    for E-1 wave 1 ("a Flush/Mate whose dry solve needs a half-turn must not be refused —
+    //    solve from the flipped seed"). Restore the brief's pick and B's turn about Z then.
     alias(&mut h, "C");
     press_role(&mut h, "Flush", Role::Button, true);
     let b_side = world_at(&h, "B", B_SIDE);
@@ -149,6 +155,9 @@ fn the_first_minute_under_inventor() {
     let mate2 = h.app.session.doc.assembly.constraint("Mate:2").expect("Mate:2");
     assert_eq!(mate2.solution, ConstraintSolution::Flush);
     assert!(near(&world(&h, "B"), &b_pose, 1e-9), "already flush (x = 100): B stays");
+    assert_eq!(status(&h, "Mate:2"), ConstraintStatus::Ok, "Mate:2 holds");
+    let dof_after_mate2 = dof(&h).expect("B's DOF after Mate:2");
+    assert!(dof_after_mate2 < dof_after_mate1, "Mate:2 takes B's freedom: {dof_after_mate1} -> {dof_after_mate2}");
     let pin_before = world(&h, "Pin");
     press(&mut h, "Insert");
     picks(&mut h, HOLE_RIM, PIN_RIM);
@@ -229,6 +238,8 @@ fn the_first_minute_under_inventor() {
     let steps = h.app.session.undo.len();
     let empty = empty_space(&mut h);
     right_click(&mut h, empty);
+    let ring = crate::context_menu::radial_items(&h.app);
+    assert_eq!(ring.get(1).map(|i| i.id.as_str()), Some("constraint.create"), "NE is Constraint");
     menu_pick(&mut h, "marking", "constraint.create");
     assert!(constrain_open(&h), "NE opened the Constrain panel");
     key(&mut h, "Escape");

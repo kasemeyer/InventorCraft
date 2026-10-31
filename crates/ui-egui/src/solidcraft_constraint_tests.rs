@@ -108,6 +108,7 @@ fn solidcraft_makes_a_mate_from_its_joints_panel() {
     let mut want = vec![0, a, b];
     want.sort_unstable();
     assert_eq!(under, want, "in the joints folder and under A and B");
+    assert_eq!(crate::browser::folder_label(&h.app, "joints"), "Joints", "SolidCraft's folder keeps its name");
     assert!(drawn("Mate:1").iter().all(|r| r.id == mate));
     // B's top now lies on A's top (z = 20).
     assert!((world_at(&h, "B", B_TOP)[2] - 20.0).abs() < 1e-6, "{:?}", world_at(&h, "B", B_TOP));
@@ -206,7 +207,7 @@ fn solidcraft_has_no_constrain_key() {
     assert_eq!(h.app.alias.fired, None, "no alias fired");
     assert!(!constrain_open(&h), "no Constrain panel");
     assert!(
-        matches!(h.app.dialog.as_ref().map(|d| &d.kind), None | Some(Kind::Sketch)),
+        matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::Sketch)),
         "only SolidCraft's own C (Circle's sketch plane): {:?}",
         h.app.dialog.as_ref().map(|d| &d.kind)
     );
