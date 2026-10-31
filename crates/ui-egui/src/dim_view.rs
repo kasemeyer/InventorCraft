@@ -874,9 +874,11 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
                     .unwrap_or(solidcraft_engine::doc::expr::Kind::Unitless);
                 let expression = app.session.doc.with_design_unit(&value, kind);
                 let mut change = json!({"name": e.param, "expression": expression});
-                // A dimension placed before R180 takes the design's unit with its first edit.
+                // A plain value placed before R180 takes the design's unit with its first edit
+                // (R182). A legacy formula or reference was shown as authored (not seeded): it
+                // keeps its unit, so "2*10" stays 20 mm rather than becoming 20 in.
                 let design = solidcraft_engine::doc::expr::length_unit_or_mm(&app.session.doc.units);
-                if design != "mm" && app.session.doc.param(&e.param).is_some_and(|p| p.unit.trim() == "mm") {
+                if design != "mm" && e.seeded.is_some() && app.session.doc.param(&e.param).is_some_and(|p| p.unit.trim() == "mm") {
                     change["unit"] = json!(design);
                 }
                 app.run("parameters.change", change).map_err(|err| shown_error("parameters.change", &err))
@@ -1308,6 +1310,46 @@ mod tests {
             assert_eq!(h.app.session.doc.param(&a).map(|p| p.expr.clone()), Some(b.clone()));
             open_on(&mut h, &a, &b);
             h.step(&json!({"key":"Escape"})).unwrap();
+            cancel();
+        }
+    }
+
+    /// R182: a legacy (unit `mm`) formula is shown as authored and a plain Enter keeps it and
+    /// its unit, so its length does not change; a legacy plain value still converts. A
+    /// centimetre design converts as an inch one does.
+    #[test]
+    fn a_legacy_formula_keeps_its_millimetres() {
+        for (units, inventor) in [("in", false), ("in", true), ("cm", false)] {
+            cancel();
+            let mut h =
+                if inventor { crate::test_support::inventor(solidcraft_engine::doc::DocumentKind::Part) } else { crate::scenario::Harness::new() };
+            h.app.home.open = false;
+            crate::documents::new_document(&mut h.app, solidcraft_engine::doc::DocumentKind::Part, Some(units));
+            h.frames(3);
+            assert_eq!(h.app.session.doc.units, units);
+            h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+            h.app.run("sketch.line", json!({"points":[[10,10],[40,10]],"ids":["la"],"infer":false})).unwrap();
+            let param = h.app.run("sketch.dimension", json!({"entities":["la"],"text_at":[25,0]})).unwrap()["param"].as_str().unwrap().to_string();
+            h.call("ui.view", json!({"view":"top"}));
+            h.app.run("parameters.change", json!({"name":param,"expression":"2*10","unit":"mm"})).unwrap();
+            assert!((line_length(&h) - 20.0).abs() < 1e-6);
+            open_on(&mut h, &param, "2*10");
+            h.step(&json!({"key":"Enter"})).unwrap();
+            h.frames(2);
+            assert!(!editing(), "{:?}", h.app.status);
+            let p = h.app.session.doc.param(&param).unwrap();
+            assert_eq!((p.expr.as_str(), p.unit.as_str()), ("2*10", "mm"), "{units}");
+            assert!((line_length(&h) - 20.0).abs() < 1e-6, "{units}: {}", line_length(&h));
+            // A legacy plain value still converts and takes the design's unit.
+            h.app.run("parameters.change", json!({"name":param,"expression":"25.4 mm","unit":"mm"})).unwrap();
+            let shown = crate::prefs::format_length(25.4, units, crate::prefs::shown_length_decimals(&h.app));
+            open_on(&mut h, &param, &shown);
+            h.step(&json!({"key":"Enter"})).unwrap();
+            h.frames(2);
+            let p = h.app.session.doc.param(&param).unwrap();
+            let stored = if units == "in" { "1 in" } else { "2.54 cm" };
+            assert_eq!((p.expr.as_str(), p.unit.as_str()), (stored, units));
+            assert!((line_length(&h) - 25.4).abs() < 1e-6);
             cancel();
         }
     }
