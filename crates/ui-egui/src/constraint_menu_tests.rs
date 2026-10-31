@@ -492,3 +492,33 @@ fn lock_turn_and_rename() {
     assert_eq!(h.app.session.undo.len(), undo + 1);
     assert!(drawn_constraints().iter().all(|d| d.label == "Pin-hole"));
 }
+
+/// Wave 1 item 8: a Modify box whose row is no longer drawn (its folder folded, the browser
+/// hidden) is dropped, not left pending to commit later.
+#[test]
+fn modify_closes_when_its_row_is_not_drawn() {
+    let mut h = blocks();
+    let mate = mate_tops(&mut h);
+    let a = occ(&h, "A");
+    modify(&mut h, mate, a);
+    h.frames(2);
+    assert!(h.app.menu.modify.is_some(), "drawn: it stays open");
+    h.app.ui.show_browser = false;
+    h.frames(2);
+    assert!(h.app.menu.modify.is_none(), "its row is not drawn: Modify is dropped");
+}
+
+/// Wave 1 item 8: Find in Window's framing goes through the pages that frame themselves, as Fit
+/// does: on a sheet it asks the sheet to fit, and the model camera stays.
+#[test]
+fn framing_on_a_sheet_fits_the_sheet() {
+    let mut h = inventor(solidcraft_engine::doc::DocumentKind::Drawing);
+    h.app.drawing.fit_pending = false;
+    let cam = h.app.cam;
+    let mut b = solidcraft_engine::geom::Aabb3::EMPTY;
+    b.add(solidcraft_engine::geom::Vec3::new(0.0, 0.0, 0.0));
+    b.add(solidcraft_engine::geom::Vec3::new(10.0, 10.0, 10.0));
+    h.app.frame_bounds(b);
+    assert!(h.app.drawing.fit_pending, "the sheet fits");
+    assert!(h.app.cam_anim.is_none() && h.app.cam == cam, "the model camera stays");
+}

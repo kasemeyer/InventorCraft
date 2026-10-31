@@ -1924,6 +1924,7 @@ pub fn start_modify(app: &mut SolveApp, id: u64, under: u64) {
     let text = solidcraft_engine::constraints::Draft::edit(c).offset.unwrap_or_default();
     app.menu.rename = None;
     app.menu.modify = Some(Modify { constraint: id, under, text, error: None, focused: false });
+    crate::browser::modify_opened();
 }
 
 /// What is wrong with `text` as constraint `id`'s offset (a catalog id), before anything is sent:
@@ -1943,7 +1944,7 @@ pub(crate) fn modify_problem(app: &SolveApp, id: u64, text: &str) -> Option<&'st
             (v.abs() > cap).then_some("ui.constraint.too_large")
         }
         // A number beyond a double's range evaluates to infinity.
-        Err(e) if e.to_string().contains("finite") => Some("ui.constraint.too_large"),
+        Err(solidcraft_engine::doc::DocError::NotFinite(_)) => Some("ui.constraint.too_large"),
         _ => Some("ui.constraint.not_a_number"),
     }
 }

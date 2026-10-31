@@ -2239,7 +2239,7 @@ fn inline_rename(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect, e: &Entry, de
     }
     let Some(mut rename) = app.menu.rename.take() else { return };
     // Where the label starts: the fold arrow, eye and icon come first.
-    let left = row.left() + 2.0 + depth as f32 * INDENT + 14.0 + 18.0 + 21.0;
+    let left = label_left(row.left(), depth);
     let edit_rect = Rect::from_min_max(pos2(left, row.top() + 1.0), pos2(row.right() - 3.0, row.bottom() - 1.0));
     ui.painter().rect_filled(edit_rect, 3.0, Tokens::get().field);
     let id = ui.id().with(("browser_rename", &e.row_key));
@@ -2744,9 +2744,23 @@ fn shows_status(app: &SolveApp) -> bool {
     app.session.doc.kind == solidcraft_engine::doc::DocumentKind::Assembly || !app.session.doc.assembly.constraints.is_empty()
 }
 
+thread_local! {
+    /// The Modify box's row was drawn since the last frame began (or Modify just opened).
+    static MODIFY_DRAWN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Modify opened: its row draws on the next frame.
+pub(crate) fn modify_opened() {
+    MODIFY_DRAWN.with(|d| d.set(true));
+}
+
 /// Picked constraints that no longer exist are dropped, every frame, whether or not the browser
-/// draws its Relationships (Task 4 review).
+/// draws its Relationships (Task 4 review); a Modify box whose row was not drawn last frame (its
+/// folder folded, the browser hidden) is dropped too (Task 5 review).
 pub(crate) fn prune_picked_constraints(app: &mut SolveApp) {
+    if app.menu.modify.is_some() && !MODIFY_DRAWN.with(|d| d.replace(false)) {
+        app.menu.modify = None;
+    }
     let rows = &app.session.constraint_report.rows;
     if app.tree.picked_constraints.iter().any(|p| !rows.iter().any(|r| r.id == *p)) {
         let ids: Vec<u64> = rows.iter().map(|r| r.id).collect();
@@ -2854,6 +2868,7 @@ pub(crate) fn constraint_row(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, und
     // Modify: the value typed in this row.
     let modifying = app.menu.modify.as_ref().is_some_and(|m| m.constraint == id && m.under == under);
     if let (true, Some(rect)) = (modifying, row_rect) {
+        MODIFY_DRAWN.with(|d| d.set(true));
         modify_box(app, ui, rect, depth, id, under);
     }
     let typed = app.menu.modify.as_ref().filter(|m| m.constraint == id && m.under == under);
@@ -2906,7 +2921,7 @@ pub(crate) fn constraint_row(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, und
 fn modify_box(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect, depth: usize, id: u64, under: u64) {
     let Some(mut m) = app.menu.modify.take() else { return };
     // Where the label starts: the fold arrow, the eye column and the icon come first.
-    let left = row.left() + 2.0 + depth as f32 * INDENT + 14.0 + 18.0 + 21.0;
+    let left = label_left(row.left(), depth);
     let edit_rect = Rect::from_min_max(pos2(left, row.top() + 1.0), pos2(row.right() - 3.0, row.bottom() - 1.0));
     ui.painter().rect_filled(edit_rect, 3.0, Tokens::get().field);
     let edit_id = ui.id().with(("constraint_modify", id, under));
@@ -2938,13 +2953,19 @@ fn modify_box(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect, depth: usize, id
     }
 }
 
+/// Where a row's label starts, from the row's left edge: its indent, then the fold arrow, the eye
+/// column and the icon (`draw_row`'s layout).
+fn label_left(row_left: f32, depth: usize) -> f32 {
+    row_left + 2.0 + depth as f32 * INDENT + 14.0 + 18.0 + 21.0
+}
+
 /// Modify's message under its row, in the error colour.
 fn modify_error(ui: &mut egui::Ui, depth: usize, error: &str) {
     let t = Tokens::get();
     let font = FontId::proportional(t.font_small);
     let galley = ui.painter().layout(error.to_string(), font, t.error, (ui.available_width() - 60.0).max(40.0));
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), galley.size().y + 4.0), Sense::hover());
-    let left = rect.left() + 2.0 + depth as f32 * INDENT + 14.0 + 18.0 + 21.0;
+    let left = label_left(rect.left(), depth);
     ui.painter().galley(pos2(left, rect.top() + 2.0), galley, t.error);
 }
 

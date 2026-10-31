@@ -1569,12 +1569,44 @@ impl SolveApp {
     /// Frame `bounds` as Fit frames a selection (`animate_view("fit")`'s path, animated, refitted
     /// once the viewport's layout is known): a constraint's Find in Window.
     pub(crate) fn frame_bounds(&mut self, bounds: solidcraft_engine::geom::Aabb3) {
+        // A page that frames itself (a render result, the flat pattern, a sheet) does, as Fit.
+        if self.page_fit("fit") {
+            return;
+        }
         let from = self.cam;
         self.pending_fit = Some((from, bounds, true));
         let to = self.fitted_bounds(from, &bounds);
         let request = self.pending_fit.take();
         self.animate_to(to);
         self.pending_fit = request;
+    }
+
+    /// View `v` on a page with its own framing: a render result, the flat pattern and a sheet
+    /// frame themselves on Fit and Home (a sheet turns for no other view); the render workspace
+    /// fits its scene. True when the page took it (the model camera's animation is not run).
+    fn page_fit(&mut self, v: &str) -> bool {
+        if render_workspace::result_active(self) && matches!(v, "fit" | "home") {
+            render_workspace::fit_result(self);
+            return true;
+        }
+        // The flat pattern is a 2D view: Fit and Home frame it, and the Design camera stays put.
+        if dialogs_sheet::flat_active(self) && matches!(v, "fit" | "home") {
+            self.flat_view.fitted = false;
+            return true;
+        }
+        // A sheet is 2D: Fit and Home frame it (`sheet_canvas::fit`); other views do not turn it.
+        if sheet_canvas::shows(self) {
+            self.drawing.fit_pending |= matches!(v, "fit" | "home");
+            return true;
+        }
+        if render_workspace::active(self) && matches!(v, "fit" | "home") {
+            if v == "home" {
+                self.cam.set_view(StandardView::Iso);
+            }
+            self.fit_view();
+            return true;
+        }
+        false
     }
 
     fn fitted_bounds(&self, mut cam: Camera, bounds: &solidcraft_engine::geom::Aabb3) -> Camera {
@@ -1643,25 +1675,7 @@ impl SolveApp {
 
     /// Animated view changes for the axis view and navigation bar.
     pub fn animate_view(&mut self, v: &str) {
-        if render_workspace::result_active(self) && matches!(v, "fit" | "home") {
-            render_workspace::fit_result(self);
-            return;
-        }
-        // The flat pattern is a 2D view: Fit and Home frame it, and the Design camera stays put.
-        if dialogs_sheet::flat_active(self) && matches!(v, "fit" | "home") {
-            self.flat_view.fitted = false;
-            return;
-        }
-        // A sheet is 2D: Fit and Home frame it (`sheet_canvas::fit`); other views do not turn it.
-        if sheet_canvas::shows(self) {
-            self.drawing.fit_pending |= matches!(v, "fit" | "home");
-            return;
-        }
-        if render_workspace::active(self) && matches!(v, "fit" | "home") {
-            if v == "home" {
-                self.cam.set_view(StandardView::Iso);
-            }
-            self.fit_view();
+        if self.page_fit(v) {
             return;
         }
         self.pending_fit = None;
