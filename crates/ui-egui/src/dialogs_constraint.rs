@@ -496,6 +496,15 @@ pub(crate) fn take(s: &Session, f: &mut ConstraintForm, sel: &Sel) {
     }
 }
 
+/// The status note for a pick just taken on the assembly's own body (R187): fixed geometry, as
+/// an origin item is ("Pick 1: root body (fixed)"). `before` is the picks ahead of the click.
+pub(crate) fn root_note(before: &[Option<GeoRef>; 3], f: &ConstraintForm) -> Option<String> {
+    let slot = (0..3).find(|i| f.picks[*i] != before[*i])?;
+    let g = f.picks[slot].as_ref()?;
+    (g.occurrence == 0 && !matches!(g.geo, Geo::Origin { .. }))
+        .then(|| crate::i18n::format("ui.constraint.root_fixed", &[("pick", &(slot + 1).to_string())]))
+}
+
 /// A browser pick of an occurrence's origin item (`occurrence` 0: the assembly's).
 pub fn pick_origin(app: &mut SolveApp, occurrence: u64, key: &str) {
     let Some(item) = origin_item(key) else { return };

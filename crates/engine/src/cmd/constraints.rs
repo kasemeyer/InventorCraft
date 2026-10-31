@@ -25,7 +25,7 @@ use crate::params::{bad, vec3};
 use crate::{Result, Session};
 
 /// A pick, as every command that takes one reads it.
-const PICK: &str = "a pick is {occurrence: id|name, face|edge: \"<name>\" | [x,y,z]} (a world point picks the nearest face/edge on that occurrence; a name may take near?: [x,y,z] in the component's coordinates), {occurrence, vertex: [x,y,z]} (or vertex: \"<edge name>\", end?: start|end, near?), or {occurrence?: id|name (default: the assembly), origin: \"xy\"|\"xz\"|\"yz\"|\"x\"|\"y\"|\"z\"|\"center\"}";
+const PICK: &str = "a pick is {occurrence: id|name, face|edge: \"<name>\" | [x,y,z]} (a world point picks the nearest face/edge on that occurrence; occurrence 0 is the assembly's own bodies, fixed; a name may take near?: [x,y,z] in the component's coordinates), {occurrence, vertex: [x,y,z]} (or vertex: \"<edge name>\", end?: start|end, near?), or {occurrence?: id|name (default: the assembly), origin: \"xy\"|\"xz\"|\"yz\"|\"x\"|\"y\"|\"z\"|\"center\"}";
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("constraint.create", "Constrain", create).at("SOLID", "ASSEMBLE").icon("constrain").enabled(has_components).params(
@@ -122,7 +122,8 @@ fn pick(s: &Session, v: Option<&Value>, what: &str, cmd: &str) -> Result<GeoRef>
         let Some((key, kind)) = kinds.into_iter().find(|(k, _)| v.get(*k).is_some_and(|x| !x.is_null())) else {
             return Err(bad(cmd, format!("`{what}` needs a face, edge, vertex or origin: {PICK}")));
         };
-        if occurrence == 0 {
+        // The assembly's own bodies are fixed geometry, as its origin items are (R187).
+        if occurrence == 0 && !st.bodies.iter().any(|b| s.doc.model_body_component(b) == 0) {
             return Err(bad(
                 cmd,
                 format!("`{what}`: the assembly itself has no faces, edges or vertices to pick: pick a component's, or an origin item"),

@@ -437,3 +437,26 @@ fn a_mate_needing_a_half_turn_is_made() {
     assert!((apply_point(&m, Vec3::new(50.0, 25.0, 60.0)).z - 20.0).abs() <= TOL, "B's top on A's");
     assert!((apply_point(&m, Vec3::new(100.0, 25.0, 50.0)).x - 100.0).abs() <= TOL, "still flush");
 }
+
+/// R187: the assembly's own body is fixed geometry (occurrence 0), as its origin items are: a
+/// Mate of a root body's top to B's bottom moves B onto it; with no root body there the pick is
+/// still refused.
+#[test]
+fn a_root_body_face_is_fixed_geometry() {
+    let mut s = blocks();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "corner": [-80, -80, 0]}));
+    let out = run(
+        &mut s,
+        "constraint.create",
+        json!({"type": "mate", "a": {"occurrence": 0, "face": [-60.0, -60.0, 10.0]}, "b": face("B", [50.0, 25.0, 40.0])}),
+    );
+    let rows = run(&mut s, "constraint.list", json!({}))["constraints"].clone();
+    assert_eq!(rows[0]["status"], json!("ok"), "{out} {rows}");
+    let b = occurrence_world(&s.doc, occ(&s, "B"));
+    assert!((apply_point(&b, Vec3::new(50.0, 25.0, 40.0)).z - 10.0).abs() < TOL, "B's bottom sits on the root box: {b:?}");
+    let e = s.execute(
+        "constraint.create",
+        &json!({"type": "mate", "a": {"occurrence": 0, "face": [500.0, 500.0, 10.0]}, "b": face("A", [50.0, 25.0, 20.0])}),
+    );
+    assert!(e.is_err(), "no root face there");
+}

@@ -2196,7 +2196,18 @@ pub(crate) fn dialog_pick(app: &mut SolveApp, hit: &Hit, sel: Sel) {
     if app.preferences.hole_moves && crate::hole_place::pick_moves(&mut d, &app.session, &sel) {
         d.focus = true;
     } else {
+        let constrain = |d: &crate::dialogs::Dialog| match &d.kind {
+            crate::dialogs::Kind::Assembly(crate::dialogs_assembly::Asm::Constraint(f)) => Some(f.picks.clone()),
+            _ => None,
+        };
+        let before = constrain(&d);
         d.pick(&app.session, sel);
+        // A pick on the assembly's own body is fixed geometry: the status line says so (R187).
+        if let (Some(before), crate::dialogs::Kind::Assembly(crate::dialogs_assembly::Asm::Constraint(f))) = (before, &d.kind)
+            && let Some(note) = crate::dialogs_constraint::root_note(&before, f)
+        {
+            app.set_status(note, false);
+        }
     }
     if let crate::dialogs::Kind::PathPlane { sketch, .. } = &mut d.kind {
         *sketch = match hit {

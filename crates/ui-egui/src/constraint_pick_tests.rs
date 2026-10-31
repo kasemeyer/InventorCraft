@@ -590,3 +590,34 @@ fn a_refused_create_does_not_pop() {
     assert_eq!(h.app.session.doc.assembly.constraints.len(), 1, "refused");
     assert_eq!(crate::audio::requests(), before, "no pop for a refusal");
 }
+
+/// R187: the assembly's own body is fixed geometry (occurrence 0), like its origin: a root body's
+/// face takes a pick (the status line says "root body (fixed)") and a Mate to a component face
+/// moves the component.
+#[test]
+fn a_root_body_face_is_a_fixed_pick() {
+    let mut h = inventor(Assembly);
+    constraint_blocks(&mut h);
+    h.app.run("solid.box", json!({"length": 40, "width": 40, "height": 10, "corner": [-80, -80, 0]})).unwrap();
+    h.settle();
+    alias(&mut h, "C");
+    let before = transform(&h, "B");
+    click_world(&mut h, [-60.0, -60.0, 10.0]);
+    crate::test_support::clicks_expire(&mut h);
+    assert_eq!(form(&h).picks[0].as_ref().map(|g| g.occurrence), Some(0), "the root body's face is pick 1, on occurrence 0");
+    let status = crate::status_bar::texts(&h.app).left;
+    assert!(status.contains("(fixed)"), "the status line notes the fixed pick: {status}");
+    click_world(&mut h, B_TOP);
+    crate::test_support::clicks_expire(&mut h);
+    h.frames(2);
+    pick_solution(&mut h, "Flush");
+    assert!(form(&h).ready(), "{:?}", form(&h).picks);
+    assert_eq!(form(&h).preview.as_ref().and_then(|(_, p)| p.refused.clone()), None, "{:?}", form(&h).picks);
+    enter(&mut h);
+    let rows = list(&mut h);
+    assert_eq!(rows.len(), 1, "{:?}", h.app.status);
+    assert_eq!(rows[0]["status"], json!("ok"), "{rows:?}");
+    let after = transform(&h, "B");
+    assert!(!near(&after, &before, 1e-6), "the component moves");
+    assert!((after[3][2] - (before[3][2] - 17.0)).abs() < 1e-6, "B's top is flush with the root box's: {after:?}");
+}
