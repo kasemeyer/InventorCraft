@@ -2209,6 +2209,8 @@ pub fn now_ms() -> f64 {
 #[cfg(test)]
 mod picker_test_support;
 #[cfg(test)]
+mod solidcraft_constraint_tests;
+#[cfg(test)]
 #[path = "starts_new_design_tests.rs"]
 mod starts_new_design_tests;
 #[cfg(test)]
