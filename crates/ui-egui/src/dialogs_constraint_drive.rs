@@ -9,11 +9,12 @@
 
 use std::cell::Cell;
 use std::collections::BTreeMap;
+use std::sync::{Arc, Weak};
 
 use serde_json::{Value, json};
 use solidcraft_engine::doc::constraints::{MAX_OFFSET_DEG, MAX_OFFSET_MM};
 use solidcraft_engine::doc::expr::{Kind as ValueKind, Value as ExprValue};
-use solidcraft_engine::doc::{Document, Mat};
+use solidcraft_engine::doc::{DocError, Document, Mat};
 
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind};
@@ -75,6 +76,11 @@ pub struct DriveForm {
     /// The design's parameter values, for expressions in the boxes, and the revision they are of.
     vals: BTreeMap<String, ExprValue>,
     revision: u64,
+    /// The design the frames were made from: another one (an edit, an undo) discards them (R174).
+    /// A row pick bumps the revision but keeps the design, so the pointer is compared, not it.
+    doc: Weak<Document>,
+    /// The constraint's current value: the engine's Start when Start is empty.
+    current: f64,
 }
 
 /// A box that is not a usable amount: why.
@@ -124,6 +130,8 @@ impl DriveForm {
             next_at: 0.0,
             vals: s.doc.param_values().0,
             revision: s.revision,
+            doc: Arc::downgrade(&s.doc),
+            current: now,
         })
     }
 
@@ -139,7 +147,7 @@ impl DriveForm {
                 let (v, cap) = if self.angle { (v.to_degrees(), MAX_OFFSET_DEG) } else { (v, MAX_OFFSET_MM) };
                 if v.abs() > cap { Err(Bad::TooLarge) } else { Ok(v) }
             }
-            Err(e) if e.to_string().contains("finite") => Err(Bad::TooLarge),
+            Err(DocError::NotFinite(_)) => Err(Bad::TooLarge),
             _ => Err(Bad::NotAValue),
         })
     }
@@ -216,7 +224,7 @@ impl DriveForm {
             // Unset Start / End are the engine's defaults: the current value, Start + 10.
             let span = match values {
                 [Some(a), Some(b)] => (b - a).abs(),
-                [None, Some(_)] => 0.0,
+                [None, Some(b)] => (b - self.current).abs(),
                 _ => 10.0,
             };
             let n = span / inc;
@@ -261,6 +269,7 @@ impl DriveForm {
                     self.stopped = self.stop(&reply);
                     self.error = None;
                     self.ran = Some(params);
+                    self.doc = Arc::downgrade(&app.session.doc);
                     self.at = if forward { 0 } else { self.frames.len().saturating_sub(1) };
                 }
                 Err(e) => {
@@ -304,6 +313,20 @@ impl DriveForm {
             self.playing = None;
         }
         self.next_at = now + self.pause_s().unwrap_or(0.0);
+    }
+
+    /// The design is not the one the frames were made from (an edit, an undo): the frames, their
+    /// params and the stop reason go, so Play runs the drive again (R174).
+    pub fn design_changed(&mut self, doc: &Arc<Document>) {
+        if std::ptr::eq(self.doc.as_ptr(), Arc::as_ptr(doc)) {
+            return;
+        }
+        self.doc = Arc::downgrade(doc);
+        self.frames.clear();
+        self.ran = None;
+        self.stopped = None;
+        self.playing = None;
+        self.at = 0;
     }
 
     /// Playback has reached the frame the drive stopped on (R174): the last frame, not playing,
@@ -481,6 +504,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut DriveForm) -> bool {
         f.vals = app.session.doc.param_values().0;
         f.revision = app.session.revision;
     }
+    f.design_changed(&app.session.doc);
     // Playback first: a frame Play starts on stays up for its Pause.
     f.tick(now);
     if f.playing.is_some() {
@@ -508,16 +532,17 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut DriveForm) -> bool {
         ui_kit::row(ui, tr(key), |ui| ui_kit::field(ui, value));
     }
 
-    // Transport: play backward, play, stop, to start, step back, step on, to end.
+    // Transport, in the captured order (R174): play, play backward, stop, to start, step back,
+    // then step on and to end. The four step buttons work once a sweep exists.
     let problem = f.problem();
     let can_play = problem.is_none();
     let has = !f.frames.is_empty();
     ui.horizontal(|ui| {
-        if transport(ui, "ui.constraint.drive_reverse", glyph_reverse, f.playing == Some(false), can_play) {
-            f.play(app, false, now);
-        }
         if transport(ui, "ui.constraint.drive_play", glyph_play, f.playing == Some(true), can_play) {
             f.play(app, true, now);
+        }
+        if transport(ui, "ui.constraint.drive_reverse", glyph_reverse, f.playing == Some(false), can_play) {
+            f.play(app, false, now);
         }
         if transport(ui, "ui.constraint.drive_stop", glyph_stop, false, true) {
             f.playing = None;
@@ -528,7 +553,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut DriveForm) -> bool {
             ("ui.constraint.drive_step_on", glyph_step_on, Go::On),
             ("ui.constraint.drive_to_end", glyph_to_end, Go::End),
         ] {
-            if transport(ui, key, glyph, false, true) && has {
+            if transport(ui, key, glyph, false, has) {
                 f.go(to);
             }
         }

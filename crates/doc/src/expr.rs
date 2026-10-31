@@ -258,7 +258,7 @@ impl Value {
                 return Err(DocError::Expr(format!("expected {}, got {}", kind_word(k), self.describe())));
             }
         };
-        if out.is_finite() { Ok(out) } else { Err(DocError::Expr("result is not a finite number".into())) }
+        if out.is_finite() { Ok(out) } else { Err(DocError::NotFinite("result is not a finite number".into())) }
     }
     /// "a length", "an angle", "length²"…
     pub fn describe(&self) -> String {
@@ -914,7 +914,7 @@ pub fn eval_with_defaults(s: &str, lookup: &dyn Fn(&str) -> Result<Value, DocErr
         return Err(DocError::Expr(format!("unexpected input in `{s}`")));
     }
     if !v.v.is_finite() {
-        return Err(DocError::Expr(format!("`{s}` is not a finite number")));
+        return Err(DocError::NotFinite(format!("`{s}` is not a finite number")));
     }
     Ok(v)
 }

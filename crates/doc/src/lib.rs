@@ -100,6 +100,9 @@ pub use solidcraft_sketch as sketch;
 pub enum DocError {
     #[error("expression: {0}")]
     Expr(String),
+    /// An expression whose value is not a finite number (an overflow, a division by zero).
+    #[error("expression: {0}")]
+    NotFinite(String),
     #[error("{0}")]
     Invalid(String),
     #[error("unknown {0}")]

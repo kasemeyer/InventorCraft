@@ -1122,6 +1122,14 @@ impl SolveApp {
             });
             return;
         }
+        // Drive started without a row (the control channel, a shortcut): the first picked
+        // constraint's panel, or the engine's reason it can't be driven (R162).
+        if id == "ui.constraintDrive"
+            && let Some(&c) = self.tree.picked_constraints.first()
+        {
+            dialogs_constraint_drive::open(self, c);
+            return;
+        }
         if id == "sketch.constraint_settings" {
             constraint_settings::open(self);
             return;

@@ -188,11 +188,20 @@ fn drive_opens_with_the_captured_defaults() {
     assert_eq!(field(&h, "End"), "10.000 mm");
     assert_eq!(field(&h, "Pause"), "0.000 s");
     assert_eq!(position(&h), "0.000 mm");
-    for b in ["ui.constraint.drive_reverse", "ui.constraint.drive_play", "ui.constraint.drive_stop", "ui.constraint.drive_to_start"] {
-        assert!(!button(&h, tr(b)).is_disabled(), "{b}");
-    }
-    for b in ["ui.constraint.drive_step_back", "ui.constraint.drive_step_on", "ui.constraint.drive_to_end"] {
-        assert!(drawn(&h, tr(b)), "{b}");
+    // R174: the captured order; the step buttons wait for a sweep.
+    let order = [
+        "ui.constraint.drive_play",
+        "ui.constraint.drive_reverse",
+        "ui.constraint.drive_stop",
+        "ui.constraint.drive_to_start",
+        "ui.constraint.drive_step_back",
+        "ui.constraint.drive_step_on",
+        "ui.constraint.drive_to_end",
+    ];
+    let xs: Vec<f64> = order.iter().map(|b| button(&h, tr(b)).bounds().unwrap().x0).collect();
+    assert!(xs.windows(2).all(|w| w[0] < w[1]), "left to right in the captured order: {xs:?}");
+    for (i, b) in order.iter().enumerate() {
+        assert_eq!(button(&h, tr(b)).is_disabled(), i >= 3, "{b}");
     }
     assert!(drawn(&h, "OK") && drawn(&h, "Cancel"));
     // Collapsed: More opens Stop on contact, Increment and Repetitions.
@@ -212,7 +221,7 @@ fn drive_stops_on_contact_and_restores() {
     let (mut h, mate) = contact_setup();
     let (undo, pose) = (h.app.session.undo.len(), world(&h, "B"));
     open_drive(&mut h, mate);
-    let revision = h.app.session.revision;
+    let (revision, before_doc) = (h.app.session.revision, h.app.session.doc.clone());
     {
         let f = form_mut(&mut h);
         f.end = "20".into();
@@ -254,6 +263,8 @@ fn drive_stops_on_contact_and_restores() {
     let why = f.stopped.clone().expect("a stop reason");
     assert!(why.contains("B:1") && why.contains("C:1"), "{why}");
     assert!(drawn(&h, &why), "the stop reason is drawn under the buttons");
+    assert!(std::sync::Arc::ptr_eq(&before_doc, &h.app.session.doc), "the drive leaves the very same design");
+    assert!(!button(&h, tr("ui.constraint.drive_to_end")).is_disabled(), "the step buttons work once a sweep exists");
     press(&mut h, tr("ui.constraint.drive_to_start"));
     assert_eq!(form(&h).at, 0);
     assert!(!drawn(&h, &why), "no stop reason at frame 0");
@@ -272,7 +283,76 @@ fn drive_stops_on_contact_and_restores() {
     assert!(near(&world(&h, "B"), &pose, 1e-9), "B at its document transform");
     assert_eq!(h.app.session.undo.len(), undo);
     assert_eq!(h.app.session.revision, revision);
+    assert!(std::sync::Arc::ptr_eq(&before_doc, &h.app.session.doc));
     assert_eq!(h.app.session.doc.assembly.constraint("Mate:1").unwrap().offset, 0.0);
+}
+
+/// Closing while a sweep plays (Cancel, or Esc) puts B back and clears the preview.
+#[test]
+fn closing_mid_sweep_restores() {
+    for close in ["Cancel", "Escape"] {
+        let (mut h, mate) = contact_setup();
+        let (undo, pose, before_doc) = (h.app.session.undo.len(), world(&h, "B"), h.app.session.doc.clone());
+        open_drive(&mut h, mate);
+        form_mut(&mut h).pause = "0.05".into();
+        h.frames(2);
+        press(&mut h, tr("ui.constraint.drive_play"));
+        for _ in 0..60 {
+            if form(&h).at > 1 {
+                break;
+            }
+            h.frames(1);
+        }
+        assert!(form(&h).playing.is_some() && h.app.preview.active, "{close}: mid-sweep");
+        if close == "Escape" {
+            h.step(&json!({"key": "Escape"})).unwrap();
+        } else {
+            click(&mut h, "Cancel");
+        }
+        h.frames(3);
+        assert!(h.app.dialog.is_none(), "{close}: closed");
+        assert!(!h.app.preview.active, "{close}: the preview is cleared");
+        assert_eq!(count_of("constraint_drive_moved"), Some(0.0), "{close}");
+        assert!(near(&world(&h, "B"), &pose, 1e-9), "{close}: B at its document transform");
+        assert!(std::sync::Arc::ptr_eq(&before_doc, &h.app.session.doc), "{close}: the same design");
+        assert_eq!(h.app.session.undo.len(), undo, "{close}: no step");
+    }
+}
+
+/// A design change (here an undo-able edit) discards the frames; a row pick (which bumps the
+/// revision only) keeps them (R174).
+#[test]
+fn a_design_change_discards_the_frames() {
+    let (mut h, mate) = contact_setup();
+    open_drive(&mut h, mate);
+    play_out(&mut h);
+    assert_eq!(form(&h).frames.len(), 11);
+    h.app.session.revision += 1;
+    h.frames(2);
+    assert_eq!(form(&h).frames.len(), 11, "a revision bump alone keeps the frames");
+    run(&mut h, "parameters.add", json!({"name": "gap", "expression": "5 mm"}));
+    h.frames(2);
+    let f = form(&h);
+    assert!(f.frames.is_empty() && f.stopped.is_none() && f.playing.is_none() && f.at == 0, "the frames go with the old design");
+    assert!(button(&h, tr("ui.constraint.drive_to_end")).is_disabled());
+    play_out(&mut h);
+    assert_eq!(drives(), 2.0, "Play runs the drive again on the new design");
+}
+
+/// The control channel's Drive on a suppressed pick says why, as the row menu does (R162).
+#[test]
+fn the_control_channel_drive_reports_the_refusal() {
+    let (mut h, mate) = contact_setup();
+    run(&mut h, "constraint.suppress", json!({"constraint": mate}));
+    h.app.tree.picked_constraints = vec![mate];
+    h.call("ui.start", json!({"command": "ui.constraintDrive"}));
+    h.frames(2);
+    assert!(h.app.dialog.is_none());
+    assert!(h.app.status.as_ref().is_some_and(|s| s.2 && s.0.ends_with("Mate:1 is suppressed: unsuppress it to drive it")), "{:?}", h.app.status);
+    run(&mut h, "constraint.suppress", json!({"constraint": mate, "suppressed": false}));
+    h.call("ui.start", json!({"command": "ui.constraintDrive"}));
+    h.frames(2);
+    assert_eq!(form(&h).constraint, mate, "an unsuppressed pick opens its panel");
 }
 
 #[test]
@@ -364,6 +444,17 @@ fn hostile_drive_entries_are_refused_inline() {
         assert!(form(&h).frames.is_empty() && form(&h).playing.is_none(), "{case}");
         assert_eq!(drives(), 0.0, "{case}: no command ran");
     }
+    // An overflowing amount is too large, not "not a value" (the expression error's kind).
+    *form_mut(&mut h) = fresh.clone();
+    form_mut(&mut h).end = "1e400".into();
+    let why = form(&h).problem().expect("1e400");
+    assert_eq!(why, crate::i18n::format("ui.constraint.drive_too_large", &[("field", tr("ui.constraint.drive_end"))]));
+    // An empty Start is the current value (0 here): End 9,999.5 by 1 is 10,001 frames.
+    *form_mut(&mut h) = fresh.clone();
+    (form_mut(&mut h).start, form_mut(&mut h).end) = (String::new(), "9999.5".into());
+    assert_eq!(form(&h).problem().as_deref(), Some(tr("ui.constraint.drive_frames")), "span from the current value");
+    form_mut(&mut h).end = "9998".into();
+    assert_eq!(form(&h).problem(), None);
     // The 10,000-frame cap counts a pass times its repetitions.
     *form_mut(&mut h) = fresh.clone();
     (form_mut(&mut h).by_steps, form_mut(&mut h).steps, form_mut(&mut h).repeat) = (true, "4999".into(), "2".into());
