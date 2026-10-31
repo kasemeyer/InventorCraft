@@ -282,7 +282,7 @@ pub fn paste(app: &mut SolveApp, at: Option<Pos2>) -> bool {
     }
     if let Some(path) = app.linked_design_clipboard.clone() {
         let (parent_path, translate) = paste_placement(app, at);
-        let Ok(out) = app.run("component.insert_design", json!({"path": path, "reuse": true, "translate":translate})) else { return false };
+        let Ok(out) = app.run("component.insert_design", json!({"path": path, "reuse": true, "translate": translate})) else { return false };
         // Into an empty assembly the paste is grounded, like a Place (R123): nothing to move.
         let grounded = |id: u64| app.session.doc.occurrences.iter().any(|o| o.id == id && o.grounded);
         if let Some(id) = out.get("occurrence").and_then(Value::as_u64).filter(|id| !grounded(*id)) {

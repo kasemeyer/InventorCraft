@@ -29,7 +29,8 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("component.insert_design", "Insert Design", insert_design).at("SOLID", "ASSEMBLE").icon("component").enabled(super::document_kind::needs_assembly).params(
         "path: a design (.tcipart, .tciasm, .tcidrw or .solidcraft) → a new component linked to it, holding its solid bodies as placed in that design; \
          name? (default: the design's name); parent?: component id or name (default: the active one); translate?: [x,y,z]; \
-         reuse?: bool (default false): insert a free occurrence, reusing an existing link to the same file when available;          at?: [x,y,z]: place it there in its own orientation (identity rotation, in the parent's coordinates; not with translate)",
+         reuse?: bool (default false): insert a free occurrence, reusing an existing link to the same file when available; \
+         at?: [x,y,z]: place it there in its own orientation (identity rotation, in the parent's coordinates; not with translate)",
     ),
     CommandSpec::new("component.update_links", "Update Links", update_links).icon("update").params(
         "component?: id or name (default: every linked component) — reads the linked designs again and replaces their bodies where they changed; \
@@ -461,6 +462,13 @@ mod tests {
 
     fn volume(s: &mut Session) -> f64 {
         run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap_or(f64::NAN)
+    }
+
+    /// The params help reads as one text: no run of spaces from a lost line continuation.
+    #[test]
+    fn insert_design_params_text_has_no_stray_spaces() {
+        let params = crate::cmd::find_command("component.insert_design").unwrap().params;
+        assert!(!params.contains("  "), "{params}");
     }
 
     /// R184: `at` places a copy in the part's own orientation at that point, even when the first
