@@ -100,7 +100,7 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | `message_field` | Growing message editor; owner retains scroll and Enter routing | field tokens |
 | `cell_editor`, `bounded_cell_editor`, `search_field`, `library_cell` | Stable-ID inline/search editors; bounded variant caps Unicode characters; `library_cell` attaches a Library dropdown inside the editor border | field tokens, `text/error` |
 | `text_area` | Bounded multiline JSON/data editor | field tokens |
-| `dropdown`, `dropdown_menu` | Indexed choices or caller-supplied menu controls | `control_height`, `text_dim`, form tokens |
+| `dropdown`, `dropdown_with_disabled`, `dropdown_menu` | Indexed choices (some shown disabled with a hover reason) or caller-supplied menu controls | `control_height`, `text_dim`, form tokens |
 | `searchable_dropdown`, `SearchOption` | Filtered choices, custom-value action and pending message | dropdown tokens |
 | `selection_field`, `Selection` | Selection chip with explicit `active` and `filled` state | `selected_bg/ink`, `accent`, `control_*`, `form_inset`, `space_8/24` |
 | `value_pair` | Paired captions/expressions; optional independent field names | row/field tokens, `space_8` |
@@ -113,7 +113,6 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | choice: `segmented`, `Segments` | Equal text choices; `states` supplies mixed selection, `compact` clips instead of falling back to a dropdown, `primary` uses accent/on-accent for the selected segment | `control_*`, `selected_bg/ink`, `font_label`, `space_4/8` |
 | `segmented_icons`, `IconSegment` | Equal icon choices and mixed states | segment tokens, icon palette |
 | `segmented_glyphs`, `GlyphSegment` | Equal choices drawn as small painted glyphs, the words as hover text, where labels would not fit | segment tokens, `form_ink`, `selected_ink` |
-| `expr_glyph_row` | An expression row whose field ends in square glyph segments (a distance and its extent buttons); the segments are a nested choice with their own name and handles; the field can be disabled | `row`, `field` and `segmented_glyphs` tokens, `space_4` |
 | `checkbox`, `checkbox_indeterminate`, `checkbox_row`, `checkbox_grid`, `options` | One box/tick painter for inline, mixed, full-row, grid and menu choices | `space_14/3/2`, `radius_sm`, `control_fill/border`, `form_primary/ink`, `hover`, `on_accent` |
 | `text_emphasis` | Bold/italic with translated accessible names | form control/font tokens |
 | `tool_choices`, `ToolChoice`, `toggle_icon` | Wrapped command modes or independent icon toggles | sketch mode/icon tokens, `accent` |
