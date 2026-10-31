@@ -453,6 +453,8 @@ pub struct SolveApp {
     pub tree: browser::TreeState,
     /// A saved design copied for insertion into another open document.
     pub linked_design_clipboard: Option<String>,
+    /// Placed components copied for pasting as new occurrences (R186).
+    pub occurrence_clipboard: Vec<edit_clipboard::CopiedOccurrence>,
     /// The S box (command search at the cursor): recent and pinned commands.
     pub sbox: shortcut_box::ShortcutBox,
     /// Keyboard shortcuts the user changed.
@@ -620,6 +622,7 @@ impl SolveApp {
             alias: Default::default(),
             tree: browser::TreeState::default(),
             linked_design_clipboard: None,
+            occurrence_clipboard: Vec::new(),
             sbox: shortcut_box::ShortcutBox::default(),
             keymap: keymap::Keymap::default(),
             help: help::HelpState::default(),

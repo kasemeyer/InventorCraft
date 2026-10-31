@@ -40,12 +40,139 @@ fn sketch_selection(app: &SolveApp) -> Vec<String> {
         .collect()
 }
 
+/// Where an occurrence paste with no pointer over the view goes: this far from its source.
+pub(crate) const PASTE_OFFSET: [f64; 3] = [10.0, 10.0, 0.0];
+
+/// A placed component on the clipboard (R186): its source occurrence, where that sat in its
+/// parent, and the design file it links to (a paste into another assembly inserts that file).
+#[derive(Clone, Debug, PartialEq)]
+pub struct CopiedOccurrence {
+    pub occurrence: u64,
+    pub component: u64,
+    origin: [f64; 3],
+    file: Option<String>,
+}
+
+/// The placements a selection resolves to (R186): every item an occurrence's Browser row or
+/// geometry (body, face, edge, vertex) of a placed component's body. None when anything else
+/// is selected (a root body keeps SolidCraft's body paste; a feature or sketch geometry keeps
+/// its own copy) or nothing is.
+pub(crate) fn selected_occurrences(app: &SolveApp) -> Option<Vec<u64>> {
+    if app.session.active_sketch.is_some() {
+        return None;
+    }
+    let mut out: Vec<u64> = Vec::new();
+    // A component row picked in SolidCraft's Browser: its first placement.
+    if app.session.selection.is_empty() && !app.tree.picked_components.contains(&0) {
+        out.extend(app.tree.picked_components.iter().filter_map(|c| app.session.doc.occurrence_of(*c).map(|o| o.id)));
+        return (!out.is_empty()).then_some(out);
+    }
+    for item in &app.session.selection {
+        let occurrence = match item {
+            Sel::Occurrence { path } => path.last().copied(),
+            Sel::Body { name: body } | Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } => {
+                crate::dialogs_assembly::occurrence_of_body(&app.session, body)
+            }
+            _ => None,
+        };
+        let occurrence = occurrence.filter(|id| *id != 0 && app.session.doc.occurrences.iter().any(|o| o.id == *id))?;
+        if !out.contains(&occurrence) {
+            out.push(occurrence);
+        }
+    }
+    (!out.is_empty()).then_some(out)
+}
+
+/// The design file a linked component's link names, resolved against the assembly's folder.
+fn linked_file(app: &SolveApp, component: u64) -> Option<String> {
+    let link = app.session.doc.links.get(&component)?;
+    let stored = std::path::Path::new(&link.path);
+    let file = match app.session.path.as_deref().and_then(|p| std::path::Path::new(p).parent()) {
+        Some(dir) if stored.is_relative() => dir.join(stored),
+        _ => stored.to_path_buf(),
+    };
+    Some(file.to_string_lossy().into_owned())
+}
+
+fn occurrence_names(app: &SolveApp, ids: impl IntoIterator<Item = u64>) -> String {
+    let names: Vec<String> =
+        ids.into_iter().filter_map(|id| app.session.doc.occurrences.iter().find(|o| o.id == id).map(|o| o.name.clone())).collect();
+    names.join(", ")
+}
+
+/// Copy the selected placements (R186).
+fn copy_occurrences(app: &mut SolveApp, occurrences: &[u64]) -> bool {
+    let copied: Vec<CopiedOccurrence> = occurrences
+        .iter()
+        .filter_map(|id| app.session.doc.occurrences.iter().find(|o| o.id == *id))
+        .map(|o| CopiedOccurrence {
+            occurrence: o.id,
+            component: o.component,
+            origin: [o.transform[3][0], o.transform[3][1], o.transform[3][2]],
+            file: linked_file(app, o.component),
+        })
+        .collect();
+    let names = occurrence_names(app, copied.iter().map(|c| c.occurrence));
+    app.occurrence_clipboard = copied;
+    app.linked_design_clipboard = None;
+    app.set_status(format!("Copied {names}"), false);
+    leave_text(format!("SolidCraft components: {names}"));
+    true
+}
+
+/// Paste the copied placements as new occurrences in the active component (R186): at the
+/// pointer when it is over the view (the first copy's origin there, the rest keeping their
+/// offsets from it), else `PASTE_OFFSET` from their sources. A linked component goes in through
+/// `component.insert_design {reuse, at}` (first-paste grounding, R123; any open assembly), one
+/// that is not through `occurrence.copy` (its own assembly only). The pastes end up selected.
+fn paste_occurrences(app: &mut SolveApp, at: Option<Pos2>) -> bool {
+    let copied = app.occurrence_clipboard.clone();
+    let Some(first) = copied.first() else { return false };
+    let over_view = at.filter(|p| app.viewport.rect.is_some_and(|r| r.contains(*p)) && !crate::shell::covered(app, *p));
+    let (parent_path, delta) = match over_view {
+        Some(_) => {
+            let (path, target) = paste_placement(app, over_view);
+            (path, [target[0] - first.origin[0], target[1] - first.origin[1], target[2] - first.origin[2]])
+        }
+        None => (paste_placement(app, None).0, PASTE_OFFSET),
+    };
+    let mut made = Vec::new();
+    for c in &copied {
+        let target = [c.origin[0] + delta[0], c.origin[1] + delta[1], c.origin[2] + delta[2]];
+        let here = app.session.doc.occurrences.iter().any(|o| o.id == c.occurrence && o.component == c.component);
+        let out = match &c.file {
+            Some(file) => app.run("component.insert_design", json!({"path": file, "reuse": true, "at": target})),
+            None if here => {
+                let parent = app.session.active_component;
+                app.run("occurrence.copy", json!({"occurrence": c.occurrence, "parent": parent, "translate": delta}))
+            }
+            None => {
+                app.set_status("Paste: that component belongs to another assembly; save it to a file to paste it here", true);
+                return false;
+            }
+        };
+        let Ok(out) = out else { return false };
+        made.extend(out.get("occurrence").and_then(Value::as_u64));
+    }
+    app.session.selection = made
+        .iter()
+        .map(|id| {
+            let mut path = parent_path.clone();
+            path.push(*id);
+            Sel::Occurrence { path }
+        })
+        .collect();
+    let names = occurrence_names(app, made.iter().copied());
+    app.set_status(format!("Pasted {names}"), false);
+    true
+}
+
 /// Is there something Paste would paste here?
 pub fn can_paste(app: &SolveApp) -> bool {
     if app.session.active_sketch.is_some() {
         app.session.sketch_clipboard.is_some()
     } else {
-        app.linked_design_clipboard.is_some() || !app.session.clipboard.is_empty()
+        !app.occurrence_clipboard.is_empty() || app.linked_design_clipboard.is_some() || !app.session.clipboard.is_empty()
     }
 }
 
@@ -56,6 +183,7 @@ pub fn copy_design(app: &mut SolveApp) -> bool {
         return false;
     };
     app.linked_design_clipboard = Some(path);
+    app.occurrence_clipboard.clear();
     leave_text(format!("SolidCraft linked design: {}", app.session.doc.name));
     app.set_status("Copied design: switch to the assembly and paste to insert a linked component", false);
     true
@@ -66,6 +194,10 @@ pub fn copy(app: &mut SolveApp) -> bool {
     if app.session.active_sketch.is_none() && app.tree.picked_components == [0] {
         return copy_design(app);
     }
+    // A placed component pastes as a new occurrence of it, never a body at the root (R186).
+    if let Some(occurrences) = selected_occurrences(app) {
+        return copy_occurrences(app, &occurrences);
+    }
     if app.session.active_sketch.is_some() {
         let entities = sketch_selection(app);
         if entities.is_empty() {
@@ -74,6 +206,7 @@ pub fn copy(app: &mut SolveApp) -> bool {
         }
         let Ok(out) = app.run("sketch.copy", json!({ "entities": entities })) else { return false };
         app.linked_design_clipboard = None;
+        app.occurrence_clipboard.clear();
         let n = out.get("curves").and_then(Value::as_u64).unwrap_or(0) + out.get("points").and_then(Value::as_u64).unwrap_or(0);
         let k = out.get("constraints").and_then(Value::as_u64).unwrap_or(0);
         let text = format!("SolidCraft sketch geometry: {n} entities, {k} constraints and dimensions");
@@ -88,6 +221,7 @@ pub fn copy(app: &mut SolveApp) -> bool {
     }
     let Ok(out) = app.run("timeline.copy", json!({ "features": features })) else { return false };
     app.linked_design_clipboard = None;
+    app.occurrence_clipboard.clear();
     let names: Vec<&str> = out.get("copied").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
     app.set_status(format!("Copied {}", names.join(", ")), false);
     leave_text(format!("SolidCraft features: {}", names.join(", ")));
@@ -142,6 +276,9 @@ pub fn paste(app: &mut SolveApp, at: Option<Pos2>) -> bool {
         let n = out.get("curves").and_then(Value::as_array).map_or(0, Vec::len) + out.get("points").and_then(Value::as_array).map_or(0, Vec::len);
         app.set_status(format!("Pasted {n} sketch entities (selected: drag them, or press M to move them)"), false);
         return true;
+    }
+    if !app.occurrence_clipboard.is_empty() {
+        return paste_occurrences(app, at);
     }
     if let Some(path) = app.linked_design_clipboard.clone() {
         let (parent_path, translate) = paste_placement(app, at);
@@ -255,3 +392,7 @@ pub fn flush(ctx: &egui::Context) {
 #[cfg(test)]
 #[path = "edit_clipboard_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "edit_clipboard_occurrence_tests.rs"]
+mod occurrence_tests;
