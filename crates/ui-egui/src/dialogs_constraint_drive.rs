@@ -306,6 +306,12 @@ impl DriveForm {
         self.next_at = now + self.pause_s().unwrap_or(0.0);
     }
 
+    /// Playback has reached the frame the drive stopped on (R174): the last frame, not playing,
+    /// or there are no frames (the first value already stops). The stop reason shows only then.
+    pub fn at_stop(&self) -> bool {
+        self.frames.is_empty() || (self.playing.is_none() && self.at == self.frames.len() - 1)
+    }
+
     /// Step back (-1) or on (+1) one frame, or to the start / the end; playback stops.
     fn go(&mut self, to: Go) {
         self.playing = None;
@@ -530,7 +536,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut DriveForm) -> bool {
     // Under the buttons: what keeps Play off, the engine's refusal, or why the drive stopped.
     if let Some(why) = problem.as_deref().or(f.error.as_deref()) {
         ui_kit::text(ui, why, ui_kit::Text::Report("drive_problem", true));
-    } else if let Some(why) = &f.stopped {
+    } else if let Some(why) = f.stopped.as_ref().filter(|_| f.at_stop()) {
         ui_kit::text(ui, why, ui_kit::Text::Report("drive_stopped", false));
     }
 

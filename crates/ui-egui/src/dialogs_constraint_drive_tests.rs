@@ -220,6 +220,8 @@ fn drive_stops_on_contact_and_restores() {
         f.steps = "10".into();
         f.stop_on_contact = true;
         f.expanded = true;
+        // A Pause, so a mid-sweep frame can be looked at.
+        f.pause = "0.05".into();
     }
     h.frames(2);
     assert_eq!(
@@ -228,12 +230,19 @@ fn drive_stops_on_contact_and_restores() {
     );
     press(&mut h, tr("ui.constraint.drive_play"));
     // Mid-sweep: B is drawn at the frame's pose, the document stays.
-    for _ in 0..3 {
+    for _ in 0..60 {
+        if form(&h).at > 0 {
+            break;
+        }
         h.frames(1);
     }
     assert!(h.app.preview.active, "B drawn at a frame's pose");
     assert!(count_of("constraint_drive_moved").unwrap_or(0.0) >= 1.0);
     assert!(near(&world(&h, "B"), &pose, 0.0), "the document never changes");
+    // R174: the reason waits until playback reaches the stop frame.
+    let why = form(&h).stopped.clone().expect("a stop reason");
+    assert!(form(&h).playing.is_some() && form(&h).at > 0 && form(&h).at < form(&h).frames.len() - 1, "mid-sweep");
+    assert!(!drawn(&h, &why), "no stop reason mid-sweep");
     play_out(&mut h);
     let f = form(&h);
     assert_eq!(f.at, f.frames.len() - 1, "the last frame is shown");
@@ -245,6 +254,14 @@ fn drive_stops_on_contact_and_restores() {
     let why = f.stopped.clone().expect("a stop reason");
     assert!(why.contains("B:1") && why.contains("C:1"), "{why}");
     assert!(drawn(&h, &why), "the stop reason is drawn under the buttons");
+    press(&mut h, tr("ui.constraint.drive_to_start"));
+    assert_eq!(form(&h).at, 0);
+    assert!(!drawn(&h, &why), "no stop reason at frame 0");
+    press(&mut h, tr("ui.constraint.drive_to_end"));
+    press(&mut h, tr("ui.constraint.drive_step_back"));
+    assert!(!drawn(&h, &why), "no stop reason a frame short of the stop");
+    press(&mut h, tr("ui.constraint.drive_step_on"));
+    assert!(drawn(&h, &why), "the stop reason is back at the last frame");
     assert_eq!(drives(), 1.0, "Play called constraint.drive once");
     // Cancel: B drawn at its document transform, no step, the offset 0.
     press(&mut h, "Cancel");
