@@ -95,6 +95,8 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
             crate::dialogs_assembly::Asm::Constraint(_) => Some("constraint.create"),
             crate::dialogs_assembly::Asm::Drive { .. } => Some("joint.drive"),
             crate::dialogs_assembly::Asm::Interference { .. } => Some("inspect.interference"),
+            // Its heading is the static "Drive" (R138), not the command's label.
+            crate::dialogs_assembly::Asm::DriveConstraint(_) => None,
         },
         _ => kind.simple_metadata().map(|(command, _)| command),
     }

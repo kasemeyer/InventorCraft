@@ -116,6 +116,8 @@ pub enum Asm {
     Trace(Box<TraceForm>),
     /// Constrain (Plan E-2): the Place Constraint panel.
     Constraint(Box<crate::dialogs_constraint::ConstraintForm>),
+    /// Drive (Plan E-2 Task 6): a constraint's offset swept through `constraint.drive`'s frames.
+    DriveConstraint(Box<crate::dialogs_constraint_drive::DriveForm>),
 }
 
 /// The snap under the cursor, remembered for the selection it was found for.
@@ -193,6 +195,8 @@ impl Asm {
             Asm::Trace(_) => "MOTION TRACE",
             // Title case (R138); an edit is headed through `dialog.edit_title` (R143).
             Asm::Constraint(_) => "Constrain",
+            // Static (R138): the constraint's name is the body's header row.
+            Asm::DriveConstraint(_) => "Drive",
         }
     }
 
@@ -227,6 +231,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "joint.gear" | "joint.rack_pinion" | "joint.screw" => crate::dialogs_coupling::start(app, id)?,
         "joint.cam" => crate::dialogs_coupling::cam::start(app),
         "constraint.create" => return crate::dialogs_constraint::start(app),
+        "ui.constraintDrive" => return crate::dialogs_constraint_drive::start(app),
         "inspect.interference" => (
             Asm::Interference { result: None, overlaps: Vec::new(), of: Vec::new(), clearance: "0".into() },
             vec![SelInput::new("Bodies (all if none)", BODIES, true)],
@@ -744,6 +749,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
         }
         Asm::Trace(f) => enter |= trace::rows(app, ui, f, inputs),
         Asm::Constraint(f) => enter |= crate::dialogs_constraint::rows_keys(app, ui, f).1,
+        Asm::DriveConstraint(f) => enter |= crate::dialogs_constraint_drive::rows(app, ui, f),
     }
     enter
 }
@@ -995,6 +1001,8 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
         Asm::Interference { .. } => Vec::new(),
         Asm::Trace(f) => cmd("motion.trace.keep", trace::params(s, f, inputs)?),
         Asm::Constraint(f) => crate::dialogs_constraint::commands(app, f)?,
+        // The drive takes no step: OK and Cancel only close (owner Q17).
+        Asm::DriveConstraint(_) => Vec::new(),
     })
 }
 

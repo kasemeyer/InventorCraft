@@ -36,6 +36,7 @@ pub mod dialogs;
 pub mod dialogs_appearance;
 pub mod dialogs_assembly;
 pub mod dialogs_constraint;
+pub mod dialogs_constraint_drive;
 pub mod dialogs_coupling;
 pub mod dialogs_frame;
 mod dialogs_hole;

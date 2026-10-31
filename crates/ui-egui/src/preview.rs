@@ -315,6 +315,12 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
         constraint_scene(app, &moved);
         return;
     }
+    // The Drive panel (Plan E-2 Task 6): the shown frame's poses the same way; the document never
+    // changes, so closing the panel draws everything where it is (owner Q17).
+    if let Some(moved) = crate::dialogs_constraint_drive::frame(app) {
+        constraint_scene(app, &moved);
+        return;
+    }
     let cmds = match app.dialog.as_ref().filter(|d| d.previews() && d.preview_enabled).map(|d| crate::dialogs::preview_commands(app, d)) {
         Some(Ok(c)) if !c.is_empty() => c,
         _ if crate::sketch_attachment_ui::commands(app).is_some() => crate::sketch_attachment_ui::commands(app).unwrap_or_default(),

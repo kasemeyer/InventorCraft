@@ -1577,10 +1577,10 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 start_modify(app, id, menu_under(app, id));
             }
         }
-        // Plan E-2 Task 6 opens the Drive panel here; until then the row says why it can't drive.
+        // The Drive panel (Plan E-2 Task 6); a suppressed or Lost constraint says why it can't drive.
         "ui.constraintDrive" => {
-            if let Some(why) = id_of(&p, "constraint").and_then(|id| drive_refusal(app, id)) {
-                app.set_status(why, true);
+            if let Some(id) = id_of(&p, "constraint") {
+                crate::dialogs_constraint_drive::open(app, id);
             }
         }
         "ui.constraintLock" => {
