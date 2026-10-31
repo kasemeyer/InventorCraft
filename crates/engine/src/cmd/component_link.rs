@@ -29,7 +29,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("component.insert_design", "Insert Design", insert_design).at("SOLID", "ASSEMBLE").icon("component").enabled(super::document_kind::needs_assembly).params(
         "path: a design (.tcipart, .tciasm, .tcidrw or .solidcraft) → a new component linked to it, holding its solid bodies as placed in that design; \
          name? (default: the design's name); parent?: component id or name (default: the active one); translate?: [x,y,z]; \
-         reuse?: bool (default false): insert a free occurrence, reusing an existing link to the same file when available",
+         reuse?: bool (default false): insert a free occurrence, reusing an existing link to the same file when available;          at?: [x,y,z]: place it there in its own orientation (identity rotation, in the parent's coordinates; not with translate)",
     ),
     CommandSpec::new("component.update_links", "Update Links", update_links).icon("update").params(
         "component?: id or name (default: every linked component) — reads the linked designs again and replaces their bodies where they changed; \
@@ -177,6 +177,15 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
         None => solidcraft_geom::Vec3::ZERO,
         Some(v) => vec3(v).filter(|t| t.is_finite() && t.len() < 1e9).ok_or_else(|| bad(cmd, "`translate` must be [x, y, z] in mm"))?,
     };
+    // `at`: an absolute placement in the part's own orientation (Place Component, R184).
+    let at = match p.get("at") {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(vec3(v).filter(|t| t.is_finite() && t.len() < 1e9).ok_or_else(|| bad(cmd, "`at` must be [x, y, z] in mm"))?),
+    };
+    if at.is_some() && p.get("translate").is_some() {
+        return Err(bad(cmd, "give `at` or `translate`, not both"));
+    }
+    let translate = at.unwrap_or(translate);
     let file = absolute(Path::new(given));
     if s.path.as_deref().is_some_and(|own| absolute(Path::new(own)) == file) {
         return Err(bad(cmd, "a design can't be linked into itself"));
@@ -189,6 +198,13 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
             // a fresh paste into an empty assembly is (R123).
             let first = !s.doc.occurrences.iter().any(|o| o.parent == 0);
             let mut out = super::component::copy_occurrence(s, &json!({"component": component, "parent": parent, "translate": translate}))?;
+            // A copy offsets the first occurrence's placement; `at` places it fresh instead.
+            if let (Some(at), Some(id)) = (at, out["occurrence"].as_u64())
+                && let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| o.id == id)
+            {
+                o.transform = solidcraft_doc::IDENTITY;
+                o.transform[3] = [at.x, at.y, at.z, 1.0];
+            }
             if first && let Some(id) = out["occurrence"].as_u64() {
                 if let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| o.id == id) {
                     o.grounded = true;
@@ -445,6 +461,34 @@ mod tests {
 
     fn volume(s: &mut Session) -> f64 {
         run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap_or(f64::NAN)
+    }
+
+    /// R184: `at` places a copy in the part's own orientation at that point, even when the first
+    /// occurrence has been turned; `at` with `translate` is refused.
+    #[test]
+    fn at_places_a_copy_unrotated_where_asked() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-link-at-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let part = dir.join("plate.solidcraft");
+        save_box(&part, 30.0);
+        let mut s = Session::default();
+        let first = run(&mut s, "component.insert_design", json!({"path": part}));
+        let o1 = first["occurrence"].as_u64().unwrap();
+        let turned = solidcraft_doc::rigid(
+            solidcraft_geom::Vec3::new(5.0, 0.0, 0.0),
+            solidcraft_geom::Vec3::ZERO,
+            solidcraft_geom::Vec3::Z,
+            std::f64::consts::PI,
+        );
+        s.doc_mut().occurrences.iter_mut().find(|o| o.id == o1).unwrap().transform = turned;
+        let copy = run(&mut s, "component.insert_design", json!({"path": part, "reuse": true, "at": [40, 20, 0]}));
+        let o2 = copy["occurrence"].as_u64().unwrap();
+        let m = s.doc.occurrences.iter().find(|o| o.id == o2).unwrap().transform;
+        let mut want = solidcraft_doc::IDENTITY;
+        want[3] = [40.0, 20.0, 0.0, 1.0];
+        assert_eq!(m, want, "unrotated at the point");
+        assert!(s.execute("component.insert_design", &json!({"path": part, "at": [0, 0, 0], "translate": [1, 0, 0]})).is_err());
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

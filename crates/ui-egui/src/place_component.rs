@@ -1,7 +1,7 @@
 //! Place Component (R171): after the file picker a ghost of the design follows the pointer, on
 //! the face under it or else the active component's XY plane (the paste's placement), and each
-//! left click places one occurrence where the ghost is (`component.insert_design` with
-//! `reuse`, one undo step each); the ghost goes on for further copies until Esc, the right-click
+//! left click places one occurrence where the ghost is, in the part's own orientation
+//! (`component.insert_design` with `reuse` and `at`, one undo step each, R184); the ghost goes on for further copies until Esc, the right-click
 //! list's Done (a right-click where the profile has no marking menu) or another command ends it.
 //! The first component of an empty assembly is placed at the origin and grounded at once
 //! (R103/R123), and the ghost still follows for more copies. Both profiles place this way.
@@ -26,19 +26,16 @@ pub(crate) struct Place {
     /// active component), and that component's world frame.
     meshes: Vec<Arc<Mesh>>,
     frame: Mat,
-    /// The placement a copy starts from (`insert_design` with `reuse` copies the first
-    /// occurrence of a design already linked; a fresh one is the identity): its rotation is the
-    /// ghost's.
-    base: Mat,
     /// Where the next copy goes, while the pointer is over the view.
     ghost: Option<Ghost>,
 }
 
-/// The next copy's placement in the active component, and the `translate` that puts it there.
+/// The next copy's placement in the active component: the part's own orientation at the
+/// pointer (R184), and that point (`insert_design`'s `at`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Ghost {
     pub(crate) local: Mat,
-    translate: [f64; 3],
+    at: [f64; 3],
 }
 
 pub(crate) fn live(app: &SolveApp) -> bool {
@@ -65,8 +62,7 @@ pub(crate) fn begin(app: &mut SolveApp, path: String) {
         app.set_status(crate::i18n::tr("ui.place.unreadable"), true);
         return;
     };
-    let base = base_of(&app.session, &path);
-    app.viewport.place = Some(Place { path, meshes, frame: frame(app), base, ghost: None });
+    app.viewport.place = Some(Place { path, meshes, frame: frame(app), ghost: None });
 }
 
 /// End Place Component; true when it was running (Esc's answer).
@@ -100,14 +96,6 @@ fn design_meshes(s: &Session, path: &str) -> Option<Vec<Arc<Mesh>>> {
     (!meshes.is_empty()).then_some(meshes)
 }
 
-/// Where a copy with no `translate` would go (its placement in the active component).
-fn base_of(s: &Session, path: &str) -> Mat {
-    let mut scratch = s.scratch();
-    let Ok(out) = scratch.execute("component.insert_design", &json!({ "path": path, "reuse": true })) else { return IDENTITY };
-    let id = out.get("occurrence").and_then(Value::as_u64);
-    scratch.doc.occurrences.iter().find(|o| Some(o.id) == id).map_or(IDENTITY, |o| o.transform)
-}
-
 /// The pointer at `at` over the view (None: off it): the ghost goes there. Not called while the
 /// view is being navigated, so the ghost holds still meanwhile.
 pub(crate) fn hover(app: &mut SolveApp, at: Option<Pos2>) {
@@ -116,10 +104,9 @@ pub(crate) fn hover(app: &mut SolveApp, at: Option<Pos2>) {
     }
     let ghost = at.map(|at| {
         let (_, local) = crate::edit_clipboard::paste_placement(app, Some(at));
-        let base = app.viewport.place.as_ref().map_or(IDENTITY, |p| p.base);
-        let mut placed = base;
+        let mut placed = IDENTITY;
         placed[3] = [local[0], local[1], local[2], 1.0];
-        Ghost { local: placed, translate: [local[0] - base[3][0], local[1] - base[3][1], local[2] - base[3][2]] }
+        Ghost { local: placed, at: local }
     });
     if let Some(p) = app.viewport.place.as_mut() {
         p.ghost = ghost;
@@ -129,14 +116,11 @@ pub(crate) fn hover(app: &mut SolveApp, at: Option<Pos2>) {
 /// A left click in the view: one occurrence where the ghost is.
 pub(crate) fn click(app: &mut SolveApp) {
     let Some((path, Some(g))) = app.viewport.place.as_ref().map(|p| (p.path.clone(), p.ghost)) else { return };
-    if app.run("component.insert_design", json!({ "path": path, "reuse": true, "translate": g.translate })).is_err() {
+    if app.run("component.insert_design", json!({ "path": path, "reuse": true, "at": g.at })).is_err() {
         return;
     }
-    // The next copy starts from the design's first occurrence now (its link exists).
-    let base = base_of(&app.session, &path);
     let frame = frame(app);
     if let Some(p) = app.viewport.place.as_mut() {
-        p.base = base;
         p.frame = frame;
     }
 }

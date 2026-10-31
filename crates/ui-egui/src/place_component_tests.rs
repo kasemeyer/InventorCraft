@@ -192,3 +192,21 @@ fn the_control_channel_places_a_named_file() {
         assert_eq!(r["ok"], json!(false), "{r}");
     }
 }
+
+/// R184: a copy comes in the part's own orientation at the click, though the first occurrence
+/// (the one `reuse` copies) has been turned a half round (as constraints turn a part).
+#[test]
+fn a_copy_comes_in_unrotated_though_the_source_is_turned() {
+    for mut h in both() {
+        place(&mut h);
+        let first = roots(&h)[0].id;
+        let turned = solidcraft_engine::doc::rigid(Vec3::new(10.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, std::f64::consts::PI);
+        h.app.session.doc_mut().occurrences.iter_mut().find(|o| o.id == first).unwrap().transform = turned;
+        h.app.session.refresh();
+        h.frames(2);
+        let (g, o) = click_at(&mut h, [60.0, 40.0, 0.0]);
+        assert!(near(&o.transform, &g, 1e-9), "{:?}", o.transform);
+        let rotation_free = (0..3).all(|r| (0..3).all(|c| (o.transform[r][c] - IDENTITY[r][c]).abs() <= 1e-12));
+        assert!(rotation_free, "the part's own orientation: {:?}", o.transform);
+    }
+}
