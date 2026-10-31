@@ -591,11 +591,11 @@ fn every_inventor_ribbon_carries_the_render_tab() {
 
 /// Task 6 (D5): the 46 Inventor aliases with a SolidCraft target, as data, with the one-key wait;
 /// updated by design (R70) for Plan D-2 Task 1's eight drawing aliases and Plan E-2 Task 1's `C`
-/// (Constrain, assembly scope).
+/// (Constrain, assembly scope), and F-1's navigation words PAN and ORBIT (R197).
 #[test]
-fn inventor_maps_55_aliases_without_conflicts() {
+fn inventor_maps_57_aliases_without_conflicts() {
     assert_eq!(inventor().letter_keys, LetterKeys::Aliases);
-    assert_eq!(inventor().aliases.len(), 55);
+    assert_eq!(inventor().aliases.len(), 57);
     assert_eq!(inventor().alias_wait_ms, 750);
     assert_eq!(validate(inventor()), Vec::<String>::new());
 }

@@ -225,6 +225,9 @@ pub(crate) fn run_ui_action(app: &mut SolveApp, id: &str) -> bool {
         // Only a drawing has sheets to switch.
         "ui.previousSheet" => crate::drawing_menu::step_sheet(app, -1),
         "ui.nextSheet" => crate::drawing_menu::step_sheet(app, 1),
+        // Inventor's navigation words: the view's Pan and Orbit, as the navigation bar's buttons.
+        "ui.pan" => app.viewport.nav = Some(crate::viewport::NavMode::Pan),
+        "ui.orbit" => app.viewport.nav = Some(crate::viewport::NavMode::Orbit),
         _ => return false,
     }
     true

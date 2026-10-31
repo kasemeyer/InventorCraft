@@ -258,3 +258,31 @@ fn another_key_drops_a_waiting_alias() {
     assert!(h.app.alias.fired.is_none());
     assert!(h.app.dialog.is_none());
 }
+
+/// PAN and ORBIT are Inventor's navigation words (clean-room theme document §Keyboard): in every
+/// environment they start the view's Pan and Orbit, as the navigation bar does.
+#[test]
+fn pan_and_orbit_are_navigation_words_everywhere() {
+    let t = t();
+    for ctx in [Context::Part, Context::Sketch, Context::Assembly, Context::Drawing] {
+        assert_eq!(resolve(&t, ctx, "PAN"), Resolution::Run("ui.pan".into()), "{ctx:?}");
+        assert_eq!(resolve(&t, ctx, "ORBIT"), Resolution::Run("ui.orbit".into()), "{ctx:?}");
+    }
+    let mut h = inventor(Part);
+    for k in [Key::P, Key::A, Key::N] {
+        h.frame_with(key(k));
+    }
+    assert_eq!(h.app.alias.fired.as_deref(), Some("ui.pan"));
+    assert_eq!(h.app.viewport.nav, Some(crate::viewport::NavMode::Pan));
+    for k in [Key::O, Key::R, Key::B, Key::I, Key::T] {
+        h.frame_with(key(k));
+    }
+    assert_eq!(h.app.alias.fired.as_deref(), Some("ui.orbit"));
+    assert_eq!(h.app.viewport.nav, Some(crate::viewport::NavMode::Orbit));
+}
+
+/// SolidCraft keeps its own keys: no alias table, so no navigation words.
+#[test]
+fn solidcraft_has_no_navigation_words() {
+    assert!(!get("solidcraft").unwrap().aliases.iter().any(|a| a.keys == "PAN" || a.keys == "ORBIT"));
+}

@@ -29,6 +29,8 @@ pub const UI_ACTIONS: &[&str] = &[
     "ui.createDrawingView",
     "ui.previousSheet",
     "ui.nextSheet",
+    "ui.pan",
+    "ui.orbit",
 ];
 /// The one-key alias wait when a profile names none (Ruling 4).
 pub const DEFAULT_ALIAS_WAIT_MS: u32 = 750;
@@ -833,7 +835,8 @@ fn validate_dropdowns(at: &str, panel: &RibbonPanel, face: &[String], lists: &mu
 /// `^[A-Z][A-Z0-9]{0,3}$`
 fn alias_keys_ok(keys: &str) -> bool {
     let mut chars = keys.chars();
-    keys.len() <= 4 && chars.next().is_some_and(|c| c.is_ascii_uppercase()) && chars.all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
+    // Five: the capture's longest alias is the navigation word ORBIT.
+    keys.len() <= 5 && chars.next().is_some_and(|c| c.is_ascii_uppercase()) && chars.all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
 }
 
 /// Placement and alias problems, one message per problem naming where it is. Empty: valid.
@@ -908,7 +911,7 @@ pub fn validate(profile: &Profile) -> Vec<String> {
     }
     for (i, a) in profile.aliases.iter().enumerate() {
         if !alias_keys_ok(&a.keys) {
-            out.push(format!("alias \"{}\" ({}): keys must be a capital letter then up to three capitals or digits", a.keys, a.command));
+            out.push(format!("alias \"{}\" ({}): keys must be a capital letter then up to four capitals or digits", a.keys, a.command));
         }
         if find_command(&a.command).is_none() && !UI_ACTIONS.contains(&a.command.as_str()) {
             out.push(format!("alias \"{}\": {} is not a registry command or UI action", a.keys, a.command));

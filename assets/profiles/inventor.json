@@ -89,6 +89,8 @@
     {"keys": "T", "command": "sketch.text", "scope": "sketch_wrapper"},
     {"keys": "OP", "command": "ui.preferences", "scope": "everywhere"},
     {"keys": "VC", "command": "ui.view_cube", "scope": "everywhere"},
+    {"keys": "PAN", "command": "ui.pan", "scope": "everywhere"},
+    {"keys": "ORBIT", "command": "ui.orbit", "scope": "everywhere"},
     {"keys": "A", "command": "sketch.arc.center_point", "scope": "sketch"},
     {"keys": "A3", "command": "sketch.arc.three_point", "scope": "sketch"},
     {"keys": "CE", "command": "sketch.circle.center", "scope": "sketch"},
