@@ -435,12 +435,12 @@ fn glyph_to_start(r: egui::Rect, ink: egui::Color32) -> Vec<egui::Shape> {
 
 fn glyph_step_back(r: egui::Rect, ink: egui::Color32) -> Vec<egui::Shape> {
     let (c, d) = (r.center().x, r.width() * 0.18);
-    vec![triangle(r, ink, c - 0.3 * d, false), bar(r, ink, c + 1.0 * d)]
+    vec![triangle(r, ink, c - 0.6 * d, false), bar(r, ink, c + 1.2 * d)]
 }
 
 fn glyph_step_on(r: egui::Rect, ink: egui::Color32) -> Vec<egui::Shape> {
     let (c, d) = (r.center().x, r.width() * 0.18);
-    vec![bar(r, ink, c - 1.0 * d), triangle(r, ink, c + 0.3 * d, true)]
+    vec![bar(r, ink, c - 1.2 * d), triangle(r, ink, c + 0.6 * d, true)]
 }
 
 fn glyph_to_end(r: egui::Rect, ink: egui::Color32) -> Vec<egui::Shape> {
