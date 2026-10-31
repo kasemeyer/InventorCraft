@@ -3257,6 +3257,7 @@
   "ui.points": "Points",
   "ui.polygon": "Polygon",
   "ui.preferences": "Preferences",
+  "ui.presets.none_yet": "Available once an extrude has been made",
   "ui.press_a_key": "press a key…",
   "ui.profile": "Profile",
   "ui.profile_plane": "Profile Plane",

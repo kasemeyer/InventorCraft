@@ -257,12 +257,22 @@ fn dropdown_arrow(ui: &Ui, rect: egui::Rect, _visuals: &egui::style::WidgetVisua
 
 /// Native dropdown with kit arrow and scenario option handles. Tokens: `text_dim; scope control/font tokens`.
 pub(crate) fn dropdown(ui: &mut Ui, id: &str, selected: &mut usize, options: &[&str]) -> Response {
+    dropdown_with_disabled(ui, id, selected, options, &[])
+}
+
+/// [`dropdown`] with some options shown disabled: `disabled` pairs an option's index with the
+/// (already translated) reason its hover text gives. Tokens: dropdown tokens.
+pub(crate) fn dropdown_with_disabled(ui: &mut Ui, id: &str, selected: &mut usize, options: &[&str], disabled: &[(usize, &str)]) -> Response {
     let text = options.get(*selected).copied().map(crate::i18n::tr_label).unwrap_or("");
     let row = label(ui).to_string();
     dropdown_menu(ui, id, text, |ui| {
         for (index, option) in options.iter().enumerate() {
-            let response = ui.selectable_value(selected, index, crate::i18n::tr_label(option));
+            let why = disabled.iter().find(|(i, _)| *i == index).map(|(_, why)| *why);
+            let response = ui.add_enabled_ui(why.is_none(), |ui| ui.selectable_value(selected, index, crate::i18n::tr_label(option))).inner;
             scenario::publish_handle(&format!("dialog:{row}:{option}"), response.rect.center());
+            if let Some(why) = why {
+                response.on_disabled_hover_text(why);
+            }
         }
     })
 }

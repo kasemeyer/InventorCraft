@@ -1154,7 +1154,12 @@ impl SolveApp {
                 .then(|| self.dialog.as_ref().and_then(dialogs::waits_for_profile))
                 .flatten()
                 .map(|command| WaitingFeature { command, after: self.session.doc.features.iter().map(|f| f.id).max().unwrap_or(0) })
-                .or_else(|| self.waiting_feature.take().filter(|_| id == "sketch.create"));
+                // Start 2D Sketch again while its plane pick is open keeps the park; after Esc
+                // on the plane pick (no Sketch panel) it is gone.
+                .or_else(|| {
+                    let picking = self.dialog.as_ref().is_some_and(|d| matches!(d.kind, dialogs::Kind::Sketch));
+                    self.waiting_feature.take().filter(|_| id == "sketch.create" && picking)
+                });
         }
         dim_view::cancel();
         self.tool = None;

@@ -759,11 +759,14 @@ fn extrude_sections(app: &SolveApp, ui: &mut egui::Ui, d: &mut Dialog) -> bool {
     let mut enter = false;
     let has_bodies = !app.session.world_state().bodies.is_empty();
     // Presets (the profile's `feature_presets`): No Preset is the template's values, Last Used
-    // the last extrude made's; a new panel opens with Last Used.
+    // the last extrude made's (disabled until there is one); a new panel opens with Last Used
+    // only where the profile's `preset_opens_last_used` says so.
     if crate::profile::active(app).workflow.feature_presets && d.editing.is_none() {
         let old = usize::from(d.extra.get("preset").and_then(Value::as_str) == Some("last_used"));
         let mut pick = old;
-        form_row(ui, "Presets", |ui| combo(ui, "ex_preset", &["No Preset", "Last Used"], &mut pick));
+        let none_yet = crate::i18n::tr("ui.presets.none_yet");
+        let disabled: &[(usize, &str)] = if last_used(app, "solid.extrude").is_none() { &[(1, none_yet)] } else { &[] };
+        form_row(ui, "Presets", |ui| ui_kit::dropdown_with_disabled(ui, "ex_preset", &mut pick, &["No Preset", "Last Used"], disabled));
         if pick != old {
             let preset = if pick == 1 { last_used(app, "solid.extrude").cloned() } else { None };
             if pick == 0 || preset.is_some() {

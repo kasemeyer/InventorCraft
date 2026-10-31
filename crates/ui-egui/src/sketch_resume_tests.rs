@@ -114,3 +114,27 @@ fn finish_sketch_resumes_hole_with_the_sketch_points_picked() {
     let want = vec![Sel::SketchPoint { id: format!("{sketch}:a") }, Sel::SketchPoint { id: format!("{sketch}:b") }];
     assert_eq!(d.inputs[0].items, want, "the sketch's points are the placements");
 }
+
+/// Esc on Start 2D Sketch's plane pick forgets the parked Extrude: a later, unrelated sketch
+/// finishes at the model.
+#[test]
+fn escape_on_the_plane_pick_forgets_the_parked_feature() {
+    let mut h = ready(inventor(Part));
+    h.app.start("solid.extrude");
+    h.frames(2);
+    h.app.start("sketch.create");
+    h.frames(2);
+    assert!(h.app.dialog.as_ref().is_some_and(|d| matches!(d.kind, Kind::Sketch)));
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.frames(2);
+    assert!(h.app.dialog.is_none(), "Esc closed the plane pick");
+    h.app.start("sketch.create");
+    h.frames(2);
+    h.app.dialog.as_mut().expect("plane pick").inputs[0].items.push(Sel::Plane { name: "XZ".into() });
+    h.frames(2);
+    assert!(h.app.session.active_sketch.is_some());
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[20,10]})).unwrap();
+    h.app.finish_sketch();
+    h.frames(2);
+    assert!(h.app.dialog.is_none(), "nothing resumes after the parked feature was dropped");
+}

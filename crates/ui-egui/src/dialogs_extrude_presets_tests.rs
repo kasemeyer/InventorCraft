@@ -145,3 +145,36 @@ fn between_is_from_object_and_to_object() {
     let d = h.app.dialog.as_ref().unwrap();
     assert!(!to_object_on(&d.inputs) && !object_on(&d.inputs, FROM_OBJECT));
 }
+
+/// Last Used is offered disabled, with the reason on hover, until an extrude has been made.
+#[test]
+fn last_used_is_disabled_until_something_is_stored() {
+    let mut h = inv();
+    open_extrude(&mut h);
+    h.step(&json!({"click": {"handle": "dialog:Presets"}})).unwrap();
+    h.frames(1);
+    let disabled = |h: &Harness| {
+        h.output
+            .accesskit_update
+            .as_ref()
+            .and_then(|tree| tree.nodes.iter().find_map(|(_, n)| (n.label() == Some("Last Used")).then(|| n.is_disabled())))
+    };
+    assert_eq!(disabled(&h), Some(true), "Last Used is greyed with nothing stored");
+    h.step(&json!({"click": {"handle": "dialog:Presets:Last Used"}})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.dialog.as_ref().unwrap().extra.get("preset"), None, "still No Preset");
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.frames(1);
+    if h.app.dialog.is_some() {
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(4);
+    }
+    // Once an extrude is made, it is live.
+    let _ = h.app.dialog.take();
+    open_extrude(&mut h);
+    ok(&mut h);
+    open_extrude(&mut h);
+    h.step(&json!({"click": {"handle": "dialog:Presets"}})).unwrap();
+    h.frames(1);
+    assert_eq!(disabled(&h), Some(false), "Last Used is live once something is stored");
+}

@@ -1253,7 +1253,6 @@ fn id_of(p: &Value, k: &str) -> Option<u64> {
     p.get(k).and_then(Value::as_u64)
 }
 
-/// Run a menu item (what a click on it does). `at` places a rename box.
 /// Start a profile feature with every profile of a sketch picked.
 fn start_on_sketch(app: &mut SolveApp, command: &str, sketch: u64) {
     let n = app.session.world_state().sketch(sketch).map_or(0, |s| s.profiles.len());
@@ -1262,6 +1261,7 @@ fn start_on_sketch(app: &mut SolveApp, command: &str, sketch: u64) {
     app.start(command);
 }
 
+/// Run a menu item (what a click on it does). `at` places a rename box.
 pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
     if !item.enabled || item.is_sep() || item.is_heading() {
         return;
