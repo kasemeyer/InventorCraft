@@ -2495,7 +2495,7 @@ struct Built<'a> {
 }
 
 /// Lay out the joint graph: the spanning tree out from the fixed occurrences (the root, grounded
-/// ones; with neither involved, the first joint's A side) and the joints left over, which close
+/// ones; in each group with neither, its first joint's A side, R167) and the joints left over, which close
 /// loops. Joints whose origins can't be resolved go to `sol.errors`; `sol.fixed` is set.
 fn build<'a>(doc: &'a Document, st: &ModelState, vals: &Values, extra: &'a Compiled, sol: &mut Solution, mut frames: Frames) -> Built<'a> {
     let asm = &doc.assembly;
@@ -2504,7 +2504,7 @@ fn build<'a>(doc: &'a Document, st: &ModelState, vals: &Values, extra: &'a Compi
     // Joint frames in component coordinates (errors leave the joint out), those not found yet.
     frames.resolve(doc, st, &joints, sol);
     let frames = frames.ok;
-    // Fixed: the root, grounded occurrences; with neither involved, the first joint's A side.
+    // Fixed: the root, grounded occurrences; in each group with neither, its first joint's A side.
     let mut placed: BTreeMap<u64, Mat> = BTreeMap::new();
     let mut dof: BTreeMap<u64, usize> = BTreeMap::new();
     placed.insert(0, IDENTITY);
@@ -2516,7 +2516,7 @@ fn build<'a>(doc: &'a Document, st: &ModelState, vals: &Values, extra: &'a Compi
     // `Free` members (from the root) are left out: they place what the joints don't. Only joints
     // whose frames resolve can hold a side still, as `free_members` reckons it.
     let resolved: Vec<&Joint> = joints.iter().copied().filter(|j| frames.contains_key(&j.id)).collect();
-    if let Some(a) = floating_anchor(&placed, &resolved, &extra.equations) {
+    for a in floating_anchors(&placed, &resolved, &extra.equations) {
         placed.insert(a, occurrence_world(doc, a));
         dof.insert(a, 0);
     }
@@ -2607,6 +2607,15 @@ fn build<'a>(doc: &'a Document, st: &ModelState, vals: &Values, extra: &'a Compi
             closing.push(Closing::Equation(i));
         }
     }
+    // A constraint's joint that resolves but neither places a part nor closes a loop (a side it
+    // can't be stepped to) is an error, never a silent Ok (R167). Saved joints keep `joint.list`'s
+    // floating report.
+    for j in joints.iter().filter(|j| j.id >= COMPILED_BASE && j.kind != JointKind::Free && tree.frames.contains_key(&j.id) && !used.contains(&j.id))
+    {
+        if !(placed.contains_key(&j.a.occurrence) && placed.contains_key(&j.b.occurrence)) {
+            sol.errors.push((j.id, j.name.clone(), "a part it joins is not placed".into()));
+        }
+    }
     Built { tree, placed, closing, dof }
 }
 
@@ -2654,16 +2663,86 @@ impl Frames {
     }
 }
 
-/// With no fixed occurrence among the joints' and the equations' (the `Free` members aside), the
-/// first joint's A side is held where it is. An equation touching a fixed occurrence counts
-/// (R148): a loose pair angled to a grounded part turns as a pair, no side of it held.
-fn floating_anchor(placed: &BTreeMap<u64, Mat>, joints: &[&Joint], equations: &[Eq]) -> Option<u64> {
+/// The occurrences held where they are, one per connected group of the joint/equation graph
+/// (R167): a group (occurrences the joints and equations tie together, the `Free` members aside)
+/// that a constraint reaches and that has no fixed occurrence has its first joint's A side held,
+/// so the second pick moves; a group with no joint (only equations) gets none, `free_members`
+/// places it. Saved joints alone keep the global rule: the first joint's group is held only when
+/// no group has a fixed occurrence. An equation touching a
+/// fixed occurrence joins its group (R148): a loose pair angled to a grounded part turns as a
+/// pair, no side of it held.
+fn floating_anchors(placed: &BTreeMap<u64, Mat>, joints: &[&Joint], equations: &[Eq]) -> Vec<u64> {
     let real = || joints.iter().filter(|j| j.kind != JointKind::Free);
-    let mut involved = real().flat_map(|j| [j.a.occurrence, j.b.occurrence]).chain(equations.iter().flat_map(|e| e.eq.occurrences()));
-    if involved.any(|o| placed.contains_key(&o)) {
-        return None;
+    // Union-find over the occurrences the joints and equations tie.
+    let mut parent: BTreeMap<u64, u64> = BTreeMap::new();
+    fn find(parent: &mut BTreeMap<u64, u64>, o: u64) -> u64 {
+        let mut r = o;
+        while let Some(&p) = parent.get(&r) {
+            if p == r {
+                break;
+            }
+            r = p;
+        }
+        // Path compression.
+        let mut c = o;
+        while c != r {
+            let next = parent.get(&c).copied().unwrap_or(r);
+            parent.insert(c, r);
+            c = next;
+        }
+        parent.entry(r).or_insert(r);
+        r
     }
-    real().next().map(|j| j.a.occurrence)
+    fn union(parent: &mut BTreeMap<u64, u64>, a: u64, b: u64) {
+        let (ra, rb) = (find(parent, a), find(parent, b));
+        if ra != rb {
+            parent.insert(rb, ra);
+        }
+    }
+    for j in real() {
+        union(&mut parent, j.a.occurrence, j.b.occurrence);
+    }
+    for e in equations {
+        let occs = e.eq.occurrences();
+        if let Some(first) = occs.first().copied() {
+            find(&mut parent, first);
+            for o in occs.iter().skip(1) {
+                union(&mut parent, first, *o);
+            }
+        }
+    }
+    // Groups holding a fixed occurrence.
+    let members: Vec<u64> = parent.keys().copied().collect();
+    let mut held: BTreeSet<u64> = BTreeSet::new();
+    for o in members {
+        if placed.contains_key(&o) {
+            held.insert(find(&mut parent, o));
+        }
+    }
+    // Groups a constraint reaches (a compiled joint or an equation): each is anchored on its own.
+    let mut constrained: BTreeSet<u64> = BTreeSet::new();
+    for j in real().filter(|j| j.id >= COMPILED_BASE) {
+        constrained.insert(find(&mut parent, j.a.occurrence));
+    }
+    for e in equations {
+        if let Some(o) = e.eq.occurrences().first() {
+            constrained.insert(find(&mut parent, *o));
+        }
+    }
+    // Saved joints alone keep the rule they were built with: with nothing fixed among them, the
+    // first joint's group is held; a joint group beside a fixed one floats (`joint.list` names it).
+    let mut first = held.is_empty();
+    let mut out = Vec::new();
+    for j in real() {
+        let r = find(&mut parent, j.a.occurrence);
+        if held.contains(&r) || !(first || constrained.contains(&r)) {
+            continue;
+        }
+        first = false;
+        held.insert(r);
+        out.push(j.a.occurrence);
+    }
+    out
 }
 
 /// The first id of the `Free` members a solve makes (occurrence id above it): past every
@@ -2687,7 +2766,7 @@ fn free_members(doc: &Document, extra: &Compiled, frames: &Frames) -> Vec<Joint>
     for o in doc.occurrences.iter().filter(|o| o.grounded) {
         fixed.insert(o.id, IDENTITY);
     }
-    if let Some(a) = floating_anchor(&fixed, &joints, &extra.equations) {
+    for a in floating_anchors(&fixed, &joints, &extra.equations) {
         fixed.insert(a, IDENTITY);
     }
     let mut next: BTreeMap<u64, Vec<u64>> = BTreeMap::new();

@@ -539,3 +539,40 @@ fn an_edit_draft_sends_only_what_changed() {
     let pv = preview(&s, &Draft { offset: None, ..draft });
     assert!(pv.refused.as_deref().is_some_and(|r| r.contains("no longer exists")), "{pv:?}");
 }
+
+/// R167: a free Plate/Pin pair Mated to each other, in an assembly with grounded A Mated to B
+/// elsewhere, is anchored as its own group: the Pin (second pick) moves onto the Plate's top, the
+/// constraint is Ok because it holds, not because it was dropped.
+#[test]
+fn a_free_pair_beside_a_grounded_part_is_solved() {
+    let mut s = blocks();
+    let r = run(&mut s, "constraint.create", json!({"type": "mate", "a": face("A", v(50.0, 25.0, 20.0)), "b": face("B", v(50.0, 25.0, 40.0))}));
+    assert_eq!(r["status"], "ok", "{r}");
+    let (plate_before, pin_before) = (transform(&s, "Plate"), transform(&s, "Pin"));
+    let r =
+        run(&mut s, "constraint.create", json!({"type": "mate", "a": face("Plate", v(160.0, 30.0, 10.0)), "b": face("Pin", v(300.0, 5.0, 110.0))}));
+    assert_eq!(r["status"], "ok", "{r}");
+    // The Plate (first pick, its group's anchor) stays; the Pin moved.
+    assert!(transform(&s, "Plate").iter().flatten().zip(plate_before.iter().flatten()).all(|(x, y)| (x - y).abs() <= TOL), "the plate moved");
+    let pin_now = transform(&s, "Pin");
+    let moved = apply_point(&pin_now, v(300.0, 0.0, 110.0)).dist(apply_point(&pin_before, v(300.0, 0.0, 110.0)));
+    eprintln!("R167: the pin's top centre moved {moved} mm");
+    assert!(moved > 1.0, "the pin did not move ({moved} mm)");
+    // Gap 0: the pin's top lies on the plate's top (z = 10), its normal turned against it.
+    let top = apply_point(&pin_now, v(300.0, 0.0, 110.0));
+    let normal = solidcraft_doc::apply_vector(&pin_now, v(0.0, 0.0, 1.0));
+    let gap = (top.z - 10.0).abs();
+    eprintln!("R167: gap {gap} mm, pin top normal {normal:?}");
+    assert!(gap <= TOL, "gap {gap}");
+    assert!((normal - v(0.0, 0.0, -1.0)).len() <= TOL, "{normal:?}");
+    let st = report(&s);
+    let status = |name: &str| st.rows.iter().find(|r| r.name == name).map(|r| r.status.clone()).unwrap();
+    assert_eq!(status("Mate:2"), ConstraintStatus::Ok);
+    assert_eq!(status("Mate:1"), ConstraintStatus::Ok);
+    // Hand count: a plane Mate leaves 3 (two slides, one turn) to B on A and to the Pin on the
+    // Plate; the Plate holds its group, counted 0 as the anchor.
+    let dof = crate::cmd::joints::resolve(&mut s).dof;
+    eprintln!("R167: dof B {:?} Pin {:?} Plate {:?}", dof.get(&occ(&s, "B")), dof.get(&occ(&s, "Pin")), dof.get(&occ(&s, "Plate")));
+    assert_eq!(dof.get(&occ(&s, "B")), Some(&3));
+    assert_eq!(dof.get(&occ(&s, "Pin")), Some(&3));
+}
