@@ -214,7 +214,7 @@ pub(crate) fn cmd(app: &SolveApp, id: &str, label: &str) -> Item {
 
 /// Ground's words: the profile's `menu_labels` entry as a check-mark item ("Grounded", checked
 /// while grounded), else Ground / Unground.
-fn ground_label(app: &SolveApp, item: &mut Item, grounded: bool) {
+pub(crate) fn ground_label(app: &SolveApp, item: &mut Item, grounded: bool) {
     match crate::profile::active(app).menu_labels.get("occurrence.ground") {
         Some(id) => {
             item.label = crate::i18n::tr(id).to_string();
@@ -1311,6 +1311,8 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         // A drawing's Delete acts on the sheet's selection, never the part's delete (R72).
         "ui.delete" if crate::sheet_canvas::shows(app) => crate::drawing_menu::delete_selection(app),
         "ui.delete" if item.params.is_some() => crate::delete::request(app, p),
+        // Grounded over several picked placements (R179): one undo step for all of them.
+        "occurrence.ground" if p.get("occurrences").is_some() => ground_all(app, &p),
         "ui.delete" => delete(app),
         "ui.horizontalConstraint" | "ui.verticalConstraint" => {
             let selection = app.session.selection.clone();
@@ -1733,6 +1735,20 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         }
         id => app.start(id),
     }
+}
+
+/// Ground (or unground) every listed placement as one undo step (R179).
+fn ground_all(app: &mut SolveApp, p: &Value) {
+    let grounded = p.get("grounded").and_then(Value::as_bool).unwrap_or(true);
+    let depth = app.session.undo.len();
+    for o in p["occurrences"].as_array().into_iter().flatten().filter_map(Value::as_u64) {
+        if let Err(e) = app.run("occurrence.ground", json!({ "occurrence": o, "grounded": grounded })) {
+            app.set_status(e.to_string(), true);
+            break;
+        }
+    }
+    // The first change kept the design as it was before them all: the rest fold into it.
+    app.session.undo.truncate(depth + 1);
 }
 
 /// Ask the open panel for a footer action (the marking menu); it acts on its next frame.

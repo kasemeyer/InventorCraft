@@ -6,6 +6,7 @@
 //! profile's marking-menu data moves (`workflow_warnings` and the rest of `unmapped`, R142).
 
 use serde_json::{Value, json};
+use solidcraft_engine::Sel;
 use solidcraft_engine::doc::DocumentKind::Assembly;
 
 use super::*;
@@ -234,4 +235,94 @@ fn workflow_warnings_unchanged() {
         layouts[&MenuContext::AssemblyEmpty].overflow,
         ["joint.create", "-", "constraint.show", "constraint.hide_all", "-", "ui.previousView", "ui.home", "-", "ui.createDrawingView"]
     );
+}
+
+/// Whether the design still holds B's definition: its component and the body it makes.
+fn b_defined(h: &Harness) -> bool {
+    let doc = &h.app.session.doc;
+    let Some(c) = doc.components.iter().find(|c| c.name == "B") else { return false };
+    h.app.session.model.state().bodies.iter().any(|b| doc.model_body_component(b) == c.id)
+}
+
+/// R178: in an assembly a picked face of B means B's placement. The ring's Delete and the Del
+/// key both delete B:1 in one step and leave B's definition (its body) in the design. B has a
+/// second placement (B:2): the engine's `selection.delete` takes a component with its LAST
+/// placement (`cmd/delete.rs`), which stays an engine matter (reported, not changed here).
+#[test]
+fn delete_takes_the_picked_placement() {
+    let mut h = blocks();
+    let component = h.app.session.doc.components.iter().find(|c| c.name == "B").map(|c| c.id).unwrap();
+    h.app.run("occurrence.copy", json!({"component": component, "translate": [0, 200, 0]})).unwrap();
+    h.frames(2);
+    let empty = empty_space(&mut h);
+    for by_key in [false, true] {
+        let b = occ(&h, "B");
+        click_world(&mut h, [50.0, 95.0, 27.0]);
+        assert!(matches!(h.app.session.selection.as_slice(), [Sel::Face { .. } | Sel::Body { .. }]), "{:?}", h.app.session.selection);
+        let undo = h.app.session.undo.len();
+        if by_key {
+            h.step(&json!({"key": "Delete"})).unwrap();
+            h.frames(3);
+        } else {
+            right_click(&mut h, empty.clone());
+            assert_eq!(entry(&describe(&h.app), "items", "ui.delete")["params"], json!({"occurrences": [b]}));
+            menu_pick(&mut h, "menu", "ui.delete");
+        }
+        h.settle();
+        assert!(!h.app.session.doc.occurrences.iter().any(|o| o.id == b), "B:1 is gone (key: {by_key})");
+        assert!(h.app.session.doc.occurrences.iter().any(|o| o.name == "A:1"), "A:1 stays");
+        assert_eq!(h.app.session.undo.len(), undo + 1, "one step");
+        assert!(b_defined(&h), "B's definition stays (key: {by_key})");
+        assert!(h.app.menu.confirm.is_none(), "nothing else goes, so nothing to confirm");
+        h.app.run("edit.undo", json!({})).unwrap();
+        h.frames(2);
+        h.app.session.selection.clear();
+    }
+    // A Part document keeps deleting what is picked.
+    let mut p = inventor(solidcraft_engine::doc::DocumentKind::Part);
+    p.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "Block"})).unwrap();
+    p.app.session.selection = vec![Sel::Body { name: "Block".into() }];
+    assert_eq!(crate::delete::selection_params(&p.app)["occurrences"], json!([]));
+    assert_eq!(crate::delete::selection_params(&p.app)["items"], json!([{"type": "body", "name": "Block"}]));
+}
+
+/// R179: Grounded over two picked placements is checked only when both are grounded, sets both
+/// to the opposite in one step; with only the root's body picked it is disabled.
+#[test]
+fn grounded_applies_to_every_picked_placement() {
+    let mut h = blocks();
+    let empty = empty_space(&mut h);
+    let (a, b) = (occ(&h, "A"), occ(&h, "B"));
+    let grounded = |h: &Harness, o: u64| h.app.session.doc.occurrences.iter().any(|x| x.id == o && x.grounded);
+    h.app.session.selection = vec![Sel::Occurrence { path: vec![a] }, Sel::Occurrence { path: vec![b] }];
+    right_click(&mut h, empty.clone());
+    let menu = describe(&h.app);
+    let ground = entry(&menu, "items", "occurrence.ground");
+    assert_eq!(ground["label"], json!("Grounded"));
+    assert_eq!(ground["checked"], json!(false), "A is grounded, B is not");
+    assert_eq!(ground["enabled"], json!(true));
+    assert_eq!(ground["params"], json!({"occurrences": [a, b], "grounded": true}));
+    let undo = h.app.session.undo.len();
+    menu_pick(&mut h, "menu", "occurrence.ground");
+    assert!(grounded(&h, a) && grounded(&h, b), "both grounded");
+    assert_eq!(h.app.session.undo.len(), undo + 1, "one step");
+    right_click(&mut h, empty.clone());
+    let menu = describe(&h.app);
+    let ground = entry(&menu, "items", "occurrence.ground");
+    assert_eq!((ground["checked"].clone(), ground["params"]["grounded"].clone()), (json!(true), json!(false)));
+    menu_pick(&mut h, "menu", "occurrence.ground");
+    assert!(!grounded(&h, a) && !grounded(&h, b), "both free");
+    assert_eq!(h.app.session.undo.len(), undo + 2);
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert!(grounded(&h, a) && grounded(&h, b), "one undo restores both");
+
+    // Only a body of the root picked: no placement, so Grounded is disabled.
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, -60, 0], "body_name": "Loose"})).unwrap();
+    h.frames(2);
+    let loose = h.app.session.world_state().bodies.iter().find(|b| b.name.contains("Loose")).map(|b| b.name.clone()).expect("the root body");
+    h.app.session.selection = vec![Sel::Body { name: loose }];
+    right_click(&mut h, empty);
+    assert_eq!(context(&h.app), MenuContext::AssemblyComponent);
+    let menu = describe(&h.app);
+    assert_eq!(entry(&menu, "items", "occurrence.ground")["enabled"], json!(false));
 }

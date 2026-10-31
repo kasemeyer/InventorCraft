@@ -22,7 +22,22 @@ pub struct Pending {
 pub fn selection_params(app: &SolveApp) -> Value {
     use solidcraft_engine::Sel;
     let mut items: Vec<Sel> = Vec::new();
+    // In an assembly edited at its top, a picked body, face, edge or vertex of a placed part
+    // means its placement (R178): the placement goes, the part's definition stays.
+    let top = app.session.doc.kind == solidcraft_engine::doc::DocumentKind::Assembly
+        && app.session.active_component == 0
+        && app.session.active_sketch.is_none();
+    let mut placed: Vec<u64> = Vec::new();
     for s in app.session.selection.iter().filter(|s| !matches!(s, Sel::Body { name } if app.session.visibility.locked_bodies.contains(name))) {
+        if top
+            && let Sel::Body { name: body } | Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } = s
+            && let Some(o) = crate::dialogs_assembly::occurrence_path_of_body(&app.session, body).and_then(|p| p.last().copied())
+        {
+            if !placed.contains(&o) {
+                placed.push(o);
+            }
+            continue;
+        }
         // A MidPoint glyph shared by lines whose midpoints meet removes every constraint it
         // shows, and the point they shared when nothing else holds it.
         let group = match s {
@@ -35,7 +50,12 @@ pub fn selection_params(app: &SolveApp) -> Value {
             }
         }
     }
-    let occurrences: Vec<u64> = app.tree.picked_components.iter().filter_map(|c| app.session.doc.occurrence_of(*c).map(|o| o.id)).collect();
+    let mut occurrences: Vec<u64> = app.tree.picked_components.iter().filter_map(|c| app.session.doc.occurrence_of(*c).map(|o| o.id)).collect();
+    for o in placed {
+        if !occurrences.contains(&o) {
+            occurrences.push(o);
+        }
+    }
     json!({
         "items": items,
         "occurrences": occurrences,

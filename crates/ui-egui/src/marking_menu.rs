@@ -103,14 +103,14 @@ fn kind_list(app: &SolveApp) -> Option<&'static [&'static str]> {
     }
 }
 
-/// The one placement the selection names in an assembly (a picked placement, or the component of
-/// a picked body, face, edge or vertex): the target whose context-menu list the ring's list items
-/// come from (R136). None with nothing, the root's bodies, or several placements picked.
-fn selected_placement(app: &SolveApp) -> Option<Vec<u64>> {
-    if app.session.doc.kind != DocumentKind::Assembly {
-        return None;
-    }
+/// The placements the selection names in an assembly, in pick order: a picked placement, or the
+/// placement of a picked body, face, edge or vertex (the root's bodies name none). Shared with
+/// the Delete key (R178) and Grounded (R179).
+pub(crate) fn selected_placements(app: &SolveApp) -> Vec<Vec<u64>> {
     let mut paths: Vec<Vec<u64>> = Vec::new();
+    if app.session.doc.kind != DocumentKind::Assembly {
+        return paths;
+    }
     for sel in &app.session.selection {
         let path = match sel {
             Sel::Occurrence { path } => Some(path.clone()),
@@ -125,21 +125,30 @@ fn selected_placement(app: &SolveApp) -> Option<Vec<u64>> {
             paths.push(path);
         }
     }
-    match <[Vec<u64>; 1]>::try_from(paths) {
-        Ok([path]) => Some(path),
-        Err(_) => None,
-    }
+    paths
 }
 
-/// A list entry the target's context-menu list also carries takes that item's label, check and
-/// parameters: the context menu is the one producer (R136; Grounded and its check).
+/// A list entry the target's context-menu list also carries takes that item's label, check,
+/// enablement and parameters: the context menu is the one producer (R136; Grounded and its check).
 fn from_context(mut item: Item, listed: &[Item]) -> Item {
     if let Some(src) = listed.iter().find(|l| l.id == item.id && l.id != "-") {
         item.label.clone_from(&src.label);
         item.checked = src.checked;
+        item.enabled = src.enabled;
         item.params.clone_from(&src.params);
     }
     item
+}
+
+/// Grounded over several picked placements (R179): checked only when all are grounded, a click
+/// sets all to the opposite in one step; disabled with no placement picked.
+fn ground_all(app: &SolveApp, mut item: Item, paths: &[Vec<u64>]) -> Item {
+    let placements: Vec<_> = paths.iter().filter_map(|p| app.session.occurrence_placement(p).ok()).collect();
+    let all = !placements.is_empty() && placements.iter().all(|p| p.grounded);
+    crate::context_menu::ground_label(app, &mut item, all);
+    let occurrences: Vec<u64> = placements.iter().map(|p| p.occurrence).collect();
+    item.params = Some(json!({ "occurrences": occurrences, "grounded": !all }));
+    item.on(!occurrences.is_empty())
 }
 
 fn current(app: &SolveApp) -> Option<(MenuContext, &'static MenuLayout)> {
@@ -166,8 +175,16 @@ pub(crate) fn overflow(app: &SolveApp) -> Option<Vec<Item>> {
         return Some(list.iter().map(|id| item(app, id, MenuContext::Panel)).collect());
     }
     let (ctx, l) = current(app)?;
-    let listed = selected_placement(app).map(|path| crate::context_menu::items(app, &Target::Occurrence { path })).unwrap_or_default();
-    Some(l.overflow.iter().map(|id| from_context(item(app, id, ctx), &listed)).collect())
+    let paths = selected_placements(app);
+    let listed = match paths.as_slice() {
+        [path] => crate::context_menu::items(app, &Target::Occurrence { path: path.clone() }),
+        _ => Vec::new(),
+    };
+    let entry = |id: &String| match id.as_str() {
+        "occurrence.ground" if paths.len() != 1 && ctx == MenuContext::AssemblyComponent => ground_all(app, item(app, id, ctx), &paths),
+        _ => from_context(item(app, id, ctx), &listed),
+    };
+    Some(l.overflow.iter().map(entry).collect())
 }
 
 /// The key the profile maps to a UI action (F5 for Previous View under Inventor).
