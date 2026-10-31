@@ -75,7 +75,11 @@ impl ContainerGuard {
             {
                 self.found.push(format!("raw host in macro: {}", names.join("::")));
             }
+            // A method call (`.shadow(…)`), not a field read (`frame.shadow` in an assert).
             if tokens.get(index.wrapping_sub(1)).is_some_and(|t| matches!(t, proc_macro2::TokenTree::Punct(p) if p.as_char() == '.'))
+                && tokens
+                    .get(index + 1)
+                    .is_some_and(|t| matches!(t, proc_macro2::TokenTree::Group(g) if g.delimiter() == proc_macro2::Delimiter::Parenthesis))
                 && matches!(ident.to_string().as_str(), "menu_button" | "menu_image_button" | "context_menu" | "shadow")
             {
                 self.found.push(format!("raw popup/frame shorthand in macro: {ident}"));
@@ -452,6 +456,8 @@ mod tests {
             assert!(!container_violations(source).is_empty(), "bypass: {source}");
         }
         assert!(container_violations("fn show() { wrapper!(egui::Frame::new().show(ui, body)); }").is_empty());
+        // A field read of the same name in a macro is not a popup or frame call.
+        assert!(container_violations("fn check() { assert!(style.shadow == none, \"{}\", menu.context_menu); }").is_empty());
         assert!(violations("invalid Rust {{").is_err(), "unparseable source fails closed");
     }
 
