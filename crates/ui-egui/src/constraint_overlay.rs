@@ -66,6 +66,8 @@ pub(crate) struct DrawnGlyph {
     pub(crate) leaders: usize,
     /// The pointer is on it.
     pub(crate) hot: bool,
+    /// Anchors drawn faded: behind a face from where the view looks (R176).
+    pub(crate) faded: usize,
 }
 
 thread_local! {
@@ -80,15 +82,38 @@ pub(crate) fn drawn_glyphs() -> Vec<DrawnGlyph> {
 
 /// Each glyph's screen point and the screen points of its two anchors.
 fn placed(app: &SolveApp, proj: &Proj) -> Vec<(u64, Pos2, [Option<Pos2>; 2], bool)> {
+    placed_world(app, proj).into_iter().map(|(id, at, anchors, sick)| (id, at, anchors.map(|a| a.map(|a| a.1)), sick)).collect()
+}
+
+/// [`placed`] with each anchor's world point too.
+fn placed_world(app: &SolveApp, proj: &Proj) -> Vec<(u64, Pos2, [Option<(Vec3, Pos2)>; 2], bool)> {
     glyphs(app)
         .into_iter()
         .filter_map(|(id, m, sick)| {
             let at = proj.to_screen(m)?;
-            let anchors =
-                report_rows(app).find(|r| r.id == id).and_then(|r| r.anchors).map_or([None, None], |[a, b]| [proj.to_screen(a), proj.to_screen(b)]);
+            let on = |w: Vec3| proj.to_screen(w).map(|s| (w, s));
+            let anchors = report_rows(app).find(|r| r.id == id).and_then(|r| r.anchors).map_or([None, None], |[a, b]| [on(a), on(b)]);
             Some((id, at, anchors, sick))
         })
         .collect()
+}
+
+/// How much of its colour a hidden anchor keeps.
+const HIDDEN_ALPHA: f32 = 0.3;
+
+/// Most anchors checked for depth each frame; past them all are drawn as in view.
+const MAX_DEPTH_CHECKS: usize = 64;
+
+/// Is world point `w` (drawn at `s`) behind a face from where the view looks (R176)? The first
+/// face under `s` is nearer the eye than `w` by more than a hair.
+fn behind(app: &SolveApp, proj: &Proj, w: Vec3, s: Pos2) -> bool {
+    let (eye, dir) = proj.ray(s);
+    let depth = (w - eye).dot(dir);
+    let first = crate::viewport::pick(app, proj, s).into_iter().find_map(|h| match h {
+        crate::viewport::Hit::Face { point, .. } => Some((point - eye).dot(dir)),
+        _ => None,
+    });
+    first.is_some_and(|f| f < depth - 1e-3 * depth.abs().max(1.0))
 }
 
 /// The glyph under screen point `at`, the nearest when several overlap.
@@ -110,14 +135,21 @@ pub(crate) fn draw(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     }
     let hot = app.viewport.constraint_hover;
     let mut drawn = Vec::new();
-    for (id, at, anchors, sick) in placed(app, proj) {
+    let mut checks = 0;
+    for (id, at, anchors, sick) in placed_world(app, proj) {
         let Some(kind) = report_rows(app).find(|r| r.id == id).map(|r| r.kind) else { continue };
         let colour = if sick { t.error } else { t.accent };
         let picked = app.tree.picked_constraints.contains(&id);
-        let leaders: Vec<Pos2> = anchors.into_iter().flatten().collect();
-        for a in &leaders {
-            painter.line_segment([at, *a], Stroke::new(1.0, colour));
-            painter.circle_filled(*a, 2.0, colour);
+        let leaders: Vec<(Vec3, Pos2)> = anchors.into_iter().flatten().collect();
+        let mut faded = 0;
+        for (w, a) in &leaders {
+            // An anchor behind a face fades, with its leader (R176).
+            checks += 1;
+            let hidden = checks <= MAX_DEPTH_CHECKS && behind(app, proj, *w, *a);
+            let c = if hidden { colour.gamma_multiply(HIDDEN_ALPHA) } else { colour };
+            faded += usize::from(hidden);
+            painter.line_segment([at, *a], Stroke::new(1.0, c));
+            painter.circle_filled(*a, 2.0, c);
         }
         let lit = hot == Some(id) || picked;
         crate::icons::markers::constraint_glyph(painter, at, kind, colour);
@@ -127,7 +159,7 @@ pub(crate) fn draw(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
             painter.rect_stroke(ring, 4.5, Stroke::new(2.0, t.sel_edge), egui::StrokeKind::Middle);
         }
         crate::scenario::publish_handle(&format!("glyph:constraint:{id}"), at);
-        drawn.push(DrawnGlyph { id, at, colour, leaders: leaders.len(), hot: hot == Some(id) });
+        drawn.push(DrawnGlyph { id, at, colour, leaders: leaders.len(), hot: hot == Some(id), faded });
     }
     DRAWN.with(|d| *d.borrow_mut() = drawn);
 }

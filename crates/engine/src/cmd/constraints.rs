@@ -81,7 +81,7 @@ fn has_constraints(s: &Session) -> std::result::Result<(), String> {
 }
 
 fn any_sick(s: &Session) -> std::result::Result<(), String> {
-    if s.constraint_report.any_sick { Ok(()) } else { Err("nothing is sick".into()) }
+    if s.constraint_report.rows.iter().any(|r| is_problem(&r.status)) { Ok(()) } else { Err("nothing is sick".into()) }
 }
 
 fn occurrence_name(s: &Session, id: u64) -> String {
@@ -998,14 +998,13 @@ fn show(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(shown(s))
 }
 
+/// What Show Problems shows (R176): Sick, Lost and Unsolved (R170) constraints.
+fn is_problem(status: &ConstraintStatus) -> bool {
+    matches!(status, ConstraintStatus::Sick { .. } | ConstraintStatus::Lost { .. } | ConstraintStatus::Unsolved)
+}
+
 fn show_sick(s: &mut Session, _p: &Value) -> Result<Value> {
-    let sick = s
-        .constraint_report
-        .rows
-        .iter()
-        .filter(|r| matches!(r.status, ConstraintStatus::Sick { .. } | ConstraintStatus::Lost { .. }))
-        .map(|r| r.id)
-        .collect();
+    let sick = s.constraint_report.rows.iter().filter(|r| is_problem(&r.status)).map(|r| r.id).collect();
     s.shown_constraints = sick;
     Ok(shown(s))
 }

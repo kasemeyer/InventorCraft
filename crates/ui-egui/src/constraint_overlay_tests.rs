@@ -277,3 +277,24 @@ fn unsolved_and_sick_take_the_error_colour() {
     assert!(!is_problem(&ConstraintStatus::Redundant));
     assert!(!is_problem(&ConstraintStatus::Suppressed));
 }
+
+/// R176: an anchor dot behind a face fades (its leader too); one in plain view does not.
+#[test]
+fn anchors_behind_faces_fade() {
+    for mut h in [blocks(), blocks_on(Harness::new())] {
+        // A's bottom flush with the plate's bottom: from the top both anchors are under their parts.
+        let p = json!({"type": "mate", "solution": "flush", "a": face(&h, "A", [50.0, 25.0, 0.0]), "b": face(&h, "Plate", [160.0, 30.0, 0.0])});
+        run(&mut h, "constraint.create", p);
+        // The pin's top flush with B's top: both anchors on top faces, in view.
+        let p = json!({"type": "mate", "solution": "flush", "a": face(&h, "B", [50.0, 95.0, 27.0]), "b": face(&h, "Pin", [300.0, 5.0, 110.0])});
+        run(&mut h, "constraint.create", p);
+        run(&mut h, "constraint.show", json!({"occurrences": ["A", "B"]}));
+        assert_eq!(h.call("ui.view", json!({"view": "top"}))["ok"], json!(true));
+        h.settle();
+        h.frames(2);
+        let drawn = drawn_glyphs();
+        let of = |name: &str| drawn.iter().find(|g| g.id == constraint_id(&h, name)).cloned().unwrap_or_else(|| panic!("{name} not drawn"));
+        assert_eq!(of("Mate:1").faded, 2, "both bottom anchors are behind the parts' tops");
+        assert_eq!(of("Mate:2").faded, 0, "top-face anchors are in view");
+    }
+}

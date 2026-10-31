@@ -331,6 +331,38 @@ pub fn refresh(s: &mut Session) {
 }
 
 /// A pick's point: a plane's or line's base point, a circle's or sphere's centre.
+/// Where a pick was clicked, in the world (`None` for an origin item, which has no click point).
+fn pick_world(s: &Session, g: &GeoRef) -> Option<Vec3> {
+    let pick = match &g.geo {
+        Geo::Face { pick, .. } | Geo::Edge { pick, .. } | Geo::Vertex { pick, .. } => *pick,
+        Geo::Origin { .. } => return None,
+    };
+    let at = solidcraft_doc::apply_point(&joints::occurrence_world(&s.doc, g.occurrence), pick);
+    at.is_finite().then_some(at)
+}
+
+/// A glyph's anchor (R176): the click point `pick` on the resolved geometry `p` (the nearest
+/// point of the plane, line, circle, cylinder or sphere), so two constraints on one face pair
+/// sit where each was picked; without a click point, the geometry's own point.
+pub(crate) fn anchor_at(p: &Prim, pick: Option<Vec3>) -> Vec3 {
+    let Some(q) = pick else { return anchor(p) };
+    let on = match *p {
+        Prim::Plane { p, n } => q - n * (q - p).dot(n),
+        Prim::Line { p, d } => p + d * (q - p).dot(d),
+        Prim::Point { p } => p,
+        Prim::Circle { c, axis, r } => {
+            let flat = q - axis * (q - c).dot(axis);
+            (flat - c).normalized().map_or(c, |u| c + u * r)
+        }
+        Prim::Cylinder { p, d, r } => {
+            let foot = p + d * (q - p).dot(d);
+            (q - foot).normalized().map_or(foot, |u| foot + u * r)
+        }
+        Prim::Sphere { c, r } => (q - c).normalized().map_or(c, |u| c + u * r),
+    };
+    if on.is_finite() { on } else { anchor(p) }
+}
+
 fn anchor(p: &Prim) -> Vec3 {
     match *p {
         Prim::Plane { p, .. } | Prim::Line { p, .. } | Prim::Point { p } | Prim::Cylinder { p, .. } => p,
@@ -382,7 +414,11 @@ pub(crate) fn rebuild(s: &mut Session, sol: &Solution, analysis: Analysis) {
         .constraints
         .iter()
         .map(|c| {
-            let point = |i: usize| c.picks.get(i).and_then(|g| picks.resolve_world(g).ok()).map(|p| anchor(&p));
+            let point = |i: usize| {
+                let g = c.picks.get(i)?;
+                let prim = picks.resolve_world(g).ok()?;
+                Some(anchor_at(&prim, pick_world(s, g)))
+            };
             Row {
                 id: c.id,
                 name: c.name.clone(),

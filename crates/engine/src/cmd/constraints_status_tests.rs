@@ -518,6 +518,32 @@ fn a_capped_loop_group_is_unsolved_not_sick() {
     assert_eq!(unsolved, 101);
     assert_eq!(status(&s, "Mate:2"), ConstraintStatus::Unsolved);
     assert!(!report(&s).any_sick);
+    // R176: Show Problems shows the Unsolved ones too (R170).
+    let show_sick = crate::find_command("constraint.show_sick").unwrap();
+    assert!(show_sick.info(&s).enabled, "Unsolved is a problem to show");
+    let r = run(&mut s, "constraint.show_sick", json!({}));
+    assert_eq!(r["shown"].as_array().map(Vec::len), Some(101), "{r}");
+    assert!(!s.shown_constraints.contains(&id_of(&s, "Mate:1")), "the solved tree member is not shown");
+}
+
+/// R176: a row's anchors are its picks where they were clicked, on the resolved geometry, not
+/// the face's centre: two Mates on one face pair get two glyph places; a rim pick sits on the rim.
+#[test]
+fn anchors_are_the_pick_points_on_the_geometry() {
+    let mut s = blocks();
+    for (x, y) in [(50.0, 25.0), (20.0, 10.0)] {
+        let p = mate_top_bottom(&s, x, y, json!(0));
+        run(&mut s, "constraint.create", p);
+    }
+    run(&mut s, "constraint.create", insert_plate_pin());
+    let anchors = |name: &str| report(&s).rows.iter().find(|r| r.name == name).and_then(|r| r.anchors).unwrap();
+    for (name, x, y) in [("Mate:1", 50.0, 25.0), ("Mate:2", 20.0, 10.0)] {
+        let [a, b] = anchors(name);
+        // A on the grounded part exactly; B where its pick went with B (the loop closes to 1e-6).
+        assert!(a.dist(v(x, y, 20.0)) <= TOL && b.dist(v(x, y, 20.0)) <= 1e-6, "{name}: {a:?} {b:?}");
+    }
+    let [rim, _] = anchors("Insert:1");
+    assert!(rim.dist(v(200.0, 0.0, 10.0)) <= 1e-6, "on the hole's rim where it was picked: {rim:?}");
 }
 
 #[test]
