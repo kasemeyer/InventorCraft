@@ -241,8 +241,15 @@ slot_center	false
 slot_overall	false
 snap	false
 snap_fit	false
+solution_aligned	false
+solution_directed	false
 solution_flush	false
+solution_inside	false
 solution_mate	false
+solution_opposed	false
+solution_outside	false
+solution_reference	false
+solution_undirected	false
 sphere	false
 spin	false
 spline	false

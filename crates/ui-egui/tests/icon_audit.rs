@@ -135,7 +135,23 @@ fn panels(h: &mut Harness, requested: &mut BTreeMap<String, bool>) {
         assert_eq!(h.call("ui.start", json!({"command":command.id}))["ok"], true, "{}", command.id);
         h.frames(2);
         collect(h, &surface, requested);
+        if command.id == "constraint.create" {
+            constrain_types(h, &surface, requested);
+        }
         escape(h);
+    }
+}
+
+/// The Constrain panel's other types, so every Solution row's icons are requested (R166).
+fn constrain_types(h: &mut Harness, surface: &str, requested: &mut BTreeMap<String, bool>) {
+    use solidcraft_engine::doc::constraints::ConstraintKind;
+    use solidcraft_ui_egui::{dialogs::Kind, dialogs_assembly::Asm};
+    for kind in [ConstraintKind::Angle, ConstraintKind::Tangent, ConstraintKind::Insert, ConstraintKind::Mate] {
+        // Open only in an assembly with components (the Hinge Assembly sample).
+        let Some(Kind::Assembly(Asm::Constraint(f))) = h.app.dialog.as_mut().map(|d| &mut d.kind) else { return };
+        f.set_kind(kind);
+        h.frames(2);
+        collect(h, &format!("{surface} type={kind:?}"), requested);
     }
 }
 

@@ -147,8 +147,9 @@ fn predict_fills_seven_and_presses_flush() {
     check(&mut h, "Use current offset and orientation");
     assert!(form(&h).predict);
     assert_eq!(form(&h).value, "", "Predict measures: the value box is cleared (offset None)");
-    let before = transform(&h, "B");
+    let (before, doc_before) = (transform(&h, "B"), h.app.session.doc.clone());
     picks(&mut h, A_TOP, B_TOP);
+    assert!(std::sync::Arc::ptr_eq(&doc_before, &h.app.session.doc), "the preview leaves the document untouched");
     assert_eq!(value_box(&h, "Offset").as_deref(), Some("7.000 mm"));
     assert!(on_solution(&h, "Flush"), "the predicted solution is pressed");
     assert_eq!(form(&h).draft().offset, None, "still measuring");
@@ -249,6 +250,20 @@ fn editing_the_value_re_previews_once() {
 }
 
 #[test]
+fn cancel_after_two_picks_runs_no_command() {
+    let mut h = opened();
+    let (undo, pose) = (h.app.session.undo.len(), transform(&h, "B"));
+    picks(&mut h, A_TOP, B_TOP);
+    assert!(form(&h).ready(), "{:?}", form(&h).picks);
+    press(&mut h, "Cancel");
+    assert!(h.app.dialog.is_none(), "Cancel closes the panel");
+    assert!(h.app.session.doc.assembly.constraints.is_empty(), "no constraint was made");
+    assert_eq!(h.app.session.undo.len(), undo, "no undo step");
+    assert!(near(&transform(&h, "B"), &pose, 0.0));
+    assert_eq!(count_of("constraint_preview_moved"), Some(0.0));
+}
+
+#[test]
 fn esc_mid_preview_restores_and_adds_no_step() {
     let mut h = opened();
     let (undo, pose) = (h.app.session.undo.len(), transform(&h, "B"));
@@ -275,8 +290,9 @@ fn undo_after_two_applies_removes_one_each() {
     picks(&mut h, PLATE_TOP, PIN_TOP_FACE);
     press(&mut h, "Apply");
     assert!(h.app.session.doc.assembly.constraint("Mate:2").is_some());
-    // E-1 places nothing joined to no grounded part: Plate and Pin, both free, stay where they
-    // are (Mate:2 is ok), so the undo's "back where it was" holds for them trivially.
+    // R167: the free Plate/Pin pair is its own group, anchored on the Plate (pick 1): the Pin moves.
+    assert!(near(&transform(&h, "Plate"), &plate_before, 1e-9), "the plate (pick 1) holds");
+    assert!(!near(&transform(&h, "Pin"), &pin_before, 1e-3), "the pin moved onto the plate");
     assert_eq!(h.app.session.undo.len(), undo + 2, "two Applies, two steps");
     h.step(&json!({"key": "Z", "cmd": true})).unwrap();
     h.frames(3);

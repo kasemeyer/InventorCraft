@@ -579,14 +579,8 @@ pub(crate) fn value_text(angle: bool, offset: f64, units: &str) -> String {
     if angle {
         return format!("{offset:.3} deg");
     }
-    let per_mm = match units {
-        "in" => 1.0 / 25.4,
-        "cm" => 0.1,
-        "m" => 0.001,
-        "ft" => 1.0 / 304.8,
-        _ => 1.0,
-    };
-    format!("{:.3} {units}", offset * per_mm)
+    // The shared length display (`length_number` under it), as every other length label.
+    crate::prefs::format_length(offset, units, 3)
 }
 
 // ---- overlay ----
