@@ -1380,7 +1380,6 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, label
     app.tree.picked_joints.retain(|p| joints.iter().any(|j| j.0 == *p));
     // The constraints first, sorted by id (spec §6.4), then the joints as before.
     let constraints = crate::browser::relationship_constraints(app);
-    app.tree.picked_constraints.retain(|p| constraints.contains(p));
     let empty = joints.is_empty() && constraints.is_empty();
     if empty && !always {
         return;

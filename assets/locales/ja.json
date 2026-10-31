@@ -3132,6 +3132,7 @@
   "ui.link_copies_keep": "そのまま",
   "ui.link_copies_link": "リンク",
   "ui.link_copies_text": "これらのコンポーネントは {name} と同じボディを作成します。そのリンクの配置にしますか？",
+  "ui.list_separator": "、",
   "ui.lock": "ロック",
   "ui.loft": "ロフト",
   "ui.look_at": "正面視",

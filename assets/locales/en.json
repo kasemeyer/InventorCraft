@@ -3132,6 +3132,7 @@
   "ui.link_copies_keep": "Keep",
   "ui.link_copies_link": "Link",
   "ui.link_copies_text": "These components build the same bodies as {name}. Make them placements of its link?",
+  "ui.list_separator": ", ",
   "ui.lock": "Lock",
   "ui.loft": "Loft",
   "ui.look_at": "Look At",

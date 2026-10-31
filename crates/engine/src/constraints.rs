@@ -290,7 +290,8 @@ fn occurrence_rows(s: &Session, rows: &[Row], dof: &BTreeMap<u64, usize>) -> Vec
             continue;
         }
         held.extend(r.occurrences.iter().copied());
-        if matches!(r.status, ConstraintStatus::Sick { .. } | ConstraintStatus::Lost { .. }) {
+        // Unsolved too: a part held only by a constraint left unsolved is a problem (R170).
+        if matches!(r.status, ConstraintStatus::Sick { .. } | ConstraintStatus::Lost { .. } | ConstraintStatus::Unsolved) {
             sick.extend(r.occurrences.iter().copied());
         }
     }

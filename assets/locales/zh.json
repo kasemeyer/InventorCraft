@@ -3132,6 +3132,7 @@
   "ui.link_copies_keep": "保留",
   "ui.link_copies_link": "链接",
   "ui.link_copies_text": "这些组件生成的实体与 {name} 相同。要将它们改为其链接的放置吗？",
+  "ui.list_separator": "、",
   "ui.lock": "锁定",
   "ui.loft": "放样",
   "ui.look_at": "朝向",

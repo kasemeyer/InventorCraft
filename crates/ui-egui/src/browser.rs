@@ -1141,14 +1141,9 @@ fn component_rows(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, depth: usize, 
     let grounded = app.session.doc.occurrence_of(id).is_some_and(|o| o.grounded);
     let faded = app.session.active_component != 0 && !app.session.doc.component_within(id, app.session.active_component) && !active;
     let name = component_name(app, id);
-    // A placed component's status (its first placement), as its placement rows show it.
-    let placed = app.session.doc.occurrence_of(id).map(|o| o.id).filter(|_| id != 0);
-    let mut badges: Vec<&str> = if grounded { vec!["pin"] } else { Vec::new() };
-    if placed.is_some_and(|o| occurrence_sick(app, o)) {
-        badges.push("error");
-    }
-    let marker = placed.filter(|_| shows_status(app)).map(|o| status_marker(app, o));
-    let badges = badges.as_slice();
+    // Only the design's own row is drawn here (placements are `occurrence_rows`, which carry the
+    // status marker and the problem badge).
+    let badges: &[&str] = if grounded { &["pin"] } else { &[] };
     let row = Row {
         depth,
         fold: Some(open),
@@ -1159,7 +1154,6 @@ fn component_rows(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, depth: usize, 
         selected: app.tree.picked_components.contains(&id),
         dim: faded,
         radio: Some(active),
-        marker,
         badges,
         // The design holds everything the tree lists.
         mark: if id == 0 && acts.lit.any() { Mark::Branch } else { Mark::None },
@@ -1245,11 +1239,6 @@ fn component_rows(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, depth: usize, 
         folder_rows(app, ui, id, folder, d, acts);
     }
     features::rows(app, ui, id, &[], d, acts);
-    if let Some(o) = placed {
-        for c in constraints_on(app, o) {
-            constraint_row(app, ui, c, o, d, false);
-        }
-    }
     component_children(app, ui, id, d, acts);
 }
 
@@ -2755,7 +2744,17 @@ fn shows_status(app: &SolveApp) -> bool {
     app.session.doc.kind == solidcraft_engine::doc::DocumentKind::Assembly || !app.session.doc.assembly.constraints.is_empty()
 }
 
-/// A sick or lost constraint holds this occurrence (R141).
+/// Picked constraints that no longer exist are dropped, every frame, whether or not the browser
+/// draws its Relationships (Task 4 review).
+pub(crate) fn prune_picked_constraints(app: &mut SolveApp) {
+    let rows = &app.session.constraint_report.rows;
+    if app.tree.picked_constraints.iter().any(|p| !rows.iter().any(|r| r.id == *p)) {
+        let ids: Vec<u64> = rows.iter().map(|r| r.id).collect();
+        app.tree.picked_constraints.retain(|p| ids.contains(p));
+    }
+}
+
+/// A sick, lost or unsolved constraint holds this occurrence (R141, R170).
 fn occurrence_sick(app: &SolveApp, occurrence: u64) -> bool {
     app.session.constraint_report.occurrences.iter().any(|o| o.id == occurrence && o.status == solidcraft_engine::constraints::OccurrenceStatus::Sick)
 }
@@ -2791,7 +2790,8 @@ pub(crate) fn status_tip(status: &solidcraft_engine::doc::constraints::Constrain
             } else {
                 tr("ui.constraint.tip_stuck").to_string()
             };
-            Some(if with.is_empty() { off } else { std::format!("{off} {}", format("ui.constraint.tip_with", &[("names", &with.join(", "))])) })
+            let names = with.join(tr("ui.list_separator"));
+            Some(if with.is_empty() { off } else { std::format!("{off} {}", format("ui.constraint.tip_with", &[("names", &names)])) })
         }
     }
 }

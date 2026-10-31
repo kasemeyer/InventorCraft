@@ -167,6 +167,9 @@ fn status_markers_and_the_pin() {
         h.frames(2);
     }
     assert_eq!(h.app.session.doc.assembly.constraints.len(), 2);
+    h.frames(1);
+    // Mate:1 and the left Flush remain: B slides along y only.
+    assert_eq!(missing(&h, "B"), Some(1), "recounted after the frame");
     assert_eq!(status_marker(&h.app, b), "status_half");
     assert!(has_marker("status_half", "B:1"));
 }
@@ -212,7 +215,7 @@ fn sick_lost_suppressed_and_limited_rows() {
         assert_eq!(r.color, Some(t.error), "{r:?}");
         assert!(r.tip.as_deref().is_some_and(|s| s.contains("no longer exists")), "{r:?}");
     }
-    assert!(has_badge("error", "Plate:1") || has_badge("error", "Pin:1"), "the occurrence of a lost constraint gains the problem badge");
+    assert!(has_badge("error", "Plate:1") && has_badge("error", "Pin:1"), "both occurrences of a lost constraint gain the problem badge (R169)");
 
     // Ok, offset, limited, suppressed and sick Mates.
     let mut h = blocks();
@@ -248,8 +251,9 @@ fn sick_lost_suppressed_and_limited_rows() {
     assert!(sick.badges.contains(&"error".to_string()) && sick.color == Some(t.error), "{sick:?}");
     let tip = sick.tip.clone().unwrap();
     assert!(tip.starts_with("off by 2.000 mm") && !tip.contains("— with"), "{tip}");
-    // B carries a sick constraint: it keeps its DOF marker and gains the problem badge.
-    assert!(has_badge("error", "B:1"));
+    // B carries a sick constraint: it keeps its DOF marker and gains the problem badge; so does A,
+    // its other occurrence, grounded or not (R169).
+    assert!(has_badge("error", "B:1") && has_badge("error", "A:1"));
     assert!(!has_marker("status_empty", "B:1"));
 }
 
@@ -297,6 +301,54 @@ fn solidcraft_keeps_ground_and_unground() {
     assert_eq!(ground.params, Some(json!({"occurrence": occ(&h, "A"), "grounded": false})));
 }
 
+/// R170: an Unsolved row draws as a problem (badge, error colour) and marks its occurrences; a
+/// picked constraint that goes away is dropped from the picks even with the browser hidden.
+#[test]
+fn an_unsolved_row_is_a_problem_on_its_parts() {
+    use solidcraft_engine::doc::constraints::{ConstraintKind, next_name};
+    let mut h = blocks();
+    let t = crate::theme::Tokens::get();
+    let p = mate_ab(&h, 50.0, 25.0, json!({}));
+    run(&mut h, "constraint.create", p);
+    // 101 copies close 101 loops through B's one tree member: over the loop cap, Unsolved.
+    let first = h.app.session.doc.assembly.constraints[0].clone();
+    for _ in 0..101 {
+        let doc = h.app.session.doc_mut();
+        let mut c = first.clone();
+        c.id = doc.allocate_id().unwrap();
+        c.name = next_name(&doc.assembly, ConstraintKind::Mate);
+        c.state.clear();
+        c.signatures = Default::default();
+        doc.assembly.constraints.push(c);
+    }
+    h.app.session.refresh();
+    h.frames(2);
+    let row = h.app.session.constraint_report.rows.iter().find(|r| r.name == "Mate:2").unwrap().clone();
+    assert_eq!(row.status, ConstraintStatus::Unsolved);
+    let drawn_rows = drawn("Mate:2");
+    assert!(!drawn_rows.is_empty());
+    for r in &drawn_rows {
+        assert!(r.badges.contains(&"error".to_string()) && r.color == Some(t.error), "{r:?}");
+    }
+    // Unsolved marks its occurrences (R170): their rows' problem badge (`occurrence_sick`; the
+    // rows themselves are scrolled past 102 constraint rows here).
+    for name in ["A", "B"] {
+        let id = occ(&h, name);
+        let o = h.app.session.constraint_report.occurrences.iter().find(|o| o.id == id).unwrap();
+        assert_eq!(o.status, solidcraft_engine::constraints::OccurrenceStatus::Sick, "{name}");
+        assert!(super::occurrence_sick(&h.app, id), "{name}");
+    }
+
+    // Prune: Mate:2 picked, the browser hidden, the constraint deleted.
+    let mate2 = constraint_id(&h, "Mate:2");
+    h.app.tree.picked_constraints = vec![mate2];
+    h.app.ui.show_browser = false;
+    h.frames(1);
+    run(&mut h, "constraint.delete", json!({"constraint": "Mate:2"}));
+    h.frames(1);
+    assert!(h.app.tree.picked_constraints.is_empty(), "{:?}", h.app.tree.picked_constraints);
+}
+
 /// Test 7 (R161): Unsolved and stuck-loop texts.
 #[test]
 fn unsolved_and_stuck_loop_tips() {
@@ -306,6 +358,8 @@ fn unsolved_and_stuck_loop_tips() {
     assert!(!stuck.contains("NaN"));
     let sick = status_tip(&ConstraintStatus::Sick { gap_mm: 2.0, gap_deg: 0.0, with: vec!["Mate:1".into()] });
     assert_eq!(sick.as_deref(), Some("off by 2.000 mm and 0.000° — with Mate:1"));
+    let two = status_tip(&ConstraintStatus::Sick { gap_mm: 2.0, gap_deg: 0.0, with: vec!["Mate:1".into(), "Mate:3".into()] });
+    assert_eq!(two.as_deref(), Some("off by 2.000 mm and 0.000° — with Mate:1, Mate:3"), "the list separator is the catalog's");
     for s in [ConstraintStatus::Ok, ConstraintStatus::Redundant, ConstraintStatus::Suppressed] {
         assert_eq!(status_tip(&s), None, "{s:?}");
     }

@@ -1892,6 +1892,7 @@ impl SolveApp {
         scenario::clear_handles();
         self.poll_deferred(ui.ctx());
         self.poll_delete_check(ui.ctx());
+        browser::prune_picked_constraints(self);
         toolbar::app_bar(self, ui);
         issue_report::CadInput::block(self, ui, report_input);
         file_load::show(self, ui.ctx());
