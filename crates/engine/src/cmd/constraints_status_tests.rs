@@ -602,3 +602,34 @@ fn a_free_pair_beside_a_grounded_part_is_solved() {
     assert_eq!(dof.get(&occ(&s, "B")), Some(&3));
     assert_eq!(dof.get(&occ(&s, "Pin")), Some(&3));
 }
+
+/// R172: a free pair's anchor (pick 1's part, R173) reports its true freedom, 6, not 0; the
+/// Mate takes 3 from the other part.
+#[test]
+fn a_free_groups_anchor_reports_six() {
+    let mut s = blocks();
+    let p = json!({"type": "mate", "a": on(&s, "Plate", v(160.0, 30.0, 10.0)), "b": on(&s, "Pin", v(305.0, 0.0, 50.0))});
+    run(&mut s, "constraint.create", p);
+    let r = report(&s);
+    let dof = |name: &str| r.occurrences.iter().find(|o| o.id == occ(&s, name)).and_then(|o| o.missing);
+    assert_eq!(dof("Plate"), Some(6), "the anchor is as free as an unconstrained part: {:?}", r.occurrences);
+    assert_eq!(dof("Pin"), Some(3), "{:?}", r.occurrences);
+    // A grounded part still reports 0.
+    assert_eq!(dof("A"), Some(0));
+}
+
+/// R173: a free group is held at its constraint's FIRST pick whatever the compile puts on side A:
+/// a vertex of the plate on the pin's bottom face (point on plane: the plane is side A) moves the
+/// pin, the second pick.
+#[test]
+fn a_free_group_is_held_at_pick_one() {
+    let mut s = blocks();
+    let plate = transform(&s, "Plate");
+    let pin = transform(&s, "Pin");
+    let p = json!({"type": "mate", "a": {"occurrence": "Plate", "vertex": [230.0, 40.0, 10.0]}, "b": on(&s, "Pin", v(305.0, 0.0, 50.0))});
+    run(&mut s, "constraint.create", p);
+    assert!(same(&transform(&s, "Plate"), &plate), "pick 1 stays: {:?}", transform(&s, "Plate"));
+    assert!(!same(&transform(&s, "Pin"), &pin), "pick 2 moves");
+    let bottom = apply_point(&transform(&s, "Pin"), v(305.0, 0.0, 50.0));
+    assert!((bottom.z - 10.0).abs() <= TOL, "the pin's bottom through the plate's corner: {bottom:?}");
+}

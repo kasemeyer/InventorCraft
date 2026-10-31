@@ -2516,9 +2516,11 @@ fn build<'a>(doc: &'a Document, st: &ModelState, vals: &Values, extra: &'a Compi
     // `Free` members (from the root) are left out: they place what the joints don't. Only joints
     // whose frames resolve can hold a side still, as `free_members` reckons it.
     let resolved: Vec<&Joint> = joints.iter().copied().filter(|j| frames.contains_key(&j.id)).collect();
-    for a in floating_anchors(&placed, &resolved, &extra.equations) {
+    for (a, constrained) in floating_anchors(&placed, &resolved, &extra.equations, &first_picks(asm)) {
         placed.insert(a, occurrence_world(doc, a));
-        dof.insert(a, 0);
+        // A constraint group's anchor is held only for the solve: it is as free as an
+        // unconstrained part (R172). A saved-joint group's keeps its 0.
+        dof.insert(a, if constrained { 6 } else { 0 });
     }
     sol.fixed = placed.keys().copied().collect();
     let mut tree =
@@ -2665,13 +2667,18 @@ impl Frames {
 
 /// The occurrences held where they are, one per connected group of the joint/equation graph
 /// (R167): a group (occurrences the joints and equations tie together, the `Free` members aside)
-/// that a constraint reaches and that has no fixed occurrence has its first joint's A side held,
-/// so the second pick moves; a group with no joint (only equations) gets none, `free_members`
+/// that a constraint reaches and that has no fixed occurrence is held at its first joint's
+/// constraint's first pick (R173), so the second pick moves; a group with no joint (only equations) gets none, `free_members`
 /// places it. Saved joints alone keep the global rule: the first joint's group is held only when
 /// no group has a fixed occurrence. An equation touching a
 /// fixed occurrence joins its group (R148): a loose pair angled to a grounded part turns as a
 /// pair, no side of it held.
-fn floating_anchors(placed: &BTreeMap<u64, Mat>, joints: &[&Joint], equations: &[Eq]) -> Vec<u64> {
+/// Each constraint's first pick's occurrence (R173: a free group is held there).
+fn first_picks(asm: &Assembly) -> BTreeMap<u64, u64> {
+    asm.constraints.iter().filter_map(|c| c.picks.first().map(|g| (c.id, g.occurrence))).collect()
+}
+
+fn floating_anchors(placed: &BTreeMap<u64, Mat>, joints: &[&Joint], equations: &[Eq], first_pick: &BTreeMap<u64, u64>) -> Vec<(u64, bool)> {
     let real = || joints.iter().filter(|j| j.kind != JointKind::Free);
     // Union-find over the occurrences the joints and equations tie.
     let mut parent: BTreeMap<u64, u64> = BTreeMap::new();
@@ -2740,7 +2747,12 @@ fn floating_anchors(placed: &BTreeMap<u64, Mat>, joints: &[&Joint], equations: &
         }
         first = false;
         held.insert(r);
-        out.push(j.a.occurrence);
+        // A constraint's group is held at the constraint's first pick, whichever side the
+        // compile put it on (R173: the second pick moves); a saved joint's at its A side.
+        let constraint = (j.id >= COMPILED_BASE).then(|| crate::constraints::owner_of(j.id)).flatten();
+        let at =
+            constraint.and_then(|c| first_pick.get(&c).copied()).filter(|o| *o == j.a.occurrence || *o == j.b.occurrence).unwrap_or(j.a.occurrence);
+        out.push((at, constrained.contains(&r)));
     }
     out
 }
@@ -2766,7 +2778,7 @@ fn free_members(doc: &Document, extra: &Compiled, frames: &Frames) -> Vec<Joint>
     for o in doc.occurrences.iter().filter(|o| o.grounded) {
         fixed.insert(o.id, IDENTITY);
     }
-    for a in floating_anchors(&fixed, &joints, &extra.equations) {
+    for (a, _) in floating_anchors(&fixed, &joints, &extra.equations, &first_picks(asm)) {
         fixed.insert(a, IDENTITY);
     }
     let mut next: BTreeMap<u64, Vec<u64>> = BTreeMap::new();
@@ -3311,6 +3323,30 @@ mod tests {
         assert_eq!(errors, [COMPILED_BASE + 4], "only the failed joint: {:?}", sol.errors);
         assert!(sol.fixed.contains(&a) && !sol.fixed.contains(&x), "{:?}", sol.fixed);
         assert!(sol.world.contains_key(&b) && sol.world.contains_key(&c), "{:?}", sol.world.keys());
+    }
+
+    /// R167/R173 (wave 1 item 7): a constraint's joint that resolves but can't be stepped to its
+    /// other part (here a turn that works out to NaN) neither places it nor closes a loop: an error
+    /// naming why (Lost), never a silent Ok; the rest of its group is still placed from the anchor.
+    #[test]
+    fn a_dropped_compiled_joint_is_an_error() {
+        let mut doc = Document::new("dropped");
+        let ids: Vec<u64> = ["X", "Y", "Z"]
+            .into_iter()
+            .map(|n| {
+                let comp = doc.add_component(Some(n), 0).unwrap();
+                doc.occurrences.iter().find(|o| o.component == comp).unwrap().id
+            })
+            .collect();
+        let [x, y, z] = ids[..] else { panic!("{ids:?}") };
+        doc.occurrences.iter_mut().for_each(|o| o.grounded = false);
+        let mut broken = rigid(COMPILED_BASE + 8, "Mate:2", z, y, None);
+        broken.angle = f64::NAN;
+        let extra = Compiled { joints: vec![rigid(COMPILED_BASE + 4, "Mate:1", x, y, None), broken], equations: Vec::new(), lost: Vec::new() };
+        let sol = solve_with(&doc, &ModelState::default(), &Held::new(), Analysis::Placement, &extra);
+        let errors: Vec<(u64, &str)> = sol.errors.iter().map(|(id, _, why)| (*id, why.as_str())).collect();
+        assert_eq!(errors, [(COMPILED_BASE + 8, "a part it joins is not placed")], "{:?}", sol.errors);
+        assert!(sol.world.contains_key(&x) && sol.world.contains_key(&y) && !sol.world.contains_key(&z), "{:?}", sol.world.keys());
     }
 
     /// Final wave item 10: an equation whose parts are placed but a side of which gives no
