@@ -177,3 +177,18 @@ fn a_part_into_a_started_assembly_waits_for_the_click() {
         assert!(near(&o.transform, &g, 1e-9) && !o.grounded, "the second copy too: {:?}", o.transform);
     }
 }
+
+/// The control channel starts Place on a file, past the picker (agents, screenshots).
+#[test]
+fn the_control_channel_places_a_named_file() {
+    for mut h in both() {
+        let path = h.dir.join("part1.solidcraft").to_string_lossy().into_owned();
+        let r = h.call("ui.start", json!({"command": "component.insert_design", "params": {"path": path}}));
+        assert_eq!(r["result"]["placing"], json!(true), "{r}");
+        h.settle();
+        assert_eq!(roots(&h).len(), 1, "the empty assembly's first part, grounded at once");
+        assert!(super::live(&h.app));
+        let r = h.call("ui.start", json!({"command": "component.insert_design", "params": {}}));
+        assert_eq!(r["ok"], json!(false), "{r}");
+    }
+}

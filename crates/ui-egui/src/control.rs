@@ -491,8 +491,19 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             let Some(id) = s("command") else { return err("missing `command`") };
             // `params`: what the dialog opens on. Refused: nothing starts, or the dialog closes.
             let params = p.get("params").filter(|v| !v.is_null());
+            // Place Component on a file, past the picker (R171): its ghost follows the pointer.
+            if id == "component.insert_design"
+                && let Some(path) = params.map(|v| v.get("path").and_then(Value::as_str))
+            {
+                let Some(path) = path.filter(|p| !p.trim().is_empty()) else { return err("component.insert_design takes {path}") };
+                app.tool = None;
+                crate::place_component::begin(app, path.to_string());
+                return ok(json!({"placing": crate::place_component::live(app)}));
+            }
             if params.is_some() && id != "joint.drive" && id != "motion.study" {
-                return err(format!("`{id}` takes no ui.start params yet (joint.drive takes joint, values; motion.study takes study)"));
+                return err(format!(
+                    "`{id}` takes no ui.start params yet (joint.drive takes joint, values; motion.study takes study; component.insert_design takes path)"
+                ));
             }
             app.start(id);
             if let Some(params) = params.filter(|_| id == "motion.study") {
