@@ -185,12 +185,38 @@ pub struct OccMove {
     pub pivot: Option<solidcraft_engine::geom::Vec3>,
     /// The values when the current triad drag began.
     drag0: Option<([f64; 3], [f64; 3])>,
+    /// Create Copy (R186): the panel moves a new occurrence of the source, not the source.
+    pub copy: bool,
+    /// The source while a copy is being moved, and the undo depth just after the copy was made.
+    pub copy_of: Option<(u64, usize)>,
 }
 
 impl OccMove {
     pub fn new(occurrence: u64) -> Self {
-        OccMove { occurrence, path: Vec::new(), baseline: None, had_pending: false, translate: [0.0; 3], angles: [0.0; 3], pivot: None, drag0: None }
+        OccMove {
+            occurrence,
+            path: Vec::new(),
+            baseline: None,
+            had_pending: false,
+            translate: [0.0; 3],
+            angles: [0.0; 3],
+            pivot: None,
+            drag0: None,
+            copy: false,
+            copy_of: None,
+        }
     }
+}
+
+/// The Move/Copy panel on occurrence `o` at `path` (empty: by id alone; its Browser row's Move/Copy, and the Position
+/// panel's Move with a placement picked, R186).
+pub(crate) fn open_occurrence_move(app: &mut SolveApp, o: u64, path: Vec<u64>) {
+    let mut movement = OccMove::new(o);
+    movement.had_pending = app.session.pending_moves.contains_key(&o);
+    movement.path = path;
+    movement.baseline =
+        app.session.pending_moves.get(&o).copied().or_else(|| app.session.doc.occurrences.iter().find(|occ| occ.id == o).map(|occ| occ.transform));
+    app.tree.occurrence_move = Some(movement);
 }
 
 // ---------------------------------------------------------------------------------------------

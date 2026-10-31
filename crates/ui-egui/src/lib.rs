@@ -1066,10 +1066,23 @@ impl SolveApp {
         // the exact instance path and the grounding/rigid-group restrictions.
         if id == "solid.move"
             && let [solidcraft_engine::Sel::Occurrence { path }] = self.session.selection.as_slice()
+            && self.session.doc.kind != solidcraft_engine::doc::DocumentKind::Assembly
         {
             let target = context_menu::Target::Occurrence { path: path.clone() };
             if let Some(item) = context_menu::items(self, &target).into_iter().find(|item| item.id == "ui.moveOccurrence") {
                 context_menu::run_item(self, &item, egui::Pos2::ZERO);
+            }
+            return;
+        }
+        // In an assembly a picked placement (its row, or its body, face or edge in the view)
+        // moves, or with Create Copy copies, as an occurrence, never as a root body (R186): the
+        // same resolver as Copy / Paste.
+        if id == "solid.move"
+            && let edit_clipboard::Picked::Placements(paths) = edit_clipboard::picked_placements(self)
+            && let [path] = paths.as_slice()
+        {
+            if let Some(o) = path.last().copied() {
+                browser::open_occurrence_move(self, o, path.clone());
             }
             return;
         }

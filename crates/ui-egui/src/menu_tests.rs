@@ -326,8 +326,11 @@ fn move_shortcut_respects_grounding_and_keeps_body_selection_as_a_body_move() {
     app.run("occurrence.ground", json!({"occurrence":occurrence,"grounded":true})).unwrap();
     app.run("select.set", json!({"items":[{"type":"occurrence","path":[occurrence]}]})).unwrap();
     crate::keymap::press(&mut app, "M", false);
-    assert!(app.tree.occurrence_move.is_none(), "a grounded component cannot move");
+    // R186 (E-2 wave 2 fix round): the occurrence's Move/Copy opens for Create Copy only; the
+    // grounded component itself does not move.
+    assert!(app.tree.occurrence_move.as_ref().is_some_and(|m| m.occurrence == occurrence && m.copy_of.is_none()));
     assert!(app.dialog.is_none(), "do not fall back to moving the grounded component's bodies");
+    app.tree.occurrence_move = None;
 
     app.run("occurrence.ground", json!({"occurrence":occurrence,"grounded":false})).unwrap();
     app.run("select.set", json!({"items":[{"type":"body","name":"Body1"}]})).unwrap();

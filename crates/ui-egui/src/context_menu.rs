@@ -1546,16 +1546,8 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         }
         "ui.moveOccurrence" => {
             if let Some(o) = id_of(&p, "occurrence") {
-                let mut movement = crate::browser::OccMove::new(o);
-                movement.had_pending = app.session.pending_moves.contains_key(&o);
-                movement.path = p.get("path").and_then(Value::as_array).map(|p| p.iter().filter_map(Value::as_u64).collect()).unwrap_or_default();
-                movement.baseline = app
-                    .session
-                    .pending_moves
-                    .get(&o)
-                    .copied()
-                    .or_else(|| app.session.doc.occurrences.iter().find(|occ| occ.id == o).map(|occ| occ.transform));
-                app.tree.occurrence_move = Some(movement);
+                let path = p.get("path").and_then(Value::as_array).map(|p| p.iter().filter_map(Value::as_u64).collect()).unwrap_or_default();
+                crate::browser::open_occurrence_move(app, o, path);
             }
         }
         "ui.isolateOccurrence" => {

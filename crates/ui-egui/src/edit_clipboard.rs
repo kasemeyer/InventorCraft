@@ -53,34 +53,67 @@ pub struct CopiedOccurrence {
     file: Option<String>,
 }
 
-/// The placements a selection resolves to (R186): every item an occurrence's Browser row or
-/// geometry (body, face, edge, vertex) of a placed component's body. None when anything else
-/// is selected (a root body keeps SolidCraft's body paste; a feature or sketch geometry keeps
-/// its own copy) or nothing is.
-pub(crate) fn selected_occurrences(app: &SolveApp) -> Option<Vec<u64>> {
-    if app.session.active_sketch.is_some() {
-        return None;
+/// What a selection stands for in an assembly (R186): the one resolver Copy / Paste (Ctrl+C/V,
+/// the ring's and list's Copy, the Clipboard panel) and the Position panel's Move/Copy share.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum Picked {
+    /// Not placements (outside an assembly, in a sketch, nothing picked, or only root bodies,
+    /// features or other items): each command keeps its own handling.
+    Other,
+    /// Every item is an occurrence's Browser row, a picked component row, or geometry (body,
+    /// face, edge, vertex) of a placed component's body: these placements, by path.
+    Placements(Vec<Vec<u64>>),
+    /// Placements together with something else (a root body, a feature).
+    Mixed,
+}
+
+/// The placements the selection resolves to; see [`Picked`]. Only in an assembly document: a
+/// SolidCraft Part design with components keeps its own behaviour.
+pub(crate) fn picked_placements(app: &SolveApp) -> Picked {
+    let s = &app.session;
+    if s.active_sketch.is_some() || s.doc.kind != solidcraft_engine::doc::DocumentKind::Assembly {
+        return Picked::Other;
     }
-    let mut out: Vec<u64> = Vec::new();
+    let exists = |path: &Vec<u64>| path.last().is_some_and(|id| s.doc.occurrences.iter().any(|o| o.id == *id));
+    let mut out: Vec<Vec<u64>> = Vec::new();
+    let mut other = false;
     // A component row picked in SolidCraft's Browser: its first placement.
-    if app.session.selection.is_empty() && !app.tree.picked_components.contains(&0) {
-        out.extend(app.tree.picked_components.iter().filter_map(|c| app.session.doc.occurrence_of(*c).map(|o| o.id)));
-        return (!out.is_empty()).then_some(out);
+    if s.selection.is_empty() && !app.tree.picked_components.contains(&0) {
+        out.extend(app.tree.picked_components.iter().map(|c| s.doc.first_path(*c)).filter(exists));
     }
-    for item in &app.session.selection {
-        let occurrence = match item {
-            Sel::Occurrence { path } => path.last().copied(),
+    for item in &s.selection {
+        let path = match item {
+            Sel::Occurrence { path } => Some(path.clone()),
+            // A placed (linked) part's geometry stands for its placement: its bodies come from
+            // the part's file. A component made here keeps its bodies as geometry.
             Sel::Body { name: body } | Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } => {
-                crate::dialogs_assembly::occurrence_of_body(&app.session, body)
+                crate::dialogs_assembly::occurrence_path_of_body(s, body).filter(|path| {
+                    let component = path.last().and_then(|id| s.doc.occurrences.iter().find(|o| o.id == *id)).map(|o| o.component);
+                    component.is_some_and(|c| s.doc.links.contains_key(&c))
+                })
             }
             _ => None,
         };
-        let occurrence = occurrence.filter(|id| *id != 0 && app.session.doc.occurrences.iter().any(|o| o.id == *id))?;
-        if !out.contains(&occurrence) {
-            out.push(occurrence);
+        match path.filter(exists) {
+            Some(path) if !out.contains(&path) => out.push(path),
+            Some(_) => {}
+            None => other = true,
         }
     }
-    (!out.is_empty()).then_some(out)
+    match (out.is_empty(), other) {
+        (true, _) => Picked::Other,
+        (false, false) => Picked::Placements(out),
+        (false, true) => Picked::Mixed,
+    }
+}
+
+/// The occurrences the selection resolves to (each placement's own), when it is placements only.
+#[cfg(test)]
+pub(crate) fn selected_occurrences(app: &SolveApp) -> Option<Vec<u64>> {
+    match picked_placements(app) {
+        Picked::Placements(paths) => Some(paths.iter().filter_map(|p| p.last().copied()).collect()),
+        _ => None,
+    }
 }
 
 /// The design file a linked component's link names, resolved against the assembly's folder.
@@ -115,7 +148,7 @@ fn copy_occurrences(app: &mut SolveApp, occurrences: &[u64]) -> bool {
     let names = occurrence_names(app, copied.iter().map(|c| c.occurrence));
     app.occurrence_clipboard = copied;
     app.linked_design_clipboard = None;
-    app.set_status(format!("Copied {names}"), false);
+    app.set_status(crate::i18n::format("ui.clipboard.copied", &[("names", &names)]), false);
     leave_text(format!("SolidCraft components: {names}"));
     true
 }
@@ -146,25 +179,39 @@ fn paste_occurrences(app: &mut SolveApp, at: Option<Pos2>) -> bool {
                 let parent = app.session.active_component;
                 app.run("occurrence.copy", json!({"occurrence": c.occurrence, "parent": parent, "translate": delta}))
             }
-            None => {
-                app.set_status("Paste: that component belongs to another assembly; save it to a file to paste it here", true);
+            None => Err(crate::i18n::tr("ui.clipboard.other_assembly").to_string()),
+        };
+        match out {
+            Ok(out) => made.extend(out.get("occurrence").and_then(Value::as_u64)),
+            // Part-way: what was pasted stays, selected, and the status says where it stopped.
+            Err(e) if !made.is_empty() => {
+                select_pasted(app, &parent_path, &made);
+                let names = occurrence_names(app, made.iter().copied());
+                app.set_status(crate::i18n::format("ui.clipboard.pasted_partly", &[("names", &names), ("error", &e)]), true);
+                return true;
+            }
+            Err(e) => {
+                app.set_status(e, true);
                 return false;
             }
-        };
-        let Ok(out) = out else { return false };
-        made.extend(out.get("occurrence").and_then(Value::as_u64));
+        }
     }
+    select_pasted(app, &parent_path, &made);
+    let names = occurrence_names(app, made.iter().copied());
+    app.set_status(crate::i18n::format("ui.clipboard.pasted", &[("names", &names)]), false);
+    true
+}
+
+/// The pasted occurrences become the selection.
+fn select_pasted(app: &mut SolveApp, parent_path: &[u64], made: &[u64]) {
     app.session.selection = made
         .iter()
         .map(|id| {
-            let mut path = parent_path.clone();
+            let mut path = parent_path.to_vec();
             path.push(*id);
             Sel::Occurrence { path }
         })
         .collect();
-    let names = occurrence_names(app, made.iter().copied());
-    app.set_status(format!("Pasted {names}"), false);
-    true
 }
 
 /// Is there something Paste would paste here?
@@ -194,9 +241,18 @@ pub fn copy(app: &mut SolveApp) -> bool {
     if app.session.active_sketch.is_none() && app.tree.picked_components == [0] {
         return copy_design(app);
     }
-    // A placed component pastes as a new occurrence of it, never a body at the root (R186).
-    if let Some(occurrences) = selected_occurrences(app) {
-        return copy_occurrences(app, &occurrences);
+    // A placed component pastes as a new occurrence of it, never a body at the root (R186). A
+    // mix of components and other things is refused, and the clipboard keeps what it had.
+    match picked_placements(app) {
+        Picked::Placements(paths) => {
+            let occurrences: Vec<u64> = paths.iter().filter_map(|p| p.last().copied()).collect();
+            return copy_occurrences(app, &occurrences);
+        }
+        Picked::Mixed => {
+            app.set_status(crate::i18n::tr("ui.clipboard.mixed"), true);
+            return false;
+        }
+        Picked::Other => {}
     }
     if app.session.active_sketch.is_some() {
         let entities = sketch_selection(app);
