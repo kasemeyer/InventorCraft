@@ -309,6 +309,12 @@ fn stream_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> Option
 /// Keep the preview in step with the open dialog: start a computation when its inputs changed,
 /// take finished results. Called once per frame.
 pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
+    // The Constrain panel previews E-1's dry solve: the occurrences it moves drawn at their
+    // preview poses through the joints' moved-component scene (spec §6.3, R137).
+    if let Some(moved) = crate::dialogs_constraint::frame(app) {
+        constraint_scene(app, &moved);
+        return;
+    }
     let cmds = match app.dialog.as_ref().filter(|d| d.previews() && d.preview_enabled).map(|d| crate::dialogs::preview_commands(app, d)) {
         Some(Ok(c)) if !c.is_empty() => c,
         _ if crate::sketch_attachment_ui::commands(app).is_some() => crate::sketch_attachment_ui::commands(app).unwrap_or_default(),
@@ -354,6 +360,49 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
     if app.preview.busy {
         ctx.request_repaint_after(std::time::Duration::from_millis(16));
     }
+}
+
+/// The Constrain panel's preview scene: `moved` (occurrence, world pose) drawn where the preview
+/// puts them, their document pose as the ghost; nothing when nothing moves.
+fn constraint_scene(app: &mut SolveApp, moved: &[(u64, solidcraft_engine::doc::Mat)]) {
+    let enabled = app.dialog.as_ref().is_some_and(|d| d.preview_enabled);
+    if moved.is_empty() || !enabled {
+        app.preview.clear();
+        return;
+    }
+    let colors = Colors::for_tool(&Tokens::get(), &app.ui.tab, true);
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    "constraint".hash(&mut h);
+    for (o, m) in moved {
+        o.hash(&mut h);
+        for v in m.iter().flatten() {
+            v.to_bits().hash(&mut h);
+        }
+    }
+    app.session.revision.hash(&mut h);
+    format!("{colors:?}").hash(&mut h);
+    let key = h.finish();
+    if app.preview.shown_key == Some(key) {
+        return;
+    }
+    let s = &app.session;
+    let mut after = s.scratch();
+    for (o, world) in moved {
+        let parent = s.doc.occurrences.iter().find(|x| x.id == *o).map_or(0, |x| x.parent);
+        let pw = if parent == 0 { solidcraft_engine::doc::IDENTITY } else { s.doc.component_transform(parent) };
+        if let Some(inv) = solidcraft_engine::doc::mat_inverse(&pw) {
+            after.pending_moves.insert(*o, solidcraft_engine::doc::mat_mul(&inv, world));
+        }
+    }
+    let visible = |session: &Session| {
+        let mut shown = (*session.world_state()).clone();
+        shown.bodies.retain(|body| session.body_visible(&body.name));
+        shown
+    };
+    let job = crate::dialogs_assembly::moved_scene(&visible(s), &visible(&after), colors);
+    app.preview.started = crate::now_ms();
+    app.preview.apply(key, job);
+    app.preview.busy = false;
 }
 
 /// What tells one preview computation from another: its commands, the document revision they

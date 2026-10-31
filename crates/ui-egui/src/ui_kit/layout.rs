@@ -373,6 +373,8 @@ pub(crate) enum Text<'a> {
     MonoNote(&'a str),
     Report(&'a str, bool),
     Error(&'a str),
+    /// A caution in the warning colour (a value the command will adjust).
+    Warning(&'a str),
     Heading(&'a str),
     Inline,
     Cell,
@@ -387,6 +389,7 @@ pub(crate) fn text(ui: &mut Ui, text: &str, style: Text<'_>) -> Response {
     let ink = match style {
         Text::Hint(_) | Text::Note(_) | Text::MonoNote(_) => t.form_dim,
         Text::Report(_, true) | Text::Value(_, true) | Text::Error(_) => t.form_error,
+        Text::Warning(_) => t.warning,
         _ => t.form_ink,
     };
     let font = match style {
@@ -433,7 +436,7 @@ pub(crate) fn text(ui: &mut Ui, text: &str, style: Text<'_>) -> Response {
     let (kind, key) = match style {
         Text::Hint(key) => ("hint", key),
         Text::Note(key) | Text::MonoNote(key) => ("note", key),
-        Text::Report(key, _) | Text::Value(key, _) | Text::Error(key) | Text::Heading(key) => ("report", key),
+        Text::Report(key, _) | Text::Value(key, _) | Text::Error(key) | Text::Warning(key) | Text::Heading(key) => ("report", key),
         Text::Inline => ("inline", text),
         Text::Cell | Text::MonoCell | Text::NameCell(_) => ("cell", text),
     };

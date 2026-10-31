@@ -24,7 +24,7 @@ pub(crate) struct StatusTexts {
 pub(crate) fn texts(app: &SolveApp) -> StatusTexts {
     let fresh = app.status.as_ref().filter(|(_, at, _)| crate::now_ms() - at < crate::viewport::STATUS_TOAST_MS);
     // A running drawing tool's prompt stays while it runs (General Dimension, Task 8).
-    let idle = crate::drawing_ui::prompt(app).unwrap_or("ui.status_ready");
+    let idle = crate::drawing_ui::prompt(app).or_else(|| crate::dialogs_constraint::prompt(app)).unwrap_or("ui.status_ready");
     let left = fresh.map_or_else(|| crate::i18n::tr(idle).to_string(), |(text, _, _)| crate::i18n::tr_dyn(text));
     let sketch = app.session.active_sketch.and_then(|id| {
         let st = app.session.world_state();

@@ -994,7 +994,7 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
         // The check runs from its Compute button; OK only closes.
         Asm::Interference { .. } => Vec::new(),
         Asm::Trace(f) => cmd("motion.trace.keep", trace::params(s, f, inputs)?),
-        Asm::Constraint(f) => crate::dialogs_constraint::commands(f)?,
+        Asm::Constraint(f) => crate::dialogs_constraint::commands(app, f)?,
     })
 }
 
@@ -1067,21 +1067,27 @@ pub fn world_preview(s: &Session, cmds: &[(String, Value)], colors: Colors) -> O
             c == "joint.drive" && (r["stopped_by_loop"].is_object() || r["stopped_by_contact"].is_object() || r["unconnected"].is_string())
         })
         .map(|(_, r)| r.clone());
-    let (before, after) = (preview.before, preview.after);
-    // A moved component looks like itself (no new surface), with its old place as the ghost.
+    Some(moved_scene(&preview.before, &preview.after, colors).map(|mut b| {
+        b.stopped = stopped;
+        b
+    }))
+}
+
+/// The scene of components moved from `before` to `after`: each looks like itself (no new
+/// surface), with its old place as the ghost (joints, drives, the Constrain preview).
+pub fn moved_scene(before: &solidcraft_engine::doc::ModelState, after: &solidcraft_engine::doc::ModelState, colors: Colors) -> Result<Built, String> {
     let colors = Colors { added: colors.body, new_body: colors.body, ..colors };
-    let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| crate::preview::build(&before, &after, colors)));
-    Some(match built {
+    let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| crate::preview::build(before, after, colors)));
+    match built {
         Ok(mut b) => {
             if !colors.ghost {
                 b.scene.ghost.clear();
             }
             b.bounds = after.bodies.iter().fold(Aabb3::EMPTY, |acc, x| acc.union(&x.mesh().bounds()));
-            b.stopped = stopped;
             Ok(b)
         }
         Err(_) => Err("the preview failed".into()),
-    })
+    }
 }
 
 /// What a drive that stopped short of the asked values says: where the joint got to and why
@@ -1146,6 +1152,10 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dia
     }
     if let Asm::Trace(f) = k {
         trace::overlay(painter, proj, f);
+    }
+    if let Asm::Constraint(f) = k {
+        crate::dialogs_constraint::overlay(app, painter, proj, f);
+        return;
     }
     // A joint names its two picks; a joint origin and a trace have one.
     let two = matches!(k, Asm::Joint(_));

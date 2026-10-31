@@ -1337,6 +1337,9 @@ fn occurrence_rows(app: &mut SolveApp, ui: &mut egui::Ui, path: Vec<u64>, depth:
     for folder in ["bodies", "sketches", "construction"] {
         occurrence_folder_rows(app, ui, placement.component, &path, folder, depth + 1, acts);
     }
+    if app.session.doc.kind == solidcraft_engine::doc::DocumentKind::Assembly {
+        occurrence_origin_rows(app, ui, placement.occurrence, depth + 1);
+    }
     features::rows(app, ui, placement.component, &path, depth + 1, acts);
     let children = model_children(app, placement.component);
     if path.len() < 64 {
@@ -1504,6 +1507,35 @@ fn origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &Actio
             && let Some(x) = sel
         {
             pick_from_browser(app, x);
+        }
+    }
+}
+
+/// An assembly component's own Origin folder (spec §6.3: its planes, axes and centre are picks of
+/// the Constrain panel, as a canvas pick would be). Closed until opened.
+fn occurrence_origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, occurrence: u64, depth: usize) {
+    let key = format!("oo:{occurrence}");
+    let open = is_open(app, &key, false);
+    let r = draw_row(ui, ui.id().with(&key), &Row { depth, fold: Some(open), icon: "origin", label: "Origin", ..Default::default() });
+    if let Some(rect) = r.rect {
+        crate::scenario::publish_handle(
+            &format!("fold:occurrence_origin:{occurrence}"),
+            pos2(rect.left() + 8.0 + depth as f32 * INDENT, rect.center().y),
+        );
+    }
+    if r.fold || r.clicked {
+        toggle(app, &key, false);
+    }
+    if !open {
+        return;
+    }
+    for (k, label, icon, _) in origin_entries(app) {
+        let r = draw_row(ui, ui.id().with((&key, k)), &Row { depth: depth + 1, icon, label, ..Default::default() });
+        if let Some(rect) = r.rect {
+            crate::scenario::publish_handle(&format!("row:occurrence_origin:{occurrence}:{k}"), rect.center());
+        }
+        if r.clicked {
+            crate::dialogs_constraint::pick_origin(app, occurrence, k);
         }
     }
 }

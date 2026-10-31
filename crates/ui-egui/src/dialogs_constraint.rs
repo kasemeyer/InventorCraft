@@ -2,19 +2,28 @@
 //! the tab strip (only Assembly is built), the type, the picks, the offset or angle, the type's
 //! solutions, Suppressed / Predict / Lock turn / Preview, and behind More the name and the limits.
 //! The form builds an E-1 [`Draft`]; an edit starts from `Draft::edit(&record)` and overlays only
-//! the fields the user touched (R147, R162). Picking and the live preview are Task 3's.
+//! the fields the user touched (R147, R162). Task 3: viewport and browser picks fill the armed
+//! slot ([`take`], [`pick_origin`]), the hovered candidate is memoised ([`candidate`]), the live
+//! preview re-runs once per changed draft ([`refresh_preview`]) and OK / Apply commit
+//! ([`commit`]).
 
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeSet;
 
 use serde_json::Value;
-use solidcraft_engine::constraints::{Draft, Preview, classify};
-use solidcraft_engine::doc::constraints::{ConstraintKind, ConstraintSolution, GeoRef, PrimKind, next_name};
+use solidcraft_engine::constraints::{Draft, Preview, accepts, classify};
+use solidcraft_engine::doc::constraints::{
+    ConstraintKind, ConstraintSolution, Geo, GeoRef, OriginItem, PickWhat, Prim, PrimKind, geo_at, next_name, resolve_world,
+};
+use solidcraft_engine::doc::{Mat, joints::occurrence_world};
+use solidcraft_engine::geom::Vec3;
+use solidcraft_engine::{Sel, Session};
 
 use crate::SolveApp;
 use crate::dialogs::Kind;
 use crate::dialogs_assembly::Asm;
 use crate::i18n::tr;
-use crate::selection::SelInput;
+use crate::selection::{AXES, Accept, EDGES, FACES, ORIGIN, PLANES, SelInput, VERTICES};
 use crate::theme::Tokens;
 use crate::ui_kit;
 
@@ -58,6 +67,34 @@ pub struct ConstraintForm {
     pub touched: BTreeSet<&'static str>,
     /// The document's length unit ("mm", "in"): a length value's default is `0 <units>`.
     pub units: String,
+    /// Each pick as resolved in the world when it was taken (what the overlay draws).
+    prims: [Option<Prim>; 3],
+    /// The hovered candidate as resolved in the world.
+    hover_prim: Option<Prim>,
+    /// Hover lookups by entity (R162): `geo_at` + resolve run only when the key changes.
+    memo: RefCell<Vec<(HoverKey, Option<(GeoRef, Prim)>)>>,
+    /// The design revision the last preview ran on.
+    preview_rev: u64,
+}
+
+/// What a hover lookup depends on: the entity under the pointer (a face or an edge by index, not
+/// the point on it) and what the armed slot takes.
+#[derive(Clone, Debug, PartialEq)]
+struct HoverKey {
+    entity: Sel,
+    armed: usize,
+    kind: ConstraintKind,
+    first: Option<PrimKind>,
+    part: Option<u64>,
+    taken: [Option<u64>; 2],
+    revision: u64,
+}
+
+thread_local! {
+    /// Previews run (the running count `constraint_previews`).
+    static PREVIEWS: Cell<u64> = const { Cell::new(0) };
+    /// Hover lookups run (`constraint_hover_resolves`).
+    static RESOLVES: Cell<u64> = const { Cell::new(0) };
 }
 
 /// A value box's default for `kind`: `0` in document units, `0.00 deg` for an Angle.
@@ -92,6 +129,10 @@ impl ConstraintForm {
             base: None,
             touched: BTreeSet::new(),
             units: units.to_string(),
+            prims: [None, None, None],
+            hover_prim: None,
+            memo: RefCell::new(Vec::new()),
+            preview_rev: 0,
         }
     }
 
@@ -112,6 +153,10 @@ impl ConstraintForm {
         f.min = (base.min.is_some(), base.min.clone().unwrap_or(fallback));
         f.editing = Some(id);
         f.base = Some(base);
+        let (doc, st) = (&app.session.doc, app.session.model.state());
+        for (slot, g) in f.picks.clone().iter().enumerate() {
+            f.prims[slot] = g.as_ref().and_then(|g| resolve_world(doc, &st, g).ok());
+        }
         Some(f)
     }
 
@@ -183,15 +228,30 @@ impl ConstraintForm {
 
     /// Both picks resolve to lines or cylinders (Mate's axis solutions).
     pub fn axes(&self, app: &SolveApp) -> bool {
-        let axis =
-            |g: &Option<GeoRef>| g.as_ref().and_then(|g| classify(&app.session, g)).is_some_and(|k| matches!(k, PrimKind::Line | PrimKind::Cylinder));
-        axis(&self.picks[0]) && axis(&self.picks[1])
+        self.axes_in(&app.session)
+    }
+
+    fn axes_in(&self, s: &Session) -> bool {
+        let axis = |i: usize| {
+            let kind = self.kind_of(i).or_else(|| self.picks[i].as_ref().and_then(|g| classify(s, g)));
+            kind.is_some_and(|k| matches!(k, PrimKind::Line | PrimKind::Cylinder))
+        };
+        axis(0) && axis(1)
+    }
+
+    /// What pick `slot` is, as taken.
+    fn kind_of(&self, slot: usize) -> Option<PrimKind> {
+        self.prims.get(slot).and_then(|p| p.as_ref()).map(Prim::kind)
     }
 
     /// The type's solution buttons, in the spec §6.2 table's order.
     pub fn solutions(&self, app: &SolveApp) -> &'static [ConstraintSolution] {
+        self.solutions_in(&app.session)
+    }
+
+    fn solutions_in(&self, s: &Session) -> &'static [ConstraintSolution] {
         match self.kind {
-            ConstraintKind::Mate if self.axes(app) => &MATE_AXES,
+            ConstraintKind::Mate if self.axes_in(s) => &MATE_AXES,
             ConstraintKind::Mate => &MATE,
             ConstraintKind::Angle => &ANGLE,
             ConstraintKind::Tangent => &TANGENT,
@@ -207,10 +267,9 @@ impl ConstraintForm {
         }
         let unit_changes = kind.is_angle() != self.kind.is_angle();
         self.kind = kind;
-        self.solution = None;
-        self.picks = [None, None, None];
-        self.armed = 0;
-        self.hover = None;
+        // An edit sends its solution: the new type's default, never one that does not fit.
+        self.solution = self.editing.map(|_| kind.default_solution(false));
+        self.clear_picks();
         if unit_changes {
             self.value = default_value(kind, &self.units);
             self.max = (false, default_value(kind, &self.units));
@@ -218,6 +277,55 @@ impl ConstraintForm {
             self.touched.extend(["offset", "min", "max"]);
         }
         self.touched.extend(["kind", "solution", "a", "b", "ref"]);
+    }
+
+    /// No picks; pick 1 armed (a new type, Apply).
+    pub fn clear_picks(&mut self) {
+        self.picks = [None, None, None];
+        self.prims = [None, None, None];
+        self.armed = 0;
+        self.part = None;
+        self.hover = None;
+        self.hover_prim = None;
+        self.preview = None;
+    }
+
+    /// Pick part first is waiting for its part.
+    fn wants_part(&self) -> bool {
+        self.pick_part_first && self.part.is_none()
+    }
+
+    /// Put `g` (resolved as `prim`) in the armed slot and arm the next empty one. A solution the
+    /// new picks no longer offer goes back to the type's default.
+    fn fill(&mut self, s: &Session, g: GeoRef, prim: Prim) {
+        let slot = self.armed.min(self.pick_count().saturating_sub(1));
+        self.picks[slot] = Some(g);
+        self.prims[slot] = Some(prim);
+        self.touched.insert(["a", "b", "ref"][slot]);
+        self.part = None;
+        self.hover = None;
+        self.hover_prim = None;
+        self.armed = (0..self.pick_count()).find(|i| self.picks[*i].is_none()).unwrap_or(slot);
+        if let Some(sol) = self.solution
+            && !self.solutions_in(s).contains(&sol)
+        {
+            self.solution = self.editing.map(|_| self.kind.default_solution(self.axes_in(s)));
+            self.touched.insert("solution");
+        }
+    }
+
+    /// May `g` (a `kind`) go into the armed slot? The type and first pick accept it, it is not on
+    /// the other pick's occurrence (spec §6.3 step 3), and with Pick part first it is on the part.
+    fn legal(&self, g: &GeoRef, kind: PrimKind) -> bool {
+        let slot = self.armed;
+        let first = if slot == 0 { None } else { self.kind_of(0) };
+        if !accepts(self.kind, slot, first, kind) {
+            return false;
+        }
+        if slot < 2 && self.picks[1 - slot].as_ref().is_some_and(|other| other.occurrence == g.occurrence) {
+            return false;
+        }
+        !(self.pick_part_first && self.part.is_some_and(|p| p != g.occurrence))
     }
 
     /// A solution button pressed. Directed takes an Angle's limits away (R152): Max and Min
@@ -241,18 +349,312 @@ fn units(app: &SolveApp) -> String {
     if unit.is_empty() { "mm".into() } else { unit.to_string() }
 }
 
-/// The panel for `constraint.create`; it takes its picks itself (Task 3), not through selection inputs.
+/// What the panel's one selection input takes: the viewport's hover, click and Select Other
+/// reach the panel through it; a pick goes into the form ([`take`]), never into the input.
+pub const PICKS: Accept = FACES | EDGES | VERTICES | PLANES | AXES | ORIGIN;
+
+/// The panel for `constraint.create`, with its pick input.
 pub fn start(app: &SolveApp) -> Option<(Kind, Vec<SelInput>)> {
-    Some((Kind::Assembly(Asm::Constraint(Box::new(ConstraintForm::new(&units(app))))), Vec::new()))
+    let form = ConstraintForm::new(&units(app));
+    Some((Kind::Assembly(Asm::Constraint(Box::new(form))), vec![SelInput::new("ui.constraint.picks", PICKS, false)]))
 }
 
-/// The command OK and Apply run: `constraint.create`, or `constraint.edit` with what changed.
-pub fn commands(f: &ConstraintForm) -> Result<Vec<(String, Value)>, String> {
+/// The command Apply / OK run: `draft().params()` — `constraint.create`, or, when editing,
+/// `constraint.edit` with only the touched-and-changed fields (`Draft::params` diffs against
+/// `record`, R147/R162). The answer's `warnings` are shown in the status bar ([`warnings`]).
+pub fn commit(_app: &SolveApp, f: &ConstraintForm) -> Result<(String, Value), String> {
     if !f.ready() {
         return Err(tr("ui.constraint.picks_needed").to_string());
     }
     let cmd = if f.editing.is_some() { "constraint.edit" } else { "constraint.create" };
-    Ok(vec![(cmd.to_string(), f.draft().params())])
+    Ok((cmd.to_string(), f.draft().params()))
+}
+
+/// [`commit`] as the dialog's command list.
+pub fn commands(app: &SolveApp, f: &ConstraintForm) -> Result<Vec<(String, Value)>, String> {
+    commit(app, f).map(|c| vec![c])
+}
+
+/// What `constraint.create` / `constraint.edit` warned (a limited offset clamped, R153), for the
+/// status bar.
+pub fn warnings(cmd: &str, reply: &Value) -> Option<String> {
+    if !matches!(cmd, "constraint.create" | "constraint.edit") {
+        return None;
+    }
+    let all: Vec<&str> = reply.get("warnings")?.as_array()?.iter().filter_map(Value::as_str).collect();
+    (!all.is_empty()).then(|| all.join("; "))
+}
+
+/// The origin item an origin plane, axis or point stands for.
+fn origin_item(name: &str) -> Option<OriginItem> {
+    Some(match name {
+        "XY" => OriginItem::Xy,
+        "XZ" => OriginItem::Xz,
+        "YZ" => OriginItem::Yz,
+        "X" => OriginItem::X,
+        "Y" => OriginItem::Y,
+        "Z" => OriginItem::Z,
+        "O" => OriginItem::Center,
+        _ => return None,
+    })
+}
+
+/// A viewport selection as a pick (spec §6.3): a face, edge or vertex through `geo_at` at its world
+/// point on the occurrence its body belongs to; an origin plane, axis or the origin point as the
+/// assembly's own origin item (occurrence 0). With the pick resolved in the world.
+fn resolve_sel(s: &Session, sel: &Sel) -> Option<(GeoRef, Prim)> {
+    let on = |body: &str, what: PickWhat, at: Vec3| {
+        let occurrence = crate::dialogs_assembly::occurrence_of_body(s, body)?;
+        geo_at(&s.doc, &s.model.state(), occurrence, what, at).ok()
+    };
+    let g = match sel {
+        Sel::Face { body, point, .. } => on(body, PickWhat::Face, *point)?,
+        Sel::Edge { body, point, .. } => on(body, PickWhat::Edge, *point)?,
+        Sel::Vertex { body, point } if !body.is_empty() => on(body, PickWhat::Vertex, *point)?,
+        Sel::Vertex { .. } => GeoRef { occurrence: 0, geo: Geo::Origin { item: OriginItem::Center } },
+        Sel::Plane { name } | Sel::Axis { name } => GeoRef { occurrence: 0, geo: Geo::Origin { item: origin_item(name)? } },
+        _ => return None,
+    };
+    let prim = resolve_world(&s.doc, &s.model.state(), &g).ok()?;
+    Some((g, prim))
+}
+
+/// A face or an edge by its index (the point on it does not change what it is).
+fn entity(sel: &Sel) -> Sel {
+    match sel {
+        Sel::Face { body, index, .. } => Sel::Face { body: body.clone(), index: *index, point: Vec3::ZERO },
+        Sel::Edge { body, index, .. } => Sel::Edge { body: body.clone(), index: *index, point: Vec3::ZERO },
+        other => other.clone(),
+    }
+}
+
+/// [`candidate`] with its world primitive, memoised on the hovered entity and what the armed slot
+/// takes (R162): `geo_at` and the resolve run only when one of them changes.
+fn candidate_prim(s: &Session, f: &ConstraintForm, sel: &Sel) -> Option<(GeoRef, Prim)> {
+    if f.wants_part() {
+        return None;
+    }
+    let key = HoverKey {
+        entity: entity(sel),
+        armed: f.armed,
+        kind: f.kind,
+        first: f.kind_of(0),
+        part: f.part,
+        taken: [f.picks[0].as_ref().map(|g| g.occurrence), f.picks[1].as_ref().map(|g| g.occurrence)],
+        revision: s.revision,
+    };
+    if let Some((_, hit)) = f.memo.borrow().iter().find(|(k, _)| *k == key) {
+        return hit.clone();
+    }
+    RESOLVES.set(RESOLVES.get() + 1);
+    let found = resolve_sel(s, sel).filter(|(g, p)| f.legal(g, p.kind()));
+    let mut memo = f.memo.borrow_mut();
+    if memo.len() >= 16 {
+        memo.remove(0);
+    }
+    memo.push((key, found.clone()));
+    found
+}
+
+/// The pick under a viewport selection, or None when it is not legal for the armed slot (spec §6.3 step 2).
+/// Memoised on (hovered entity, armed slot, kind, first pick's kind): `geo_at` + `classify` run only when the
+/// pointer's entity or the selection changes, never every frame (R162; ~1.5-3 ms uncached).
+pub fn candidate(app: &SolveApp, f: &ConstraintForm, sel: &Sel) -> Option<(GeoRef, PrimKind)> {
+    candidate_prim(&app.session, f, sel).map(|(g, p)| (g, p.kind()))
+}
+
+/// Does the panel take a hovered selection? Waiting for its part (Pick part first), any piece of a
+/// component; otherwise a legal [`candidate`].
+pub(crate) fn takes(s: &Session, f: &ConstraintForm, sel: &Sel) -> bool {
+    if f.wants_part() {
+        return crate::dialogs_assembly::body_of(sel).and_then(|b| crate::dialogs_assembly::occurrence_of_body(s, b)).is_some_and(|o| o != 0);
+    }
+    candidate_prim(s, f, sel).is_some()
+}
+
+/// A click (or a Select Other row): with Pick part first waiting, the part; else the pick goes
+/// into the armed slot and the next empty one is armed.
+pub(crate) fn take(s: &Session, f: &mut ConstraintForm, sel: &Sel) {
+    if f.wants_part() {
+        f.part = crate::dialogs_assembly::body_of(sel).and_then(|b| crate::dialogs_assembly::occurrence_of_body(s, b)).filter(|o| *o != 0);
+        f.hover = None;
+        return;
+    }
+    // Resolved at the clicked point itself (the memo keeps the first point on the entity).
+    if let Some((g, prim)) = resolve_sel(s, sel).filter(|(g, p)| f.legal(g, p.kind())) {
+        f.fill(s, g, prim);
+    }
+}
+
+/// A browser pick of an occurrence's origin item (`occurrence` 0: the assembly's).
+pub fn pick_origin(app: &mut SolveApp, occurrence: u64, key: &str) {
+    let Some(item) = origin_item(key) else { return };
+    let Some(mut d) = app.dialog.take() else { return };
+    if let Kind::Assembly(Asm::Constraint(f)) = &mut d.kind {
+        let g = GeoRef { occurrence, geo: Geo::Origin { item } };
+        let s = &app.session;
+        if let Ok(prim) = resolve_world(&s.doc, &s.model.state(), &g)
+            && !f.wants_part()
+            && f.legal(&g, prim.kind())
+        {
+            f.fill(s, g, prim);
+        }
+    }
+    app.dialog = Some(d);
+}
+
+/// Re-run `constraints::preview` when `f.draft()` differs from the cached draft; at most once per frame. Publishes
+/// the running count `scenario::publish_count("constraint_previews", n)` and the number of occurrences drawn at a
+/// preview pose as `"constraint_preview_moved"`.
+pub fn refresh_preview(app: &SolveApp, f: &mut ConstraintForm) {
+    if !f.ready() || !f.show_preview {
+        f.preview = None;
+        return;
+    }
+    let d = f.draft();
+    if f.preview.as_ref().is_some_and(|(seen, _)| *seen == d) && f.preview_rev == app.session.revision {
+        return;
+    }
+    let p = solidcraft_engine::constraints::preview(&app.session, &d);
+    PREVIEWS.set(PREVIEWS.get() + 1);
+    f.preview = Some((d, p));
+    f.preview_rev = app.session.revision;
+}
+
+/// The occurrences the preview places away from where they are, at their preview poses (world).
+pub fn moved(app: &SolveApp, f: &ConstraintForm) -> Vec<(u64, Mat)> {
+    let Some((_, p)) = f.preview.as_ref().filter(|(_, p)| p.refused.is_none()) else { return Vec::new() };
+    let doc = &app.session.doc;
+    let far = |a: &Mat, b: &Mat| a.iter().flatten().zip(b.iter().flatten()).any(|(x, y)| (x - y).abs() > 1e-9);
+    p.world.iter().filter(|(o, m)| far(m, &occurrence_world(doc, **o))).map(|(o, m)| (*o, *m)).collect()
+}
+
+/// The open Constrain panel's form.
+fn open_form(app: &SolveApp) -> Option<&ConstraintForm> {
+    match app.dialog.as_ref().map(|d| &d.kind) {
+        Some(Kind::Assembly(Asm::Constraint(f))) => Some(f),
+        _ => None,
+    }
+}
+
+/// Once a frame (from the preview update): the panel's preview refreshed, and the counters
+/// published (`constraint_previews`, `constraint_hover_resolves` running; `constraint_preview_moved`
+/// 0 when no panel shows one). The occurrences to draw at their preview poses.
+pub(crate) fn frame(app: &mut SolveApp) -> Option<Vec<(u64, Mat)>> {
+    let mut out = None;
+    if let Some(mut d) = app.dialog.take() {
+        if let Kind::Assembly(Asm::Constraint(f)) = &mut d.kind {
+            refresh_preview(app, f);
+            out = Some(moved(app, f));
+        }
+        app.dialog = Some(d);
+    }
+    crate::scenario::publish_count("constraint_previews", PREVIEWS.get() as f64);
+    crate::scenario::publish_count("constraint_hover_resolves", RESOLVES.get() as f64);
+    crate::scenario::publish_count("constraint_preview_moved", out.as_ref().map_or(0, Vec::len) as f64);
+    out
+}
+
+/// The status bar's prompt while the panel waits for a pick: the armed slot's.
+pub(crate) fn prompt(app: &SolveApp) -> Option<&'static str> {
+    let f = open_form(app)?;
+    if f.wants_part() {
+        return Some("ui.constraint.prompt_part");
+    }
+    if f.ready() {
+        return None;
+    }
+    Some(["ui.constraint.prompt_1", "ui.constraint.prompt_2", "ui.constraint.prompt_3"][f.armed.min(2)])
+}
+
+/// The predicted offset as the value box shows it: document units, three decimals.
+fn predicted_text(f: &ConstraintForm) -> Option<String> {
+    let p = f.preview.as_ref()?.1.predicted?;
+    Some(if f.kind.is_angle() {
+        format!("{:.3} deg", p.offset)
+    } else {
+        let per_mm = match f.units.as_str() {
+            "in" => 1.0 / 25.4,
+            "cm" => 0.1,
+            "m" => 0.001,
+            "ft" => 1.0 / 304.8,
+            _ => 1.0,
+        };
+        format!("{:.3} {}", p.offset * per_mm, f.units)
+    })
+}
+
+// ---- overlay ----
+
+/// The hovered candidate (found again only when the hovered entity changes) and the picks, each
+/// in its slot's colour: a face as its plane's patch, a line or a cylinder's axis as a line
+/// through it, a circle as itself, a point as a dot.
+pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &crate::viewport::Proj, f: &mut ConstraintForm) {
+    let t = Tokens::get();
+    let under = app.viewport.hover.as_ref().and_then(crate::viewport::hit_sel);
+    match under.and_then(|sel| candidate_prim(&app.session, f, &sel)) {
+        Some((g, prim)) => {
+            f.hover = Some((g, prim.kind()));
+            f.hover_prim = Some(prim);
+        }
+        None => {
+            f.hover = None;
+            f.hover_prim = None;
+        }
+    }
+    let inks = [t.accent, t.warning, t.text];
+    let size = app.cam.half_height() * 0.08;
+    for (prim, ink) in f.prims.iter().zip(inks).take(f.pick_count()) {
+        if let Some(prim) = prim {
+            paint_prim(painter, proj, prim, ink, size);
+        }
+    }
+    if let Some(prim) = &f.hover_prim {
+        paint_prim(painter, proj, prim, inks[f.armed.min(2)], size);
+    }
+}
+
+fn paint_prim(painter: &egui::Painter, proj: &crate::viewport::Proj, prim: &Prim, ink: egui::Color32, size: f64) {
+    let t = Tokens::get();
+    let stroke = egui::Stroke::new(t.space_3, ink);
+    let line = |a: Vec3, b: Vec3| {
+        if let (Some(a), Some(b)) = (proj.to_screen(a), proj.to_screen(b)) {
+            painter.line_segment([a, b], stroke);
+        }
+    };
+    let ring = |c: Vec3, n: Vec3, r: f64| {
+        let (u, v) = (n.any_perp(), n.cross(n.any_perp()));
+        let pts: Vec<egui::Pos2> = (0..=48)
+            .filter_map(|i| {
+                let a = std::f64::consts::TAU * f64::from(i) / 48.0;
+                proj.to_screen(c + u * (r * a.cos()) + v * (r * a.sin()))
+            })
+            .collect();
+        painter.add(egui::Shape::line(pts, stroke));
+    };
+    match *prim {
+        Prim::Plane { p, n } => {
+            let (u, v) = (n.any_perp() * size, n.cross(n.any_perp()) * size);
+            let corners = [p + u + v, p - u + v, p - u - v, p + u - v];
+            let pts: Vec<egui::Pos2> = corners.iter().filter_map(|c| proj.to_screen(*c)).collect();
+            if pts.len() == 4 {
+                painter.add(egui::Shape::convex_polygon(pts, ink.gamma_multiply(0.35), stroke));
+            }
+        }
+        Prim::Line { p, d } | Prim::Cylinder { p, d, .. } => line(p - d * size * 2.0, p + d * size * 2.0),
+        Prim::Circle { c, axis, r } => {
+            ring(c, axis, r);
+            if let Some(at) = proj.to_screen(c) {
+                painter.circle_filled(at, t.space_3, ink);
+            }
+        }
+        Prim::Sphere { c, r } => ring(c, Vec3::Z, r),
+        Prim::Point { p } => {
+            if let Some(at) = proj.to_screen(p) {
+                painter.circle_filled(at, t.space_4, ink);
+            }
+        }
+    }
 }
 
 /// OK and Apply may act: the picks are in and the last preview refused nothing.
@@ -442,7 +844,19 @@ pub(crate) fn rows_keys(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut Constrain
         let recent = recent(app, f.kind.is_angle());
         ui_kit::row(ui, label, |ui| {
             let width = (ui.available_width() - t.control_height - t.space_12 - ui.spacing().item_spacing.x).max(0.0);
-            ui.allocate_ui(egui::vec2(width, t.control_height), |ui| enter |= ui_kit::field(ui, &mut f.value));
+            // Predict with the box empty: the box shows what the parts measure (three decimals);
+            // typing over it gives the value.
+            let measured = if f.predict && f.value.trim().is_empty() { predicted_text(f) } else { None };
+            ui.allocate_ui(egui::vec2(width, t.control_height), |ui| match measured {
+                Some(text) => {
+                    let mut shown = text.clone();
+                    enter |= ui_kit::field(ui, &mut shown);
+                    if shown != text {
+                        f.value = shown;
+                    }
+                }
+                None => enter |= ui_kit::field(ui, &mut f.value),
+            });
             ui.allocate_ui(egui::vec2(t.control_height + t.space_12, t.control_height), |ui| {
                 ui_kit::dropdown_menu(ui, "constraint_value_menu", "", |ui| {
                     if ui_kit::list_picker(ui, "constraint_measure", tr("ui.constraint.measure"), false).clicked() {
@@ -457,11 +871,17 @@ pub(crate) fn rows_keys(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut Constrain
                 .on_hover_text(tr("ui.constraint.measure"));
             });
         });
+        // A limited value outside its limits starts at the nearer one (R153/R160).
+        if let Some(w) = f.preview.as_ref().and_then(|(_, p)| p.warning.as_deref()) {
+            ui_kit::text(ui, w, ui_kit::Text::Warning("constraint_warning"));
+        }
     }
 
     // Solution: the type's buttons.
     let list = f.solutions(app);
-    let pressed = f.solution.filter(|s| list.contains(s)).unwrap_or_else(|| f.kind.default_solution(f.axes(app)));
+    // The chosen one; else, measuring, the predicted one; else the type's default.
+    let predicted = f.preview.as_ref().and_then(|(_, p)| p.predicted).map(|p| p.solution).filter(|s| list.contains(s));
+    let pressed = f.solution.filter(|s| list.contains(s)).or(predicted).unwrap_or_else(|| f.kind.default_solution(f.axes(app)));
     ui_kit::row(ui, tr("ui.constraint.solution"), |ui| {
         let segments: Vec<ui_kit::IconSegment> = list
             .iter()
@@ -475,11 +895,22 @@ pub(crate) fn rows_keys(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut Constrain
             f.set_solution(*s);
         }
     });
+    // A refused draft says why under Solution and keeps OK and Apply disabled (spec §6.3 step 4).
+    if let Some(why) = f.preview.as_ref().and_then(|(_, p)| p.refused.as_deref()) {
+        ui_kit::text(ui, why, ui_kit::Text::Report("constraint_refused", true));
+    }
 
     // Options.
     ui_kit::checkbox(ui, tr("ui.constraint.suppressed"), &mut f.suppressed);
     if matches!(f.kind, ConstraintKind::Mate | ConstraintKind::Angle) {
+        let was = f.predict;
         ui_kit::checkbox(ui, tr("ui.constraint.predict"), &mut f.predict);
+        // Predict measures: the box empties (offset None); off again, an empty box is 0.
+        if f.predict && !was {
+            f.value.clear();
+        } else if !f.predict && was && f.value.trim().is_empty() {
+            f.value = default_value(f.kind, &f.units);
+        }
     }
     if f.kind == ConstraintKind::Insert {
         ui_kit::checkbox(ui, tr("ui.constraint.lock_turn"), &mut f.lock);
@@ -541,3 +972,7 @@ pub(crate) fn rows_keys(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut Constrain
 #[cfg(test)]
 #[path = "dialogs_constraint_tests.rs"]
 mod dialogs_constraint_tests;
+
+#[cfg(test)]
+#[path = "constraint_pick_tests.rs"]
+mod constraint_pick_tests;

@@ -1273,6 +1273,10 @@ impl Dialog {
             return Some(target);
         }
         let inp = self.active_input()?;
+        // Constrain: only what the armed slot takes (memoised per hovered entity, R162).
+        if let Kind::Assembly(crate::dialogs_assembly::Asm::Constraint(f)) = &self.kind {
+            return inp.accepts(h, |_, _| true).filter(|sel| crate::dialogs_constraint::takes(s, f, sel));
+        }
         // Features are also picked on the canvas: a face stands for the feature that made it.
         if inp.accept == selection::FEATURES {
             return match h {
@@ -1346,6 +1350,12 @@ impl Dialog {
 
     /// A pick in the viewport (already accepted by the active input).
     pub fn pick(&mut self, s: &Session, sel: Sel) {
+        // The Constrain panel holds its picks itself (spec §6.3).
+        if let Kind::Assembly(crate::dialogs_assembly::Asm::Constraint(f)) = &mut self.kind {
+            crate::dialogs_constraint::take(s, f, &sel);
+            self.error = None;
+            return;
+        }
         if self.take_extrude_target(s, &sel) {
             return;
         }
@@ -2123,8 +2133,8 @@ fn stored_revolve_axis(kind: &Kind) -> Option<&Value> {
 }
 
 pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, range: std::ops::Range<usize>) {
-    // Edit Text shows its Path input among its own rows.
-    if matches!(d.kind, Kind::Text(_)) {
+    // Edit Text shows its Path input among its own rows; Constrain its picks.
+    if matches!(d.kind, Kind::Text(_) | Kind::Assembly(crate::dialogs_assembly::Asm::Constraint(_))) {
         return;
     }
     let t = Tokens::get();
@@ -2843,6 +2853,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         d.error = None;
         d.refused = None;
         d.repeat_after_apply = false;
+        // Constrain keeps its type and solution; the picks clear and pick 1 is armed again.
+        if let Kind::Assembly(crate::dialogs_assembly::Asm::Constraint(f)) = &mut d.kind {
+            f.clear_picks();
+        }
         let _ = app.session.execute("select.clear", &json!({}));
     }
     // Cancel while computing: the result goes (its worker runs on to its end).
@@ -3323,6 +3337,10 @@ pub(crate) fn run_dialog(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
                     && let Some(why) = crate::dialogs_assembly::drive_stop(&reply)
                 {
                     app.set_status(why, false);
+                }
+                // A limited constraint that starts at a limit says so (R153).
+                if let Some(warning) = crate::dialogs_constraint::warnings(&cmd, &reply) {
+                    app.set_status(warning, false);
                 }
             }
             Err(error) => {
