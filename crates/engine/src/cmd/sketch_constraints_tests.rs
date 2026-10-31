@@ -865,6 +865,24 @@ fn a_placed_dimension_stores_the_design_unit() {
     assert_eq!(d["expression"], "25.4 mm", "{d}");
 }
 
+/// R180: a driven dimension made driving stores what it measures in the design's unit, as a
+/// placed one does.
+#[test]
+fn a_dimension_made_driving_stores_the_design_unit() {
+    let mut s = Session::default();
+    run(&mut s, "document.units", json!({"units": "in"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [101.6, 0]], "ids": ["la"], "infer": false}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["la"], "driven": true}));
+    let sk = s.doc.sketch(s.active_sketch.unwrap()).unwrap().clone();
+    let c = sk.constraints.iter().find(|c| c.driven).expect("a driven dimension").clone();
+    run(&mut s, "sketch.toggle_driven", json!({"constraint": c.id, "driven": false}));
+    let name = s.doc.sketch(s.active_sketch.unwrap()).unwrap().constraints.iter().find(|x| x.id == c.id).and_then(|x| x.param.clone()).unwrap();
+    let row = param_row(&mut s, &name);
+    assert_eq!((row["unit"].as_str(), row["expression"].as_str()), (Some("in"), Some("4 in")), "{row}");
+    assert!((line_length(&s, "la") - 101.6).abs() < 1e-6);
+}
+
 /// A bare right-hand side is in the design's unit, like a bare dimension value, and the new
 /// parameter carries that unit; an angle's parameter is in degrees.
 #[test]

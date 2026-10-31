@@ -80,10 +80,12 @@ impl Edit {
 }
 
 /// What the value box opens with for parameter `param` of `doc` (R180): in a design whose length
-/// unit is not the millimetre, a plain length (bare or in mm, as dimensions were stored, or in the
-/// design's unit) shows in the design's unit with its suffix at the shown precision ("1.000 in");
-/// a formula, a name, another unit or an angle shows as authored. With a converted text comes
-/// what accepting it unchanged stores: the value at full precision in the design's unit.
+/// unit is not the millimetre, a plain length shows in the design's unit with its suffix at the
+/// shown precision ("1.000 in"). Plain is a bare number or one in the design's unit; for a
+/// parameter whose unit is still `mm` (dimensions placed before R180) also one in millimetres,
+/// which is how they were stored. A formula, a name, another unit (an authored "100 mm" on an
+/// inch parameter) or an angle shows as authored. With a converted text comes what accepting it
+/// unchanged stores: the value at full precision in the design's unit.
 fn box_value(app: &SolveApp, doc: &solidcraft_engine::doc::Document, param: &str) -> (String, Option<(String, String)>) {
     use solidcraft_engine::doc::expr::{Kind, length_unit_or_mm, unit_info};
     let Some(p) = doc.param(param) else { return (String::new(), None) };
@@ -93,8 +95,11 @@ fn box_value(app: &SolveApp, doc: &solidcraft_engine::doc::Document, param: &str
     }
     let e = p.expr.trim();
     let number = crate::prefs::parse_number;
-    let mm = number(e).or_else(|| e.strip_suffix("mm").and_then(number)).map(|v| (v, false));
-    let in_design = || e.strip_suffix(design).and_then(number).map(|v| (v / crate::prefs::unit_scale(design).0, true));
+    let per_mm = crate::prefs::unit_scale(design).0;
+    let legacy = p.unit.trim() == "mm";
+    let mm = if legacy { number(e).or_else(|| e.strip_suffix("mm").and_then(number)).map(|v| (v, false)) } else { None };
+    // A bare number in a parameter of the design's unit is already in that unit.
+    let in_design = || e.strip_suffix(design).and_then(number).or_else(|| number(e).filter(|_| !legacy)).map(|v| (v / per_mm, true));
     let Some((mm, authored)) = mm.or_else(in_design) else { return (p.expr.clone(), None) };
     let shown = crate::prefs::format_length(mm, design, crate::prefs::shown_length_decimals(app));
     let stored = if authored { e.to_string() } else { app.session.doc.length_in_design_unit(mm) };
@@ -868,7 +873,13 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
                     .map(|(k, _)| k)
                     .unwrap_or(solidcraft_engine::doc::expr::Kind::Unitless);
                 let expression = app.session.doc.with_design_unit(&value, kind);
-                app.run("parameters.change", json!({"name": e.param, "expression": expression})).map_err(|err| shown_error("parameters.change", &err))
+                let mut change = json!({"name": e.param, "expression": expression});
+                // A dimension placed before R180 takes the design's unit with its first edit.
+                let design = solidcraft_engine::doc::expr::length_unit_or_mm(&app.session.doc.units);
+                if design != "mm" && app.session.doc.param(&e.param).is_some_and(|p| p.unit.trim() == "mm") {
+                    change["unit"] = json!(design);
+                }
+                app.run("parameters.change", change).map_err(|err| shown_error("parameters.change", &err))
             };
             match result {
                 Err(err) => {
@@ -1235,14 +1246,68 @@ mod tests {
             open_on(&mut h, &param, "5.000 in");
             type_enter(&mut h, "100 mm");
             assert_eq!(the_dimension(&h).1, "100 mm", "another unit is kept as typed");
-            // A dimension stored in millimetres (an older document) opens in inches...
-            h.app.run("parameters.change", json!({"name":param,"expression":"25.4 mm"})).unwrap();
+            // An authored "100 mm" reopens as authored, and accepting it changes nothing.
+            open_on(&mut h, &param, "100 mm");
+            h.step(&json!({"key":"Enter"})).unwrap();
+            h.frames(2);
+            assert!(!editing());
+            assert_eq!(the_dimension(&h).1, "100 mm", "no drift on reopen");
+            assert!((line_length(&h) - 100.0).abs() < 1e-9);
+            // A dimension stored in millimetres (placed before R180: its unit is `mm`) opens in
+            // inches...
+            h.app.run("parameters.change", json!({"name":param,"expression":"25.4 mm","unit":"mm"})).unwrap();
             open_on(&mut h, &param, "1.000 in");
-            // ...and accepting it re-stores it in inches.
+            // ...and accepting it re-stores it in inches, with the design's unit.
             h.step(&json!({"key":"Enter"})).unwrap();
             h.frames(2);
             assert_eq!(the_dimension(&h).1, "1 in");
+            assert_eq!(h.app.session.doc.param(&param).map(|p| p.unit.as_str()), Some("in"));
             assert!((line_length(&h) - 25.4).abs() < 1e-6);
+            // Now an inch parameter, a typed "100 mm" stays as typed when reopened.
+            open_on(&mut h, &param, "1.000 in");
+            type_enter(&mut h, "100 mm");
+            open_on(&mut h, &param, "100 mm");
+            h.step(&json!({"key":"Escape"})).unwrap();
+            cancel();
+        }
+    }
+
+    /// R180 in an inch part: a driven dimension still has no value to edit, and a reference to
+    /// another dimension typed into the box is stored and reopened as authored.
+    #[test]
+    fn an_inch_part_keeps_driven_dimensions_and_references_as_authored() {
+        for inventor in [false, true] {
+            cancel();
+            let mut h =
+                if inventor { crate::test_support::inventor(solidcraft_engine::doc::DocumentKind::Part) } else { crate::scenario::Harness::new() };
+            h.app.home.open = false;
+            crate::documents::new_document(&mut h.app, solidcraft_engine::doc::DocumentKind::Part, Some("in"));
+            h.frames(3);
+            h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+            h.app.run("sketch.line", json!({"points":[[10,10],[60.8,10]],"ids":["la"],"infer":false,"connect":false})).unwrap();
+            h.app.run("sketch.line", json!({"points":[[10,30],[35.4,30]],"ids":["lb"],"infer":false,"connect":false})).unwrap();
+            let a = h.app.run("sketch.dimension", json!({"entities":["la"],"text_at":[35,0]})).unwrap();
+            let b = h.app.run("sketch.dimension", json!({"entities":["lb"],"text_at":[22,40]})).unwrap();
+            let (a, b) = (a["param"].as_str().unwrap().to_string(), b["param"].as_str().unwrap().to_string());
+            assert_eq!(h.app.session.doc.param(&b).map(|p| p.expr.as_str()), Some("1 in"));
+            let driven = h.app.run("sketch.dimension", json!({"entities":["la.start","lb.start"],"driven":true,"text_at":[0,20]})).unwrap();
+            h.call("ui.view", json!({"view":"top"}));
+            h.frames(2);
+            // The driven dimension: a double-click explains, no box opens.
+            let id =
+                drawn().into_iter().map(|(id, _)| id).find(|id| !id.is_empty() && DRAWN.with(|d| d.borrow().iter().any(|x| x.id == *id && x.driven)));
+            assert!(id.is_some(), "the driven dimension is drawn: {driven}");
+            crate::test_support::clicks_expire(&mut h);
+            h.step(&json!({"click":{"dimension":id.unwrap()},"double":true})).unwrap();
+            h.frames(2);
+            assert!(!editing(), "a driven dimension has no value to edit");
+            assert!(h.app.status.as_ref().is_some_and(|s| s.0.contains("driven")), "{:?}", h.app.status);
+            // A reference to the other dimension is stored and shown as typed.
+            open_on(&mut h, &a, "2.000 in");
+            type_enter(&mut h, &b);
+            assert_eq!(h.app.session.doc.param(&a).map(|p| p.expr.clone()), Some(b.clone()));
+            open_on(&mut h, &a, &b);
+            h.step(&json!({"key":"Escape"})).unwrap();
             cancel();
         }
     }

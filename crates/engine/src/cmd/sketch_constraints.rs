@@ -395,19 +395,20 @@ fn toggle_driven(s: &mut Session, p: &Value) -> Result<Value> {
         if driven {
             slot.driven = true;
         } else {
+            // A length is stored in the design's unit, as `sketch.dimension` stores it (R180).
             let (unit, e) = if c.kind.is_angle() {
-                ("deg", format!("{} deg", (v.to_degrees() * 1e6).round() / 1e6))
+                ("deg".to_string(), format!("{} deg", (v.to_degrees() * 1e6).round() / 1e6))
             } else {
-                ("mm", format!("{} mm", (v * 1e6).round() / 1e6))
+                (solidcraft_doc::expr::length_unit_or_mm(&doc.units).to_string(), doc.length_in_design_unit(v))
             };
             slot.driven = false;
             match slot.param.as_deref().and_then(|n| doc.params.iter_mut().find(|p| p.name == n)) {
                 Some(p) => {
                     p.expr = e;
-                    p.unit = unit.into();
+                    p.unit = unit;
                     p.reference = false;
                 }
-                None => slot.param = Some(doc.new_model_param(&e, unit)),
+                None => slot.param = Some(doc.new_model_param(&e, &unit)),
             }
             before = None;
         }
