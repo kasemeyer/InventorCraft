@@ -593,12 +593,19 @@ pub(crate) fn prompt(app: &SolveApp) -> Option<&'static str> {
     if f.wants_part() {
         return Some("ui.constraint.prompt_part");
     }
-    if f.refused {
-        return Some(match f.kind {
-            ConstraintKind::Insert => "ui.constraint.refuse_insert",
-            ConstraintKind::Angle => "ui.constraint.refuse_angle",
-            _ => "ui.constraint.refuse_tangent",
-        });
+    // Why the hovered entity is refused, in the type's terms (Mate takes anything).
+    let refusal = match f.kind {
+        ConstraintKind::Insert => Some("ui.constraint.refuse_insert"),
+        ConstraintKind::Angle => Some("ui.constraint.refuse_angle"),
+        // After a plane, the second pick must be round.
+        ConstraintKind::Tangent if f.armed == 1 && f.kind_of(0) == Some(PrimKind::Plane) => Some("ui.constraint.refuse_tangent_second"),
+        ConstraintKind::Tangent => Some("ui.constraint.refuse_tangent"),
+        ConstraintKind::Mate | ConstraintKind::Symmetry => None,
+    };
+    if f.refused
+        && let Some(key) = refusal
+    {
+        return Some(key);
     }
     if f.ready() {
         return None;

@@ -2277,32 +2277,48 @@ fn inline_rename(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect, e: &Entry, de
         return;
     }
     let Some(mut rename) = app.menu.rename.take() else { return };
-    // Where the label starts: the fold arrow, eye and icon come first.
-    let left = label_left(row.left(), depth);
-    let edit_rect = Rect::from_min_max(pos2(left, row.top() + 1.0), pos2(row.right() - 3.0, row.bottom() - 1.0));
-    ui.painter().rect_filled(edit_rect, 3.0, Tokens::get().field);
     let id = ui.id().with(("browser_rename", &e.row_key));
-    let response = crate::ui_kit::inline_name(ui, edit_rect, id, &mut rename.text);
-    crate::scenario::publish_handle(&format!("rename:{}", e.key), edit_rect.center());
-    let was_focused = rename.focused;
-    if !rename.focused {
-        if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), id) {
-            let end = rename.text.chars().count();
-            state.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(end))));
-            state.store(ui.ctx(), id);
-        }
-        response.request_focus();
-        rename.focused = true;
-    }
-    let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
-    let commit = ui.input(|i| i.key_pressed(egui::Key::Enter)) || (was_focused && response.lost_focus());
-    if escape {
+    let typed = row_name_box(ui, row, depth, id, &format!("rename:{}", e.key), &mut rename.text, &mut rename.focused);
+    if typed.escape {
         // Dropping the state cancels the edit.
-    } else if commit {
+    } else if typed.enter || typed.left {
         crate::context_menu::commit_rename(app, &rename);
     } else {
         app.menu.rename = Some(rename);
     }
+}
+
+/// What was done in a row's name box this frame.
+struct RowBox {
+    escape: bool,
+    enter: bool,
+    /// The box had the focus and lost it (clicked away).
+    left: bool,
+    changed: bool,
+}
+
+/// A name or value typed over a row's label (the browser's own container; the kit's inline name
+/// field): it opens with its text selected and takes the focus. Shared by a body's inline
+/// rename, a constraint's rename (R185) and Modify.
+fn row_name_box(ui: &mut egui::Ui, row: Rect, depth: usize, id: egui::Id, handle: &str, text: &mut String, focused: &mut bool) -> RowBox {
+    // Where the label starts: the fold arrow, eye and icon come first.
+    let left = label_left(row.left(), depth);
+    let edit_rect = Rect::from_min_max(pos2(left, row.top() + 1.0), pos2(row.right() - 3.0, row.bottom() - 1.0));
+    ui.painter().rect_filled(edit_rect, 3.0, Tokens::get().field);
+    let response = crate::ui_kit::inline_name(ui, edit_rect, id, text);
+    crate::scenario::publish_handle(handle, edit_rect.center());
+    let was_focused = *focused;
+    if !*focused {
+        if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), id) {
+            let end = text.chars().count();
+            state.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(end))));
+            state.store(ui.ctx(), id);
+        }
+        response.request_focus();
+        *focused = true;
+    }
+    let (escape, enter) = ui.input(|i| (i.key_pressed(egui::Key::Escape), i.key_pressed(egui::Key::Enter)));
+    RowBox { escape, enter, left: was_focused && response.lost_focus(), changed: response.changed() }
 }
 
 /// One item row of a folder.
@@ -2948,7 +2964,7 @@ pub(crate) fn constraint_row(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, und
         constraint_rename_box(app, ui, rect, id, under, depth);
     }
     let typed = app.menu.modify.as_ref().filter(|m| m.constraint == id && m.under == under);
-    let renamed = app.menu.rename.as_ref().filter(|_| renaming && renaming_constraint(app) == Some(id));
+    let renamed = app.menu.rename.as_ref().filter(|_| renaming);
     let error = typed.and_then(|m| m.error.clone()).or_else(|| renamed.and_then(|r| r.error.clone()));
     if let Some(error) = &error {
         modify_error(ui, depth, error);
@@ -3022,33 +3038,17 @@ pub(crate) fn constraint_row(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, und
 /// it cancels.
 fn modify_box(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect, depth: usize, id: u64, under: u64) {
     let Some(mut m) = app.menu.modify.take() else { return };
-    // Where the label starts: the fold arrow, the eye column and the icon come first.
-    let left = label_left(row.left(), depth);
-    let edit_rect = Rect::from_min_max(pos2(left, row.top() + 1.0), pos2(row.right() - 3.0, row.bottom() - 1.0));
-    ui.painter().rect_filled(edit_rect, 3.0, Tokens::get().field);
     let edit_id = ui.id().with(("constraint_modify", id, under));
-    let response = crate::ui_kit::inline_name(ui, edit_rect, edit_id, &mut m.text);
-    crate::scenario::publish_handle(&format!("modify:constraint:{id}:{under}"), edit_rect.center());
-    let was_focused = m.focused;
-    if !m.focused {
-        if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), edit_id) {
-            let end = m.text.chars().count();
-            state.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(end))));
-            state.store(ui.ctx(), edit_id);
-        }
-        response.request_focus();
-        m.focused = true;
-    }
-    let (escape, enter) = ui.input(|i| (i.key_pressed(egui::Key::Escape), i.key_pressed(egui::Key::Enter)));
-    if escape {
+    let typed = row_name_box(ui, row, depth, edit_id, &format!("modify:constraint:{id}:{under}"), &mut m.text, &mut m.focused);
+    if typed.escape {
         // Dropping the state cancels it: no step.
-    } else if enter {
+    } else if typed.enter {
         app.menu.modify = Some(m);
         crate::context_menu::commit_modify(app);
-    } else if was_focused && response.lost_focus() {
+    } else if typed.left {
         // Clicked away: nothing is sent.
     } else {
-        if response.changed() {
+        if typed.changed {
             m.error = None;
         }
         app.menu.modify = Some(m);
@@ -3060,29 +3060,14 @@ fn modify_box(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect, depth: usize, id
 /// stays with the reason under the row; Escape cancels, and leaving the box keeps a good name.
 fn constraint_rename_box(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect, id: u64, under: u64, depth: usize) {
     let Some(mut rename) = app.menu.rename.take() else { return };
-    let left = label_left(row.left(), depth);
-    let edit_rect = Rect::from_min_max(pos2(left, row.top() + 1.0), pos2(row.right() - 3.0, row.bottom() - 1.0));
-    ui.painter().rect_filled(edit_rect, 3.0, Tokens::get().field);
     let edit_id = ui.id().with(("constraint_rename", id, under));
-    let response = crate::ui_kit::inline_name(ui, edit_rect, edit_id, &mut rename.text);
-    crate::scenario::publish_handle(&format!("rename:constraint:{id}:{under}"), edit_rect.center());
-    let was_focused = rename.focused;
-    if !rename.focused {
-        if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), edit_id) {
-            let end = rename.text.chars().count();
-            state.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(end))));
-            state.store(ui.ctx(), edit_id);
-        }
-        response.request_focus();
-        rename.focused = true;
-    }
-    let (escape, enter) = ui.input(|i| (i.key_pressed(egui::Key::Escape), i.key_pressed(egui::Key::Enter)));
-    let left_box = was_focused && response.lost_focus() && !enter;
-    if escape {
+    let typed = row_name_box(ui, row, depth, edit_id, &format!("rename:constraint:{id}:{under}"), &mut rename.text, &mut rename.focused);
+    let (enter, left_box) = (typed.enter, typed.left && !typed.enter);
+    if typed.escape {
         // Dropping the state cancels it: no step.
         return;
     }
-    if response.changed() {
+    if typed.changed {
         rename.error = None;
     }
     if !enter && !left_box {

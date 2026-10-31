@@ -93,9 +93,7 @@ fn a_click_shows_the_value_box_at_the_foot_and_enter_edits_the_offset() {
         h.frames(2);
         assert_eq!(h.app.session.undo.len(), undo + 1, "Escape takes no step");
         assert!((record(&h, mate).offset - 12.7).abs() < 1e-9);
-        if let Some((text, _)) = shown(&h.app) {
-            assert_eq!(text, "0.500 in", "the box shows the record's value again");
-        }
+        assert_eq!(shown(&h.app), Some(("0.500 in".to_string(), true)), "the box shows the record's value again");
     }
 }
 
