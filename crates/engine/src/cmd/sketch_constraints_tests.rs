@@ -841,6 +841,30 @@ fn a_dimension_value_can_define_a_user_parameter() {
     }
 }
 
+/// R180: a dimension placed without a value stores what it measures in the design's unit
+/// ("4 in" in an inch design, not "101.6 mm"), precisely enough to restate the geometry; a
+/// millimetre design keeps "<n> mm".
+#[test]
+fn a_placed_dimension_stores_the_design_unit() {
+    let mut s = Session::default();
+    run(&mut s, "document.units", json!({"units": "in"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [101.6, 0]], "ids": ["la"], "infer": false}));
+    let d = run(&mut s, "sketch.dimension", json!({"entities": ["la"]}));
+    assert_eq!(d["expression"], "4 in", "{d}");
+    let row = param_row(&mut s, d["param"].as_str().unwrap());
+    assert_eq!((row["unit"].as_str(), row["expression"].as_str()), (Some("in"), Some("4 in")), "{row}");
+    // An odd length restates the geometry to well within the solver's tolerance.
+    run(&mut s, "sketch.line", json!({"points": [[0, 50], [37.123, 50]], "ids": ["lb"], "infer": false}));
+    let d = run(&mut s, "sketch.dimension", json!({"entities": ["lb"]}));
+    assert_eq!(d["expression"], "1.46153543 in", "{d}");
+    assert!((line_length(&s, "lb") - 37.123).abs() < 1e-6);
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [25.4, 0]], "ids": ["la"], "infer": false}));
+    let d = run(&mut s, "sketch.dimension", json!({"entities": ["la"]}));
+    assert_eq!(d["expression"], "25.4 mm", "{d}");
+}
+
 /// A bare right-hand side is in the design's unit, like a bare dimension value, and the new
 /// parameter carries that unit; an angle's parameter is in degrees.
 #[test]

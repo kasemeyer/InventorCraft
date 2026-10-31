@@ -237,6 +237,20 @@ impl Document {
         }
     }
 
+    /// A length in millimetres as an expression in the design's length unit ("4 in", "25.4 mm"),
+    /// rounded only as far as keeps it within half a micrometre of `mm` (six decimals of a
+    /// millimetre, two more for inches).
+    pub fn length_in_design_unit(&self, mm: f64) -> String {
+        let unit = expr::length_unit_or_mm(&self.units);
+        let (per_mm, unit) = crate::display_units::unit_scale(unit);
+        let places = 6 + (1.0 / per_mm).log10().ceil().max(0.0) as i32;
+        let factor = 10f64.powi(places);
+        let value = (mm * per_mm * factor).round() / factor;
+        // `-0` reads as a typo; zero is zero.
+        let value = if value == 0.0 { 0.0 } else { value };
+        format!("{value} {unit}")
+    }
+
     /// Every length input of every feature as the geometry reads it (mm; a unit-less result is
     /// in the design's units), for checking that an edit moves nothing.
     pub fn length_inputs(&self) -> Vec<Option<f64>> {
