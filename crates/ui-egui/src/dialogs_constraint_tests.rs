@@ -127,6 +127,17 @@ fn the_panel_opens_with_the_captured_defaults() {
     assert!(f.show_preview);
     assert_eq!(f.value, "0 mm");
     assert_eq!(heading(&h), "Constrain");
+    // The Type and Solution rows are icon toggles (R166), their words the names and tooltips.
+    crate::icon_svg::audit::start();
+    h.frames(2);
+    let drawn_icons = crate::icon_svg::audit::take();
+    crate::icon_svg::audit::stop();
+    for id in
+        ["constraint_mate", "constraint_angle", "constraint_tangent", "constraint_insert", "constraint_symmetry", "solution_mate", "solution_flush"]
+    {
+        let r = drawn_icons.iter().find(|r| r.name == id).unwrap_or_else(|| panic!("{id} is not drawn"));
+        assert!(!r.placeholder, "{id} has its own master");
+    }
     // Type Mate and solution Mate are both pressed.
     let mates: Vec<bool> = nodes(&h, "Mate").iter().filter_map(|n| n.toggled()).map(|t| t == Toggled::True).collect();
     assert_eq!(mates, [true, true], "type Mate and solution Mate");
@@ -184,6 +195,11 @@ fn each_type_shows_its_picks_value_and_solutions() {
     assert_eq!(form(&h).value, "0 mm");
 
     pick_type(&mut h, "Insert");
+    crate::icon_svg::audit::start();
+    h.frames(2);
+    let insert_icons: Vec<String> = crate::icon_svg::audit::take().into_iter().filter(|r| !r.placeholder).map(|r| r.name).collect();
+    crate::icon_svg::audit::stop();
+    assert!(insert_icons.iter().any(|n| n == "solution_opposed") && insert_icons.iter().any(|n| n == "solution_aligned"), "{insert_icons:?}");
     assert!(on(&h, "Opposed") && drawn(&h, "Aligned") && !on(&h, "Aligned"));
     assert!(drawn(&h, "Lock turn") && !on(&h, "Lock turn"));
     assert!(!drawn(&h, "Use current offset and orientation"));

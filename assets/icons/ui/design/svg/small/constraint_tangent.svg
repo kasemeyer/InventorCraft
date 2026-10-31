@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Tangent</title>
+  <path d="M8 42.5L56 42.5L56 52.5L8 52.5Z" fill="#b8c3cf"/>
+  <path d="M8 42.5L56 42.5L56 52.5L8 52.5Z" fill="none" stroke="#34465b" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M17 26.5A15 15 0 1 0 47 26.5A15 15 0 1 0 17 26.5Z" fill="#e2e8ef" stroke="#34465b" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M16 41.5L48 41.5" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="32" cy="41.5" r="4.2" fill="#236ead"/>
+</svg>

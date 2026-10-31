@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Mate</title>
+  <path d="M8 38L56 38L56 50L8 50Z" fill="#b8c3cf"/>
+  <path d="M8 38L56 38L56 50L8 50Z" fill="none" stroke="#34465b" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M18 14L46 14L46 35L18 35Z" fill="#e2e8ef"/>
+  <path d="M18 14L46 14L46 35L18 35Z" fill="none" stroke="#34465b" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M12 36.5L52 36.5" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

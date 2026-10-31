@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Angle</title>
+  <path d="M13.25 44.68L55.25 44.68L55.25 51.68L13.25 51.68Z" fill="#b8c3cf"/>
+  <path d="M13.25 44.68L55.25 44.68L55.25 51.68L13.25 51.68Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M13.25 44.68L45.42 17.68L40.92 12.32L8.75 39.32Z" fill="#e2e8ef"/>
+  <path d="M13.25 44.68L45.42 17.68L40.92 12.32L8.75 39.32Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M43.18 42.59A30 30 0 0 0 37.52 27.05" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

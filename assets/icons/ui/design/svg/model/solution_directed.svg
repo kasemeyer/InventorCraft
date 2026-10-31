@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Directed</title>
+  <path d="M12 49.32L52 49.32" fill="none" stroke="currentColor" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M12 49.32L32 14.68" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M41.93 47.23A30 30 0 0 0 37.98 34.32" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32.84 27.74L42.08 32.53L34.89 37.94Z" fill="#236ead"/>
+</svg>

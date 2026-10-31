@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Reference axis</title>
+  <path d="M14.94 50L50.94 50" fill="none" stroke="currentColor" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M14.94 50L35.59 20.51" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M40.88 48.19A26 26 0 0 0 38.69 39.42" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M34.26 32.6L42.86 37.88L35.23 42.64Z" fill="#236ead"/>
+  <path d="M14.94 50L14.94 18" fill="none" stroke="#6f879c" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="3 5"/>
+  <path d="M14.94 10L18.94 18L10.94 18Z" fill="#6f879c"/>
+  <circle cx="14.94" cy="50" r="4" fill="currentColor"/>
+</svg>

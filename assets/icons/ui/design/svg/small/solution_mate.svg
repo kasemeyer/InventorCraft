@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Mate solution</title>
+  <path d="M8 40L56 40L56 50L8 50Z" fill="#b8c3cf"/>
+  <path d="M8 40L56 40L56 50L8 50Z" fill="none" stroke="#34465b" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M8 14L56 14L56 24L8 24Z" fill="#e2e8ef"/>
+  <path d="M8 14L56 14L56 24L8 24Z" fill="none" stroke="#34465b" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M20 40L20 35" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M20 27L24.5 36L15.5 36Z" fill="#236ead"/>
+  <path d="M44 24L44 29" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M44 37L39.5 28L48.5 28Z" fill="#236ead"/>
+</svg>

@@ -65,6 +65,11 @@ configuration_table	false
 conic	false
 constrain	false
 constrainer	false
+constraint_angle	false
+constraint_insert	false
+constraint_mate	false
+constraint_symmetry	false
+constraint_tangent	false
 construction	false
 contact_all	false
 contact_new	false
@@ -236,6 +241,8 @@ slot_center	false
 slot_overall	false
 snap	false
 snap_fit	false
+solution_flush	false
+solution_mate	false
 sphere	false
 spin	false
 spline	false

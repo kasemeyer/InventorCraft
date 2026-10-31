@@ -292,6 +292,51 @@ fn solution_label(s: ConstraintSolution) -> &'static str {
     })
 }
 
+/// The type's icon master (R166).
+pub fn type_icon(kind: ConstraintKind) -> &'static str {
+    match kind {
+        ConstraintKind::Mate => "constraint_mate",
+        ConstraintKind::Angle => "constraint_angle",
+        ConstraintKind::Tangent => "constraint_tangent",
+        ConstraintKind::Insert => "constraint_insert",
+        ConstraintKind::Symmetry => "constraint_symmetry",
+    }
+}
+
+/// The solution's icon master (R166).
+pub fn solution_icon(s: ConstraintSolution) -> &'static str {
+    match s {
+        ConstraintSolution::MateFace => "solution_mate",
+        ConstraintSolution::Flush => "solution_flush",
+        ConstraintSolution::Opposed => "solution_opposed",
+        ConstraintSolution::Aligned => "solution_aligned",
+        ConstraintSolution::Undirected => "solution_undirected",
+        ConstraintSolution::Directed => "solution_directed",
+        ConstraintSolution::ExplicitVector => "solution_reference",
+        ConstraintSolution::Inside => "solution_inside",
+        ConstraintSolution::Outside => "solution_outside",
+    }
+}
+
+/// One icon toggle `width` wide, its word the accessible name and the hover text `tip`.
+fn icon_toggle(ui: &mut egui::Ui, width: f32, word: &'static str, icon: &'static str, on: bool, enabled: bool, tip: &str) -> bool {
+    let t = Tokens::get();
+    ui.push_id(word, |ui| {
+        ui.allocate_ui(egui::vec2(width.max(t.control_height), t.control_height), |ui| {
+            let r = ui.add_enabled_ui(enabled, |ui| {
+                let mut picked = usize::from(!on);
+                ui_kit::segmented_icons(ui, &mut picked, &[ui_kit::IconSegment { key: word, icon, tip: tip.to_string() }], &[on])
+            });
+            if !enabled {
+                let _ = r.response.on_disabled_hover_text(tip);
+            }
+            r.inner
+        })
+        .inner
+    })
+    .inner
+}
+
 /// One toggle drawn on its own (so it can be disabled or underlined alone): a one-option
 /// segmented control at its natural width. (clicked, its rect)
 fn toggle(ui: &mut egui::Ui, text: &str, on: bool, enabled: bool, tip: &str) -> (bool, egui::Rect) {
@@ -364,9 +409,11 @@ pub(crate) fn rows_keys(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut Constrain
     // Type: Symmetry is drawn, disabled (owner Q3). The five words take the panel's width.
     ui_kit::text(ui, tr("ui.constraint.type"), ui_kit::Text::Heading("constraint_type"));
     ui.horizontal(|ui| {
+        let width = (ui.available_width() - ui.spacing().item_spacing.x * (TYPES.len() - 1) as f32) / TYPES.len() as f32;
         for kind in TYPES {
             let built = kind != ConstraintKind::Symmetry;
-            if toggle(ui, type_label(kind), f.kind == kind, built, tr("ui.constraint.later_version")).0 && built {
+            let tip = if built { type_label(kind) } else { tr("ui.constraint.later_version") };
+            if icon_toggle(ui, width, type_label(kind), type_icon(kind), f.kind == kind, built, tip) && built {
                 f.set_kind(kind);
             }
         }
@@ -416,10 +463,13 @@ pub(crate) fn rows_keys(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut Constrain
     let list = f.solutions(app);
     let pressed = f.solution.filter(|s| list.contains(s)).unwrap_or_else(|| f.kind.default_solution(f.axes(app)));
     ui_kit::row(ui, tr("ui.constraint.solution"), |ui| {
-        let labels: Vec<&str> = list.iter().map(|s| solution_label(*s)).collect();
+        let segments: Vec<ui_kit::IconSegment> = list
+            .iter()
+            .map(|s| ui_kit::IconSegment { key: solution_label(*s), icon: solution_icon(*s), tip: solution_label(*s).to_string() })
+            .collect();
         let states: Vec<bool> = list.iter().map(|s| *s == pressed).collect();
         let mut index = list.iter().position(|s| *s == pressed).unwrap_or(0);
-        if ui_kit::segmented(ui, &mut index, &labels, ui_kit::Segments { states: &states, compact: true, ..Default::default() })
+        if ui_kit::segmented_icons(ui, &mut index, &segments, &states)
             && let Some(s) = list.get(index)
         {
             f.set_solution(*s);

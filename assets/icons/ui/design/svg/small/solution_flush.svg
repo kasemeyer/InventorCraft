@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Flush</title>
+  <path d="M6 33.7L29 33.7L29 49.7L6 49.7Z" fill="#b8c3cf"/>
+  <path d="M6 33.7L29 33.7L29 49.7L6 49.7Z" fill="none" stroke="#34465b" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M35 33.7L58 33.7L58 49.7L35 49.7Z" fill="#e2e8ef"/>
+  <path d="M35 33.7L58 33.7L58 49.7L35 49.7Z" fill="none" stroke="#34465b" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M4 33.7L60 33.7" fill="none" stroke="#6f879c" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="3 4"/>
+  <path d="M17.5 32.7L17.5 20.7" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M17.5 12.7L22 21.7L13 21.7Z" fill="#236ead"/>
+  <path d="M46.5 32.7L46.5 20.7" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M46.5 12.7L51 21.7L42 21.7Z" fill="#236ead"/>
+</svg>

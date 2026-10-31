@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Insert</title>
+  <path d="M8 38L25 38L25 52L8 52Z" fill="#b8c3cf"/>
+  <path d="M8 38L25 38L25 52L8 52Z" fill="none" stroke="#34465b" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M39 38L56 38L56 52L39 52Z" fill="#b8c3cf"/>
+  <path d="M39 38L56 38L56 52L39 52Z" fill="none" stroke="#34465b" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M20 12L44 12L44 20L36 20L36 46L28 46L28 20L20 20Z" fill="#e2e8ef"/>
+  <path d="M20 12L44 12L44 20L36 20L36 46L28 46L28 20L20 20Z" fill="none" stroke="#34465b" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 6L32 58" fill="none" stroke="#236ead" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="4 4"/>
+  <path d="M20 38L44 38" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>
