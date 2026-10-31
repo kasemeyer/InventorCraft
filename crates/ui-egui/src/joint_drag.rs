@@ -1,6 +1,7 @@
 //! Dragging a part that joints place moves it as far as its joints allow: each frame runs
 //! `joint.reach`, taking the point grabbed toward the pointer in the plane through it that faces
-//! the view. The whole drag is one undo step.
+//! the view. The whole drag is one undo step. Constraints count as joints here (R163): a Mated
+//! part slides in its plane, an Inserted one turns on its axis.
 
 use egui::Pos2;
 use serde_json::json;
@@ -39,7 +40,10 @@ pub fn start(app: &mut SolveApp, proj: &Proj, p: Pos2) -> bool {
     };
     let s = &app.session;
     let Some(occurrence) = crate::dialogs_assembly::occurrence_of_body(s, &body).filter(|o| *o != 0) else { return false };
-    if !s.doc.assembly.joints.iter().any(|j| !j.suppressed && (j.a.occurrence == occurrence || j.b.occurrence == occurrence)) {
+    // Saved joints and constraints alike (a constraint compiles to joints in every solve, R163).
+    let joined = s.doc.assembly.joints.iter().any(|j| !j.suppressed && (j.a.occurrence == occurrence || j.b.occurrence == occurrence));
+    let constrained = s.doc.assembly.constraints.iter().any(|c| !c.suppressed && c.picks.iter().any(|p| p.occurrence == occurrence));
+    if !joined && !constrained {
         return false;
     }
     let sol = joints::solve(&s.doc, &s.model.state());
@@ -50,6 +54,22 @@ pub fn start(app: &mut SolveApp, proj: &Proj, p: Pos2) -> bool {
     let normal = proj.ray(p).1;
     app.viewport.joint_drag = Some(Drag { occurrence, local, origin: at, normal, pushed: false });
     true
+}
+
+/// A press on a part that neither drag takes (grounded, or held fully by its joints or
+/// constraints): the status bar says what holds it (R163). Nothing for a press elsewhere.
+pub fn say_refused(app: &mut SolveApp, proj: &Proj, p: Pos2) {
+    let hits = crate::viewport::pick(app, proj, p);
+    let Some(body) = hits.into_iter().take_while(|h| matches!(h, Hit::Face { .. } | Hit::Edge { .. } | Hit::Vertex { .. })).find_map(|h| match h {
+        Hit::Face { body, .. } => Some(body),
+        _ => None,
+    }) else {
+        return;
+    };
+    let Some(path) = crate::occurrence_drag::placement_of(app, &body) else { return };
+    if let Err(e) = app.session.drag_group(&path) {
+        app.set_status(e.to_string(), true);
+    }
 }
 
 pub fn active(app: &SolveApp) -> bool {
@@ -222,5 +242,149 @@ mod tests {
         assert_eq!(h.app.session.undo.len(), 200);
         assert_eq!(h.app.session.undo.first().map(|s| s.label.clone()), second, "only the oldest step went");
         assert_eq!(h.app.session.undo.last().map(|s| s.label.as_str()), Some("Reach Point"), "the drag's step is on top");
+    }
+
+    // --- R163: parts held by constraints drag within their remaining freedom (wave 1 item 1) ---
+
+    use crate::test_support::{constraint_blocks, inventor, occ, world_at};
+    use solidcraft_engine::doc::DocumentKind::Assembly;
+
+    /// E-1's blocks on each profile: SolidCraft (`Harness::new()`) and Inventor.
+    fn blocks_both() -> Vec<Harness> {
+        [Harness::new(), inventor(Assembly)]
+            .into_iter()
+            .map(|mut h| {
+                h.app.home.open = false;
+                constraint_blocks(&mut h);
+                h.frames(2);
+                h
+            })
+            .collect()
+    }
+
+    fn face(h: &Harness, name: &str, p: [f64; 3]) -> Value {
+        json!({"occurrence": name, "face": world_at(h, name, p)})
+    }
+
+    fn world(h: &Harness, name: &str) -> solidcraft_engine::doc::Mat {
+        joints::occurrence_world(&h.app.session.doc, occ(h, name))
+    }
+
+    /// The point a press at `a` grabs, and where the pointer at `b` takes it: on the plane through
+    /// it facing the view (as a drag does).
+    fn dropped(h: &Harness, a: egui::Pos2, b: egui::Pos2) -> (Vec3, Vec3) {
+        let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+        let origin = crate::viewport::pick(&h.app, &proj, a)
+            .into_iter()
+            .find_map(|hit| match hit {
+                crate::viewport::Hit::Face { point, .. } => Some(point),
+                _ => None,
+            })
+            .expect("a face under the press");
+        let normal = proj.ray(a).1;
+        let (o, dir) = proj.ray(b);
+        (origin, o + dir * ((origin - o).dot(normal) / dir.dot(normal)))
+    }
+
+    /// Drag from `a` to `b` and let go.
+    fn drag(h: &mut Harness, a: egui::Pos2, b: egui::Pos2) {
+        press_and_move(h, a, b);
+        release(h, b);
+        h.frames(2);
+    }
+
+    /// A free, unconstrained part keeps its free drag: the grabbed point lands where it is dropped.
+    #[test]
+    fn r163_a_free_part_moves_to_the_dropped_point() {
+        for mut h in blocks_both() {
+            let grab = Vec3::new(160.0, 30.0, 10.0);
+            let a = screen(&mut h, grab);
+            let b = a + egui::vec2(60.0, 25.0);
+            let before = world(&h, "Plate");
+            let (grabbed, want) = dropped(&h, a, b);
+            drag(&mut h, a, b);
+            let local = apply_point(&solidcraft_engine::doc::mat_inverse(&before).unwrap(), grabbed);
+            let got = apply_point(&world(&h, "Plate"), local);
+            assert!(got.dist(want) < 1e-6, "{got:?} != {want:?}");
+        }
+    }
+
+    /// A Mated part slides in the mate's plane: its height (the plane's normal) is unchanged.
+    #[test]
+    fn r163_a_mated_part_slides_only_in_plane() {
+        for mut h in blocks_both() {
+            let p = json!({"type": "mate", "a": face(&h, "A", [50.0, 25.0, 20.0]), "b": face(&h, "B", [50.0, 95.0, 7.0])});
+            run(&mut h, "constraint.create", p);
+            h.frames(2);
+            let before = world(&h, "B");
+            let grab = apply_point(&before, Vec3::new(50.0, 95.0, 27.0));
+            let a = screen(&mut h, grab);
+            let b = a + egui::vec2(-80.0, 40.0);
+            press_and_move(&mut h, a, b);
+            assert!(h.app.viewport.joint_drag.is_some(), "the drag reaches through the Mate");
+            release(&mut h, b);
+            let after = world(&h, "B");
+            assert!((after[3][2] - before[3][2]).abs() < 1e-9, "the mate's normal component is unchanged: {before:?} -> {after:?}");
+            let moved = Vec3::new(after[3][0] - before[3][0], after[3][1] - before[3][1], 0.0);
+            assert!(moved.len() > 5.0, "B slid in the plane: {moved:?}");
+            let report = run(&mut h, "constraint.list", json!({}));
+            assert!(report.to_string().contains("\"ok\""), "the Mate still holds: {report}");
+        }
+    }
+
+    /// An Inserted pin only turns on (and, with an Insert, keeps) its axis.
+    #[test]
+    fn r163_an_inserted_pin_turns_only_on_its_axis() {
+        for mut h in blocks_both() {
+            let plate = occ(&h, "Plate");
+            run(&mut h, "occurrence.ground", json!({"occurrence": plate, "grounded": true}));
+            let p = json!({"type": "insert", "a": {"occurrence": "Plate", "edge": [200.0, 0.0, 10.0]}, "b": {"occurrence": "Pin", "edge": [310.0, 0.0, 50.0]}});
+            run(&mut h, "constraint.create", p);
+            h.frames(2);
+            let axis_point = |h: &Harness| apply_point(&world(h, "Pin"), Vec3::new(300.0, 0.0, 50.0));
+            let axis_dir = |h: &Harness| solidcraft_engine::doc::apply_vector(&world(h, "Pin"), Vec3::Z);
+            let (p0, d0) = (axis_point(&h), axis_dir(&h));
+            let before = world(&h, "Pin");
+            let grab = apply_point(&before, Vec3::new(310.0, 0.0, 80.0));
+            let a = screen(&mut h, grab);
+            let b = a + egui::vec2(30.0, 60.0);
+            press_and_move(&mut h, a, b);
+            assert!(h.app.viewport.joint_drag.is_some(), "the drag reaches through the Insert");
+            release(&mut h, b);
+            assert!(axis_point(&h).dist(p0) < 1e-9 && axis_dir(&h).dist(d0) < 1e-9, "the axis stays: {:?} {:?}", axis_point(&h), axis_dir(&h));
+            assert!(world(&h, "Pin") != before, "the pin turned");
+        }
+    }
+
+    /// A grounded part does not move; the status bar names what holds it, as it does for a part
+    /// its constraints hold fully.
+    #[test]
+    fn r163_a_grounded_or_fully_held_part_stays_and_says_why() {
+        for mut h in blocks_both() {
+            let before = world(&h, "A");
+            let a = screen(&mut h, Vec3::new(50.0, 25.0, 20.0));
+            drag(&mut h, a, a + egui::vec2(60.0, 30.0));
+            assert_eq!(world(&h, "A"), before, "a grounded part stays");
+            let status = h.app.status.clone().map(|s| s.0).unwrap_or_default();
+            assert!(status.contains("A:1") && status.contains("grounded"), "{status}");
+            // B fully held: Mate top/bottom, Flush front, Flush right (each picked where B is).
+            type Pick = fn(&Harness) -> Value;
+            let picks: [Pick; 3] = [
+                |h| json!({"type": "mate", "a": face(h, "A", [50.0, 25.0, 20.0]), "b": face(h, "B", [50.0, 95.0, 7.0])}),
+                |h| json!({"type": "mate", "solution": "flush", "a": face(h, "A", [50.0, 0.0, 10.0]), "b": face(h, "B", [50.0, 70.0, 17.0])}),
+                |h| json!({"type": "mate", "solution": "flush", "a": face(h, "A", [100.0, 25.0, 10.0]), "b": face(h, "B", [100.0, 95.0, 17.0])}),
+            ];
+            for pick in picks {
+                let p = pick(&h);
+                run(&mut h, "constraint.create", p);
+                h.frames(2);
+            }
+            let held = world(&h, "B");
+            let a = screen(&mut h, apply_point(&held, Vec3::new(50.0, 95.0, 27.0)));
+            drag(&mut h, a, a + egui::vec2(60.0, 30.0));
+            assert_eq!(world(&h, "B"), held, "a fully held part stays");
+            let status = h.app.status.clone().map(|s| s.0).unwrap_or_default();
+            assert!(status.contains("B:1") && status.contains("Mate:1"), "the status names what holds it: {status}");
+        }
     }
 }

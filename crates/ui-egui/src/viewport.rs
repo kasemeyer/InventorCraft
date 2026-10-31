@@ -3559,6 +3559,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             && !crate::occurrence_drag::start(app, &proj, a)
             && !crate::joint_drag::start(app, &proj, a)
         {
+            crate::joint_drag::say_refused(app, &proj, a);
             crate::drag_extrude::press(app, &proj, a);
         }
         if resp.dragged_by(egui::PointerButton::Primary)
