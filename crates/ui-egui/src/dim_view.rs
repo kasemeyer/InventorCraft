@@ -57,6 +57,48 @@ struct Edit {
     /// The last dimension a click referenced, and when: the second click of a double-click on
     /// it must not insert its name again.
     picked: Option<(String, f64)>,
+    /// The text the box opened with when it is the stored value converted to the design's
+    /// unit, and what accepting that text unchanged stores (R180, see [`box_value`]).
+    seeded: Option<(String, String)>,
+}
+
+impl Edit {
+    /// A box on parameter `param` opened with `value` (from [`box_value`]).
+    fn new(param: String, value: (String, Option<(String, String)>), at: Option<Pos2>, wait: u8) -> Self {
+        let (expr, seeded) = value;
+        Edit { param, expr, at, fresh: FRESH, wait, draft: None, live: None, selection: None, picked: None, seeded }
+    }
+
+    /// The expression the box holds: what was typed, or the stored value at full precision
+    /// while the converted text it opened with is untouched.
+    fn value(&self) -> String {
+        match &self.seeded {
+            Some((shown, stored)) if self.expr.trim() == shown => stored.clone(),
+            _ => self.expr.clone(),
+        }
+    }
+}
+
+/// What the value box opens with for parameter `param` of `doc` (R180): in a design whose length
+/// unit is not the millimetre, a plain length (bare or in mm, as dimensions were stored, or in the
+/// design's unit) shows in the design's unit with its suffix at the shown precision ("1.000 in");
+/// a formula, a name, another unit or an angle shows as authored. With a converted text comes
+/// what accepting it unchanged stores: the value at full precision in the design's unit.
+fn box_value(app: &SolveApp, doc: &solidcraft_engine::doc::Document, param: &str) -> (String, Option<(String, String)>) {
+    use solidcraft_engine::doc::expr::{Kind, length_unit_or_mm, unit_info};
+    let Some(p) = doc.param(param) else { return (String::new(), None) };
+    let design = length_unit_or_mm(&app.session.doc.units);
+    if design == "mm" || !unit_info(p.unit.trim()).is_some_and(|(k, _)| k == Kind::Length) {
+        return (p.expr.clone(), None);
+    }
+    let e = p.expr.trim();
+    let number = crate::prefs::parse_number;
+    let mm = number(e).or_else(|| e.strip_suffix("mm").and_then(number)).map(|v| (v, false));
+    let in_design = || e.strip_suffix(design).and_then(number).map(|v| (v / crate::prefs::unit_scale(design).0, true));
+    let Some((mm, authored)) = mm.or_else(in_design) else { return (p.expr.clone(), None) };
+    let shown = crate::prefs::format_length(mm, design, crate::prefs::shown_length_decimals(app));
+    let stored = if authored { e.to_string() } else { app.session.doc.length_in_design_unit(mm) };
+    (shown.clone(), Some((shown, stored)))
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -141,17 +183,15 @@ pub fn cancel() {
 /// parameter or an undo entry. Only accepting the editor executes the command on the design.
 /// A driven dimension has no value to accept, so it is added at once.
 pub fn begin_dimension(app: &mut SolveApp, entities: Vec<String>, at: Vec2) -> Result<(), String> {
-    let (param, expr, draft) = dimension_draft(app, entities, Some(at))?;
+    let (param, _, draft) = dimension_draft(app, entities, Some(at))?;
     if draft.driven {
         PLACEMENT.with(|preview| *preview.borrow_mut() = None);
         app.run("sketch.dimension", json!({"entities": draft.entities, "text_at": [at.x, at.y], "driven": true}))?;
         app.set_status("The sketch already determines that dimension, so it was added as a driven (reference) dimension", false);
         return Ok(());
     }
-    EDIT.with(|edit| {
-        *edit.borrow_mut() =
-            Some(Edit { param, expr, at: None, fresh: FRESH, wait: 10, draft: Some(draft), live: None, selection: None, picked: None })
-    });
+    let value = box_value(app, &draft.preview_doc, &param);
+    EDIT.with(|edit| *edit.borrow_mut() = Some(Edit { draft: Some(draft), ..Edit::new(param, value, None, 10) }));
     PLACEMENT.with(|preview| *preview.borrow_mut() = None);
     Ok(())
 }
@@ -164,14 +204,13 @@ pub fn begin_live(app: &mut SolveApp, entities: Vec<String>, pointer: Option<Pos
     // A midpoint pair chooses its orientation and text position before entering a value.
     // This also permits switching freely between driving and reference spans.
     let midpoint_pair = entities.len() == 2 && entities.iter().all(|id| id.starts_with("mid:"));
-    let (param, expr, draft) = dimension_draft(app, entities, None)?;
+    let (param, _, draft) = dimension_draft(app, entities, None)?;
     if draft.driven || midpoint_pair {
         return Ok(false);
     }
     let live = Some(Live { origin: pointer, moved: false, typed: false });
-    EDIT.with(|edit| {
-        *edit.borrow_mut() = Some(Edit { param, expr, at: None, fresh: FRESH, wait: 10, draft: Some(draft), live, selection: None, picked: None })
-    });
+    let value = box_value(app, &draft.preview_doc, &param);
+    EDIT.with(|edit| *edit.borrow_mut() = Some(Edit { draft: Some(draft), live, ..Edit::new(param, value, None, 10) }));
     PLACEMENT.with(|preview| *preview.borrow_mut() = None);
     Ok(true)
 }
@@ -202,20 +241,22 @@ pub fn pin(app: &SolveApp, at: Vec2) {
 /// Enter apply, the aligned length as a horizontal or vertical span, moving the picked points.
 fn move_text(app: &SolveApp, e: &mut Edit, at: Vec2) {
     let typed = e.live.is_none_or(|l| l.typed);
-    let Some(draft) = e.draft.as_mut() else { return };
+    let Some(entities) = e.draft.as_ref().map(|d| d.entities.clone()) else { return };
     if !typed
-        && let Ok((param, expr, redone)) = dimension_draft(app, draft.entities.clone(), Some(at))
+        && let Ok((param, _, redone)) = dimension_draft(app, entities, Some(at))
         && !redone.driven
     {
+        let (expr, seeded) = box_value(app, &redone.preview_doc, &param);
         if expr != e.expr {
             // Keep the new value selected, so typing still replaces it.
             e.fresh = FRESH;
         }
-        (e.param, e.expr, *draft) = (param, expr, redone);
+        (e.param, e.expr, e.seeded, e.draft) = (param, expr, seeded, Some(redone));
         return;
     }
+    let expr = e.value();
+    let Some(draft) = e.draft.as_mut() else { return };
     draft.at = Some(at);
-    let expr = e.expr.clone();
     reevaluate(app, draft, &expr);
 }
 
@@ -406,11 +447,8 @@ fn open_editor(app: &mut SolveApp, id: Option<String>) -> bool {
         app.set_status("A driven dimension measures the sketch; it has no value to edit", false);
         return true;
     };
-    let expr = app.session.doc.param(&param).map(|p| p.expr.clone()).unwrap_or_default();
-    EDIT.with(|e| {
-        *e.borrow_mut() =
-            Some(Edit { param, expr, at: Some(d.text.center()), fresh: FRESH, wait: 0, draft: None, live: None, selection: None, picked: None })
-    });
+    let value = box_value(app, &app.session.doc, &param);
+    EDIT.with(|e| *e.borrow_mut() = Some(Edit::new(param, value, Some(d.text.center()), 0)));
     true
 }
 
@@ -498,9 +536,9 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
                 move_text(app, e, at);
             }
         }
+        let expr = e.value();
         let draft = e.draft.as_mut()?;
-        if e.expr != draft.checked_expr {
-            let expr = e.expr.clone();
+        if expr != draft.checked_expr {
             reevaluate(app, draft, &expr);
         }
         Some((e.param.clone(), draft.clone()))
@@ -657,11 +695,8 @@ fn pos2_mid_top(r: Rect) -> Pos2 {
 /// Edit a dimension's value in place by its parameter (a new dimension from the Dimension tool:
 /// its value is selected, so typing replaces it).
 pub fn edit_param(app: &SolveApp, param: &str) {
-    let expr = app.session.doc.param(param).map(|p| p.expr.clone()).unwrap_or_default();
-    EDIT.with(|e| {
-        *e.borrow_mut() =
-            Some(Edit { param: param.to_string(), expr, at: None, fresh: FRESH, wait: 10, draft: None, live: None, selection: None, picked: None })
-    });
+    let value = box_value(app, &app.session.doc, param);
+    EDIT.with(|e| *e.borrow_mut() = Some(Edit::new(param.to_string(), value, None, 10)));
 }
 
 /// A lone value such as `10`, `-3`, `12.5`, `2,5`, `10 mm` or `45 deg`: a number, optionally
@@ -815,11 +850,12 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
     e.fresh = e.fresh.saturating_sub(1);
     match done {
         Some(true) => {
+            let value = e.value();
             let result = if let Some(draft) = &e.draft {
                 if draft.valid(app) {
                     draft
-                        .evaluate(app, &e.expr)
-                        .and_then(|_| app.run("sketch.dimension", draft.params(&e.expr)).map_err(|err| shown_error("sketch.dimension", &err)))
+                        .evaluate(app, &value)
+                        .and_then(|_| app.run("sketch.dimension", draft.params(&value)).map_err(|err| shown_error("sketch.dimension", &err)))
                 } else {
                     Err("The sketch changed; place the dimension again".into())
                 }
@@ -831,7 +867,7 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
                     .and_then(|p| solidcraft_engine::doc::expr::unit_info(&p.unit))
                     .map(|(k, _)| k)
                     .unwrap_or(solidcraft_engine::doc::expr::Kind::Unitless);
-                let expression = app.session.doc.with_design_unit(&e.expr, kind);
+                let expression = app.session.doc.with_design_unit(&value, kind);
                 app.run("parameters.change", json!({"name": e.param, "expression": expression})).map_err(|err| shown_error("parameters.change", &err))
             };
             match result {
@@ -1118,6 +1154,123 @@ mod tests {
         assert_eq!(h.app.session.doc.to_json(), baseline);
         assert_eq!(h.app.session.undo.len(), undo);
         cancel();
+    }
+
+    /// The open value box: its text, and whether all of it is selected (typing replaces it).
+    fn box_text_selected() -> Option<(String, bool)> {
+        EDIT.with(|e| {
+            e.borrow().as_ref().map(|e| {
+                let n = e.expr.chars().count();
+                let all = e.selection.is_some_and(|r| {
+                    let (a, b) = (r.primary.index.0, r.secondary.index.0);
+                    a.min(b) == 0 && a.max(b) == n
+                });
+                (e.expr.clone(), all)
+            })
+        })
+    }
+
+    /// The one sketch dimension's parameter: (name, expression).
+    fn the_dimension(h: &crate::scenario::Harness) -> (String, String) {
+        let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+        let param = sk.constraints.iter().find_map(|c| c.param.clone()).expect("the dimension was added");
+        let expr = h.app.session.doc.param(&param).map(|p| p.expr.clone()).unwrap();
+        (param, expr)
+    }
+
+    /// Double-click the dimension of `param`; the box opens (`expect`: its text, all selected).
+    fn open_on(h: &mut crate::scenario::Harness, param: &str, expect: &str) {
+        h.frames(2);
+        crate::test_support::clicks_expire(h);
+        h.step(&json!({"click":{"dimension":param},"double":true})).unwrap();
+        h.frames(2);
+        assert_eq!(box_text_selected(), Some((expect.to_string(), true)), "the box opens on the value in the document unit, selected");
+    }
+
+    fn type_enter(h: &mut crate::scenario::Harness, text: &str) {
+        h.step(&json!({"text":text})).unwrap();
+        h.step(&json!({"key":"Enter"})).unwrap();
+        h.frames(2);
+        assert!(!editing(), "Enter accepts {text}: {:?}", h.app.status);
+    }
+
+    fn line_length(h: &crate::scenario::Harness) -> f64 {
+        let st = h.app.session.world_state();
+        let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        sk.constraints.iter().find_map(|c| c.param.as_ref().and(c.kind.value())).unwrap()
+    }
+
+    /// R180: in an inch part the sketch dimension box holds the value in inches ("4.000 in",
+    /// selected), never the stored millimetres; a click-placed dimension stores "4 in"; a bare
+    /// typed number means inches; another unit is kept; a legacy "25.4 mm" opens as "1.000 in"
+    /// and is re-stored in inches. Both profiles; a millimetre part keeps its format.
+    #[test]
+    fn an_inch_part_edits_sketch_dimensions_in_inches() {
+        for inventor in [false, true] {
+            cancel();
+            let mut h =
+                if inventor { crate::test_support::inventor(solidcraft_engine::doc::DocumentKind::Part) } else { crate::scenario::Harness::new() };
+            h.app.home.open = false;
+            crate::documents::new_document(&mut h.app, solidcraft_engine::doc::DocumentKind::Part, Some("in"));
+            h.frames(3);
+            assert_eq!(h.app.session.doc.units, "in");
+            h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+            h.app.run("sketch.line", json!({"points":[[10,10],[111.6,10]],"infer":false})).unwrap();
+            h.call("ui.view", json!({"view":"top"}));
+            h.step(&json!({"start":"sketch.dimension"})).unwrap();
+            h.step(&json!({"click":{"sketch":[60,10]}})).unwrap();
+            assert!(editing(), "{:?}", h.app.status);
+            h.frames(2);
+            assert_eq!(box_text_selected(), Some(("4.000 in".to_string(), true)), "inventor: {inventor}");
+            h.step(&json!({"key":"Enter"})).unwrap();
+            h.frames(2);
+            assert!(!editing(), "{:?}", h.app.status);
+            h.step(&json!({"key":"Escape"})).unwrap();
+            let (param, expr) = the_dimension(&h);
+            assert_eq!(expr, "4 in", "a click-placed dimension stores the document unit");
+            open_on(&mut h, &param, "4.000 in");
+            type_enter(&mut h, "5");
+            assert_eq!(the_dimension(&h).1, "5 in");
+            assert!((line_length(&h) - 127.0).abs() < 1e-6, "{}", line_length(&h));
+            open_on(&mut h, &param, "5.000 in");
+            type_enter(&mut h, "100 mm");
+            assert_eq!(the_dimension(&h).1, "100 mm", "another unit is kept as typed");
+            // A dimension stored in millimetres (an older document) opens in inches...
+            h.app.run("parameters.change", json!({"name":param,"expression":"25.4 mm"})).unwrap();
+            open_on(&mut h, &param, "1.000 in");
+            // ...and accepting it re-stores it in inches.
+            h.step(&json!({"key":"Enter"})).unwrap();
+            h.frames(2);
+            assert_eq!(the_dimension(&h).1, "1 in");
+            assert!((line_length(&h) - 25.4).abs() < 1e-6);
+            cancel();
+        }
+    }
+
+    #[test]
+    fn a_millimetre_part_edits_sketch_dimensions_as_before() {
+        for inventor in [false, true] {
+            cancel();
+            let mut h =
+                if inventor { crate::test_support::inventor(solidcraft_engine::doc::DocumentKind::Part) } else { crate::scenario::Harness::new() };
+            h.app.home.open = false;
+            h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+            h.app.run("sketch.line", json!({"points":[[10,10],[35.4,10]],"infer":false})).unwrap();
+            h.call("ui.view", json!({"view":"top"}));
+            h.step(&json!({"start":"sketch.dimension"})).unwrap();
+            h.step(&json!({"click":{"sketch":[20,10]}})).unwrap();
+            h.frames(2);
+            assert_eq!(box_text_selected(), Some(("25.4 mm".to_string(), true)), "inventor: {inventor}");
+            h.step(&json!({"key":"Enter"})).unwrap();
+            h.frames(2);
+            h.step(&json!({"key":"Escape"})).unwrap();
+            let (param, expr) = the_dimension(&h);
+            assert_eq!(expr, "25.4 mm");
+            open_on(&mut h, &param, "25.4 mm");
+            type_enter(&mut h, "30");
+            assert_eq!(the_dimension(&h).1, "30");
+            cancel();
+        }
     }
 
     #[test]
