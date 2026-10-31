@@ -1359,7 +1359,11 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, label
     let joints: Vec<(u64, String, JointKind, bool)> =
         app.session.doc.assembly.joints.iter().map(|j| (j.id, j.name.clone(), j.kind, j.suppressed)).collect();
     app.tree.picked_joints.retain(|p| joints.iter().any(|j| j.0 == *p));
-    if joints.is_empty() && !always {
+    // The constraints first, sorted by id (spec §6.4), then the joints as before.
+    let constraints = crate::browser::relationship_constraints(app);
+    app.tree.picked_constraints.retain(|p| constraints.contains(p));
+    let empty = joints.is_empty() && constraints.is_empty();
+    if empty && !always {
         return;
     }
     // Drawn like every other browser node (its fold, eye and rows publish `fold:Joints`,
@@ -1371,7 +1375,8 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, label
     let r = draw_row(
         ui,
         ui.id().with(key),
-        &Row { depth, fold: Some(open), eye: Some(folder_shown), icon: "folder", label, dim: !folder_shown, ..Default::default() },
+        // No expander while it has no rows (an empty Relationships).
+        &Row { depth, fold: (!empty).then_some(open), eye: Some(folder_shown), icon: "folder", label, dim: !folder_shown, ..Default::default() },
     );
     if r.eye {
         crate::browser::toggle_folder(app, key);
@@ -1380,6 +1385,9 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, label
     }
     if !open {
         return;
+    }
+    for id in constraints {
+        crate::browser::constraint_row(app, ui, id, 0, depth + 1, !folder_shown);
     }
     let mut dialog: Option<Dialog> = None;
     for (id, name, kind, suppressed) in joints {
@@ -1432,6 +1440,7 @@ pub fn pick_joint(app: &mut SolveApp, id: u64, add: bool) {
     if !add {
         let was = app.tree.picked_joints == [id];
         app.tree.picked_joints.clear();
+        app.tree.picked_constraints.clear();
         app.tree.picked_canvases.clear();
         app.tree.picked_components.clear();
         let _ = app.run("select.clear", json!({}));

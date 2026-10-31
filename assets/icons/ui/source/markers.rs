@@ -118,3 +118,30 @@ pub(crate) fn dimension_arrow(painter: &egui::Painter, t: Pos2, back: Pos2, col:
     let n = vec2(-d.y, d.x);
     painter.add(egui::Shape::convex_polygon(vec![t, t - d * 9.0 + n * 3.0, t - d * 9.0 - n * 3.0], col, Stroke::NONE));
 }
+
+/// A component's constrained status, drawn before its browser label (spec §6.4, R139): a filled
+/// disc when it cannot move (grounded or fully constrained), a half-filled one while it is partly
+/// held, a ring when nothing holds it. Our own mark, not a vendor character.
+pub(crate) fn status(painter: &egui::Painter, r: egui::Rect, name: &str, col: Color32) {
+    let (c, radius) = (r.center(), r.width().min(r.height()) / 2.0 - 1.0);
+    let ring = Stroke::new(1.2, col);
+    match name {
+        "status_full" => {
+            painter.circle_filled(c, radius, col);
+        }
+        "status_half" => {
+            // The left half filled: a convex half-disc under the ring.
+            let half: Vec<Pos2> = (0..=16)
+                .map(|k| {
+                    let a = std::f32::consts::FRAC_PI_2 + std::f32::consts::PI * (k as f32 / 16.0);
+                    c + vec2(radius * a.cos(), -radius * a.sin())
+                })
+                .collect();
+            painter.add(egui::Shape::convex_polygon(half, col, Stroke::NONE));
+            painter.circle_stroke(c, radius, ring);
+        }
+        _ => {
+            painter.circle_stroke(c, radius, ring);
+        }
+    }
+}

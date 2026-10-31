@@ -120,6 +120,9 @@ pub struct Item {
     pub children: Vec<Item>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub swatch: Option<[u8; 3]>,
+    /// A check-mark entry (a profile's `menu_labels` "Grounded"): drawn checked or unchecked.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checked: Option<bool>,
 }
 
 impl Item {
@@ -137,6 +140,7 @@ impl Item {
             params: None,
             children: Vec::new(),
             swatch: None,
+            checked: None,
         }
     }
     fn heading(label: &str) -> Item {
@@ -149,6 +153,7 @@ impl Item {
             params: None,
             children: Vec::new(),
             swatch: None,
+            checked: None,
         }
     }
     fn is_sep(&self) -> bool {
@@ -191,6 +196,19 @@ pub(crate) fn cmd(app: &SolveApp, id: &str, label: &str) -> Item {
         params: None,
         children: Vec::new(),
         swatch: None,
+        checked: None,
+    }
+}
+
+/// Ground's words: the profile's `menu_labels` entry as a check-mark item ("Grounded", checked
+/// while grounded), else Ground / Unground.
+fn ground_label(app: &SolveApp, item: &mut Item, grounded: bool) {
+    match crate::profile::active(app).menu_labels.get("occurrence.ground") {
+        Some(id) => {
+            item.label = crate::i18n::tr(id).to_string();
+            item.checked = Some(grounded);
+        }
+        None => item.label = if grounded { "Unground" } else { "Ground" }.into(),
     }
 }
 
@@ -205,6 +223,7 @@ pub(crate) fn act(id: &str, label: &str, icon: &str) -> Item {
         params: None,
         children: Vec::new(),
         swatch: None,
+        checked: None,
     }
 }
 
@@ -824,7 +843,7 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
                 item.enabled = app.session.active_occurrence_path.as_deref() != Some(path);
             }
             "occurrence.ground" => {
-                item.label = if placement.grounded { "Unground" } else { "Ground" }.into();
+                ground_label(app, item, placement.grounded);
                 item.params = Some(json!({"occurrence": placement.occurrence, "grounded": !placement.grounded}));
             }
             "ui.moveOccurrence" => {
@@ -905,7 +924,9 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
         let grounded = occ.is_some_and(|o| o.grounded);
         let oid = occ.map(|o| o.id).unwrap_or(0);
         v.push(act("ui.activate", "Activate", "component").with(json!({ "component": id })).on(!active));
-        v.push(cmd(app, "occurrence.ground", if grounded { "Unground" } else { "Ground" }).with(json!({ "occurrence": oid, "grounded": !grounded })));
+        let mut ground = cmd(app, "occurrence.ground", "Ground").with(json!({ "occurrence": oid, "grounded": !grounded }));
+        ground_label(app, &mut ground, grounded);
+        v.push(ground);
         v.push(
             act("ui.moveOccurrence", "Move/Copy", "move")
                 .key("M")
@@ -2227,7 +2248,7 @@ fn kit_item(item: &Item, lit: bool) -> crate::ui_kit::MenuItem<'_> {
         enabled: item.enabled,
         highlighted: lit,
         danger: item.icon == "delete",
-        checked: (item.shortcut == "current").then_some(true),
+        checked: item.checked.or((item.shortcut == "current").then_some(true)),
         swatch: item.swatch.map(|c| Color32::from_rgb(c[0], c[1], c[2])),
         submenu: !item.children.is_empty(),
     }

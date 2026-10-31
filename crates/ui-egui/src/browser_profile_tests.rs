@@ -74,7 +74,8 @@ fn inventor_empty_assembly_draws_relationships() {
     h.frames(2);
     let labels = labels();
     assert_eq!(labels[1..4], ["Representations", "Relationships", "Origin"], "{labels:?}");
-    assert!(crate::scenario::handle_at("fold:Relationships").is_some());
+    // Updated by design (Plan E-2 Task 4, spec §6.4): no expander until the first constraint.
+    assert!(crate::scenario::handle_at("fold:Relationships").is_none());
 }
 
 #[test]

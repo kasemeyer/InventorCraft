@@ -85,6 +85,8 @@ thread_local! {
     /// (`ui.at {browser | chevron}`, `ui.browser`).
     static DRAWN: std::cell::RefCell<Vec<(String, Rect, Option<Rect>, Option<bool>)>> = const { std::cell::RefCell::new(Vec::new()) };
     static OCCURRENCES: std::cell::RefCell<Vec<(Vec<u64>, String, Rect, bool)>> = const { std::cell::RefCell::new(Vec::new()) };
+    /// The constraint rows drawn this frame, in order.
+    static CONSTRAINTS: std::cell::RefCell<Vec<DrawnConstraint>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 /// The rows on screen: (label, row rect, fold arrow area, open).
@@ -124,6 +126,8 @@ pub struct TreeState {
     pub picked_canvases: Vec<u64>,
     /// Joints picked in the tree (a hidden one shows highlighted while it is picked).
     pub picked_joints: Vec<u64>,
+    /// Constraints picked in the tree: each one's three rows draw selected.
+    pub picked_constraints: Vec<u64>,
     /// Folders picked in the feature history (features use the engine selection).
     pub picked_timeline_groups: Vec<u64>,
     /// Last feature-history item clicked, for Shift ranges (`f:<id>` or `g:<id>`).
@@ -359,7 +363,10 @@ pub(crate) struct Row<'a> {
     pub(crate) color: Option<Color32>,
     /// Component rows: is it the active one?
     pub(crate) radio: Option<bool>,
-    /// Trailing badges: "lock", "pin".
+    /// A leading status marker drawn before the label (`status_full`, `status_half`,
+    /// `status_empty`: a component's constrained status, R139).
+    pub(crate) marker: Option<&'static str>,
+    /// Trailing badges: "lock", "pin", "error", "limit", "suppressed".
     pub(crate) badges: &'a [&'a str],
     /// Lit by the selection or the 3D view's pointer: the item's own row, or a row leading to it.
     pub(crate) mark: Mark,
@@ -486,6 +493,12 @@ pub(crate) fn draw_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
         icons::paint_icon(ui.painter(), ir, row.icon, if row.dim { DIM_ICON_OPACITY } else { 1.0 });
         x += 21.0;
     }
+    if let Some(marker) = row.marker {
+        let mr = Rect::from_center_size(pos2(x + 5.0, cy), vec2(10.0, 10.0));
+        icons::markers::status(ui.painter(), mr, marker, if row.dim { t.text_dim } else { t.text });
+        crate::scenario::publish_handle(&format!("marker:{marker}:{}", row.label), mr.center());
+        x += 15.0;
+    }
     let col =
         if row.selected { crate::theme::TabAccent::current(ui.ctx()).ink } else { row.color.unwrap_or(if row.dim { t.text_dim } else { t.text }) };
     let label_display = if row.name { crate::i18n::tr_name(row.label) } else { crate::i18n::tr_dyn(row.label) };
@@ -564,6 +577,7 @@ fn click_select(app: &mut SolveApp, ui: &egui::Ui, key: String, sel: Option<Sel>
     } else {
         app.tree.picked_components.clear();
         app.tree.picked_joints.clear();
+        app.tree.picked_constraints.clear();
         let _ = app.run("select.set", json!({ "items": [sel] }));
     }
 }
@@ -820,6 +834,7 @@ pub fn browser(app: &mut SolveApp, ui: &mut egui::Ui) {
     app.tree.order_prev = std::mem::take(&mut app.tree.order);
     DRAWN.with(|d| d.borrow_mut().clear());
     OCCURRENCES.with(|d| d.borrow_mut().clear());
+    CONSTRAINTS.with(|d| d.borrow_mut().clear());
     let mut acts = Actions::default();
     let stacked = crate::timeline_left::stacked(app);
     let container =
@@ -1112,7 +1127,14 @@ fn component_rows(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, depth: usize, 
     let grounded = app.session.doc.occurrence_of(id).is_some_and(|o| o.grounded);
     let faded = app.session.active_component != 0 && !app.session.doc.component_within(id, app.session.active_component) && !active;
     let name = component_name(app, id);
-    let badges: &[&str] = if grounded { &["pin"] } else { &[] };
+    // A placed component's status (its first placement), as its placement rows show it.
+    let placed = app.session.doc.occurrence_of(id).map(|o| o.id).filter(|_| id != 0);
+    let mut badges: Vec<&str> = if grounded { vec!["pin"] } else { Vec::new() };
+    if placed.is_some_and(|o| occurrence_sick(app, o)) {
+        badges.push("error");
+    }
+    let marker = placed.filter(|_| shows_status(app)).map(|o| status_marker(app, o));
+    let badges = badges.as_slice();
     let row = Row {
         depth,
         fold: Some(open),
@@ -1123,6 +1145,7 @@ fn component_rows(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, depth: usize, 
         selected: app.tree.picked_components.contains(&id),
         dim: faded,
         radio: Some(active),
+        marker,
         badges,
         // The design holds everything the tree lists.
         mark: if id == 0 && acts.lit.any() { Mark::Branch } else { Mark::None },
@@ -1208,6 +1231,11 @@ fn component_rows(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, depth: usize, 
         folder_rows(app, ui, id, folder, d, acts);
     }
     features::rows(app, ui, id, &[], d, acts);
+    if let Some(o) = placed {
+        for c in constraints_on(app, o) {
+            constraint_row(app, ui, c, o, d, false);
+        }
+    }
     component_children(app, ui, id, d, acts);
 }
 
@@ -1259,7 +1287,13 @@ fn occurrence_rows(app: &mut SolveApp, ui: &mut egui::Ui, path: Vec<u64>, depth:
     let own_visible = !app.session.occurrence_hidden(&path);
     let selected = app.session.selection.contains(&Sel::Occurrence { path: path.clone() });
     let faded = app.session.active_occurrence_path.as_ref().is_some_and(|p| !path.starts_with(p) && !p.starts_with(&path));
-    let badges: &[&str] = if placement.grounded { &["pin"] } else { &[] };
+    let mut badges: Vec<&str> = if placement.grounded { vec!["pin"] } else { Vec::new() };
+    // A sick or lost constraint on it: the problem badge after the pin; the marker stays its DOF.
+    if occurrence_sick(app, placement.occurrence) {
+        badges.push("error");
+    }
+    let badges = badges.as_slice();
+    let marker = shows_status(app).then(|| status_marker(app, placement.occurrence));
     let label = crate::dialogs_part_size::browser_label(app, placement.component, &placement.name);
     app.tree.order.push(key.clone());
     let r = draw_row(
@@ -1275,6 +1309,7 @@ fn occurrence_rows(app: &mut SolveApp, ui: &mut egui::Ui, path: Vec<u64>, depth:
             selected,
             dim: faded || !visible,
             radio: Some(active),
+            marker,
             badges,
             mark: acts.lit.placement(&app.session.doc, &path, placement.component),
             ..Default::default()
@@ -1341,6 +1376,10 @@ fn occurrence_rows(app: &mut SolveApp, ui: &mut egui::Ui, path: Vec<u64>, depth:
         occurrence_origin_rows(app, ui, placement.occurrence, depth + 1);
     }
     features::rows(app, ui, placement.component, &path, depth + 1, acts);
+    // Its constraints, after its own folders (spec §6.4).
+    for c in constraints_on(app, placement.occurrence) {
+        constraint_row(app, ui, c, placement.occurrence, depth + 1, faded);
+    }
     let children = model_children(app, placement.component);
     if path.len() < 64 {
         for occurrence in children {
@@ -1764,6 +1803,7 @@ fn canvas_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut A
                 app.tree.picked_canvases.clear();
                 app.tree.picked_components.clear();
                 app.tree.picked_joints.clear();
+                app.tree.picked_constraints.clear();
                 let _ = app.run("select.clear", json!({}));
             }
             if selected {
@@ -2612,3 +2652,206 @@ mod browser_profile_tests;
 #[cfg(test)]
 #[path = "browser_history_tests.rs"]
 mod browser_history_tests;
+
+#[cfg(test)]
+#[path = "browser_constraint_tests.rs"]
+mod constraint_tests;
+
+// ---------------------------------------------------------------------------------------------
+// Constraint rows and component status (Plan E-2 Task 4, spec §6.4)
+// ---------------------------------------------------------------------------------------------
+
+/// A constraint row as drawn this frame (tests, automation).
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct DrawnConstraint {
+    pub(crate) id: u64,
+    /// The occurrence it is drawn under; 0 = Relationships.
+    pub(crate) under: u64,
+    pub(crate) label: String,
+    pub(crate) icon: String,
+    pub(crate) color: Option<Color32>,
+    pub(crate) dim: bool,
+    pub(crate) badges: Vec<String>,
+    pub(crate) tip: Option<String>,
+    pub(crate) selected: bool,
+}
+
+/// The constraint rows drawn in the last frame, in order.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn drawn_constraints() -> Vec<DrawnConstraint> {
+    CONSTRAINTS.with(|d| d.borrow().clone())
+}
+
+/// Every constraint, sorted by id: Relationships' rows.
+pub(crate) fn relationship_constraints(app: &SolveApp) -> Vec<u64> {
+    let mut ids: Vec<u64> = app.session.constraint_report.rows.iter().map(|r| r.id).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    ids
+}
+
+/// The constraints whose picks name `occurrence`, sorted by id: the rows under its component.
+pub(crate) fn constraints_on(app: &SolveApp, occurrence: u64) -> Vec<u64> {
+    let mut ids: Vec<u64> = app.session.constraint_report.rows.iter().filter(|r| r.occurrences.contains(&occurrence)).map(|r| r.id).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    ids
+}
+
+/// The rows drawn for constraints, in draw order: (constraint id, the occurrence it is under,
+/// 0 = Relationships). Relationships (the profile's `joints` root node) lists every constraint;
+/// each placement then lists its own, in browser order. Folding is ignored: what the open tree
+/// draws.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn constraint_rows(app: &SolveApp) -> Vec<(u64, u64)> {
+    fn walk(app: &SolveApp, component: u64, depth: usize, out: &mut Vec<(u64, u64)>) {
+        for o in model_children(app, component) {
+            out.extend(constraints_on(app, o).into_iter().map(|c| (c, o)));
+            let child = app.session.doc.occurrences.iter().find(|x| x.id == o).map(|x| x.component);
+            if let Some(child) = child.filter(|_| depth < 64) {
+                walk(app, child, depth + 1, out);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for node in root_order(app) {
+        match node {
+            crate::profile::RootNode::Joints => out.extend(relationship_constraints(app).into_iter().map(|c| (c, 0))),
+            crate::profile::RootNode::Components => walk(app, 0, 0, &mut out),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Status markers show in an assembly, and in any design that has constraints.
+fn shows_status(app: &SolveApp) -> bool {
+    app.session.doc.kind == solidcraft_engine::doc::DocumentKind::Assembly || !app.session.doc.assembly.constraints.is_empty()
+}
+
+/// A sick or lost constraint holds this occurrence (R141).
+fn occurrence_sick(app: &SolveApp, occurrence: u64) -> bool {
+    app.session.constraint_report.occurrences.iter().any(|o| o.id == occurrence && o.status == solidcraft_engine::constraints::OccurrenceStatus::Sick)
+}
+
+/// An occurrence's constrained-status marker, from its `Report.occurrences` row (R146):
+/// `status_full` when grounded or no freedom is left; `status_empty` when nothing holds it (6
+/// free, `Empty`, or no row); `status_half` otherwise, including a held one not yet counted
+/// (the warm recount after an edit or undo fills it, R144).
+pub(crate) fn status_marker(app: &SolveApp, occurrence: u64) -> &'static str {
+    use solidcraft_engine::constraints::OccurrenceStatus;
+    let Some(row) = app.session.constraint_report.occurrences.iter().find(|o| o.id == occurrence) else { return "status_empty" };
+    if row.grounded || row.missing == Some(0) {
+        "status_full"
+    } else if row.missing == Some(6) || row.status == OccurrenceStatus::Empty {
+        "status_empty"
+    } else {
+        "status_half"
+    }
+}
+
+/// A constraint row's problem tooltip, or None for Ok, Redundant and Suppressed (R110, R161).
+pub(crate) fn status_tip(status: &solidcraft_engine::doc::constraints::ConstraintStatus) -> Option<String> {
+    use crate::i18n::{format, tr};
+    use solidcraft_engine::doc::constraints::ConstraintStatus as S;
+    match status {
+        S::Ok | S::Redundant | S::Suppressed => None,
+        S::Unsolved => Some(tr("ui.constraint.tip_unsolved").to_string()),
+        S::Lost { reason } => Some(format("ui.constraint.tip_lost", &[("reason", reason)])),
+        S::Sick { gap_mm, gap_deg, with } => {
+            // A stuck loop has no number to give (R161).
+            let off = if gap_mm.is_finite() && gap_deg.is_finite() {
+                format("ui.constraint.tip_sick", &[("mm", &std::format!("{gap_mm:.3}")), ("deg", &std::format!("{gap_deg:.3}"))])
+            } else {
+                tr("ui.constraint.tip_stuck").to_string()
+            };
+            Some(if with.is_empty() { off } else { std::format!("{off} {}", format("ui.constraint.tip_with", &[("names", &with.join(", "))])) })
+        }
+    }
+}
+
+/// A non-zero offset as the tooltip gives it: document units, three decimals; degrees for an
+/// Angle.
+fn value_tip(app: &SolveApp, row: &solidcraft_engine::constraints::Row) -> String {
+    let value = crate::dialogs_constraint::value_text(row.kind.is_angle(), row.offset, &crate::dialogs_constraint::units(app));
+    crate::i18n::format("ui.constraint.tip_value", &[("value", &value)])
+}
+
+/// One constraint's row under Relationships (`under` 0) or under a component's placement: the
+/// type icon and its name; problem, suppressed and limit badges; the status and value in its
+/// tooltip. A click picks the constraint, which lights all three of its rows.
+pub(crate) fn constraint_row(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, under: u64, depth: usize, faded: bool) {
+    use solidcraft_engine::doc::constraints::ConstraintStatus as S;
+    let t = Tokens::get();
+    let Some(row) = app.session.constraint_report.rows.iter().find(|r| r.id == id).cloned() else { return };
+    let problem = matches!(row.status, S::Sick { .. } | S::Lost { .. } | S::Unsolved);
+    let suppressed = row.status == S::Suppressed;
+    let mut badges: Vec<&str> = Vec::new();
+    if problem {
+        badges.push("error");
+    }
+    if suppressed {
+        badges.push("suppressed");
+    }
+    if row.limited {
+        badges.push("limit");
+    }
+    let tips: Vec<String> = [status_tip(&row.status), (row.offset != 0.0).then(|| value_tip(app, &row))].into_iter().flatten().collect();
+    let tip = (!tips.is_empty()).then(|| tips.join("\n"));
+    let handle = std::format!("constraint:{id}:{under}");
+    let selected = app.tree.picked_constraints.contains(&id);
+    let icon = crate::dialogs_constraint::type_icon(row.kind);
+    let look = Row {
+        depth,
+        icon,
+        label: &row.name,
+        name: true,
+        selected,
+        dim: suppressed || faded,
+        color: problem.then_some(t.error),
+        badges: &badges,
+        handle: Some(&handle),
+        ..Default::default()
+    };
+    let r = draw_row(ui, ui.id().with(("constraint", id, under)), &look);
+    CONSTRAINTS.with(|d| {
+        d.borrow_mut().push(DrawnConstraint {
+            id,
+            under,
+            label: row.name.clone(),
+            icon: icon.to_string(),
+            color: look.color,
+            dim: look.dim,
+            badges: badges.iter().map(|b| b.to_string()).collect(),
+            tip: tip.clone(),
+            selected,
+        })
+    });
+    if let (Some(resp), Some(tip)) = (&r.resp, tip) {
+        resp.clone().on_hover_text(tip);
+    }
+    if r.clicked {
+        pick_constraint(app, id, ui.input(|i| i.modifiers.command || i.modifiers.ctrl));
+    }
+}
+
+/// A click on a constraint's row: it becomes the pick (or, with Ctrl, toggles in or out of it).
+pub(crate) fn pick_constraint(app: &mut SolveApp, id: u64, add: bool) {
+    app.tree.picked_timeline_groups.clear();
+    app.tree.timeline_anchor = None;
+    if !add {
+        let was = app.tree.picked_constraints == [id];
+        app.tree.picked_constraints.clear();
+        app.tree.picked_joints.clear();
+        app.tree.picked_canvases.clear();
+        app.tree.picked_components.clear();
+        let _ = app.run("select.clear", json!({}));
+        if !was {
+            app.tree.picked_constraints.push(id);
+        }
+    } else if app.tree.picked_constraints.contains(&id) {
+        app.tree.picked_constraints.retain(|c| *c != id);
+    } else {
+        app.tree.picked_constraints.push(id);
+    }
+}

@@ -55,6 +55,9 @@ pub struct Profile {
     pub ribbon_overflow: RibbonOverflow,
     /// Command id → compact English button text (resolved with `tr_label`).
     pub button_labels: BTreeMap<String, String>,
+    /// Command id → catalog id of a list-menu entry's label; the entry becomes a check-mark item
+    /// (Inventor's component "Grounded", checked while grounded). None: the command's own words.
+    pub menu_labels: BTreeMap<String, String>,
     pub browser: BrowserLayout,
     /// Commands the SolidCraft ribbon places that this profile deliberately leaves off, and why.
     pub omitted: BTreeMap<String, String>,
@@ -578,6 +581,7 @@ pub fn solidcraft() -> Profile {
         quick_access: false,
         ribbon_overflow: RibbonOverflow::Buttons,
         button_labels: workspace::RIBBON_LABELS.iter().map(|(id, label)| (id.to_string(), label.to_string())).collect(),
+        menu_labels: BTreeMap::new(),
         browser: BrowserLayout::default(),
         omitted: BTreeMap::new(),
         workflow: crate::profile_workflow::Workflow::default(),
@@ -611,6 +615,8 @@ struct ProfileJson {
     ribbon_overflow: RibbonOverflow,
     #[serde(default)]
     button_labels: BTreeMap<String, String>,
+    #[serde(default)]
+    menu_labels: BTreeMap<String, String>,
     #[serde(default)]
     browser: BrowserLayout,
     #[serde(default)]
@@ -765,6 +771,7 @@ pub fn parse(text: &str, base: &Profile) -> Result<Profile, String> {
         quick_access: json.quick_access,
         ribbon_overflow: json.ribbon_overflow,
         button_labels: json.button_labels,
+        menu_labels: json.menu_labels,
         browser: json.browser,
         omitted: json.omitted,
         workflow: json.workflow,
@@ -949,7 +956,7 @@ pub fn validate(profile: &Profile) -> Vec<String> {
     if profile.defaults.new_document == Some(DocumentKind::Drawing) {
         out.push("defaults.new_document: drawing is not offered; New makes a part or an assembly".into());
     }
-    for (what, map) in [("button_labels", &profile.button_labels), ("omitted", &profile.omitted)] {
+    for (what, map) in [("button_labels", &profile.button_labels), ("menu_labels", &profile.menu_labels), ("omitted", &profile.omitted)] {
         for id in map.keys().filter(|id| find_command(id).is_none()) {
             out.push(format!("{what}: {id} is not a registry command"));
         }

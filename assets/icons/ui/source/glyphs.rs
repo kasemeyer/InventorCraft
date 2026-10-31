@@ -76,6 +76,27 @@ pub(crate) fn badge(p: &egui::Painter, r: Rect, name: &str, c: Color32) {
             let d = radius * std::f32::consts::FRAC_1_SQRT_2;
             p.line_segment([pos2(centre.x - d, centre.y + d), pos2(centre.x + d, centre.y - d)], s);
         }
+        // A constraint that is sick, lost or unsolved, and a component holding one: a disc in the
+        // theme's error colour with a knocked-out exclamation mark.
+        "error" => {
+            let t = crate::theme::Tokens::get();
+            let (centre, radius) = (r.center(), r.width().min(r.height()) / 2.0 - 0.5);
+            p.circle_filled(centre, radius, t.error);
+            let ink = Stroke::new(1.6, t.panel);
+            p.line_segment([pos2(centre.x, centre.y - radius + 2.5), pos2(centre.x, centre.y + 0.8)], ink);
+            p.circle_filled(pos2(centre.x, centre.y + radius - 2.6), 0.95, t.panel);
+        }
+        // A constraint with a minimum or a maximum: a span between two stops.
+        "limit" => {
+            let (l, rt, cy) = (r.left() + 1.5, r.right() - 1.5, r.center().y);
+            p.line_segment([pos2(l, cy - 4.0), pos2(l, cy + 4.0)], s);
+            p.line_segment([pos2(rt, cy - 4.0), pos2(rt, cy + 4.0)], s);
+            p.line_segment([pos2(l + 1.5, cy), pos2(rt - 1.5, cy)], s);
+            for (tip, dir) in [(l + 1.5, 1.0), (rt - 1.5, -1.0)] {
+                p.line_segment([pos2(tip, cy), pos2(tip + 2.5 * dir, cy - 2.2)], s);
+                p.line_segment([pos2(tip, cy), pos2(tip + 2.5 * dir, cy + 2.2)], s);
+            }
+        }
         _ => {}
     }
 }

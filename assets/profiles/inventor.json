@@ -139,6 +139,7 @@
     "drawing.note.hole": "Hole and Thread", "drawing.note.text": "Text", "drawing.note.leader": "Leader Text", "drawing.centermark": "Center Mark",
     "drawing.centerline.bisector": "Centerline Bisector", "drawing.update": "Update",
     "constraint.create": "Constrain", "constraint.show": "Show", "constraint.show_sick": "Show Problems", "constraint.hide_all": "Hide All"},
+  "menu_labels": {"occurrence.ground": "profile.inventor.menu.grounded"},
   "browser": {
     "part_root": ["named_views", "bodies", "origin", "history", "canvases", "analyses", "components", "doc_settings"],
     "assembly_root": ["named_views", {"node": "joints", "always": true}, "origin", "canvases", "analyses", "bodies", "sketches", "construction", "features", "components", "doc_settings"],

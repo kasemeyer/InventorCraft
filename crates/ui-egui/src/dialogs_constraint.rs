@@ -343,7 +343,7 @@ impl ConstraintForm {
 }
 
 /// The document's length unit ("mm" in a millimetre design).
-fn units(app: &SolveApp) -> String {
+pub(crate) fn units(app: &SolveApp) -> String {
     let zero = crate::dialogs::length_default(&app.session, "0");
     let unit = zero.trim().trim_start_matches('0').trim();
     if unit.is_empty() { "mm".into() } else { unit.to_string() }
@@ -570,18 +570,23 @@ pub(crate) fn prompt(app: &SolveApp) -> Option<&'static str> {
 /// The predicted offset as the value box shows it: document units, three decimals.
 fn predicted_text(f: &ConstraintForm) -> Option<String> {
     let p = f.preview.as_ref()?.1.predicted?;
-    Some(if f.kind.is_angle() {
-        format!("{:.3} deg", p.offset)
-    } else {
-        let per_mm = match f.units.as_str() {
-            "in" => 1.0 / 25.4,
-            "cm" => 0.1,
-            "m" => 0.001,
-            "ft" => 1.0 / 304.8,
-            _ => 1.0,
-        };
-        format!("{:.3} {}", p.offset * per_mm, f.units)
-    })
+    Some(value_text(f.kind.is_angle(), p.offset, &f.units))
+}
+
+/// An offset (mm, or degrees for an angle) in `units`, three decimals ("7.000 mm", "30.000 deg"):
+/// the value box's prediction and a browser row's tooltip.
+pub(crate) fn value_text(angle: bool, offset: f64, units: &str) -> String {
+    if angle {
+        return format!("{offset:.3} deg");
+    }
+    let per_mm = match units {
+        "in" => 1.0 / 25.4,
+        "cm" => 0.1,
+        "m" => 0.001,
+        "ft" => 1.0 / 304.8,
+        _ => 1.0,
+    };
+    format!("{:.3} {units}", offset * per_mm)
 }
 
 // ---- overlay ----
