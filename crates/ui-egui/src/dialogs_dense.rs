@@ -820,11 +820,12 @@ fn extrude_sections(app: &SolveApp, ui: &mut egui::Ui, d: &mut Dialog) -> bool {
             usize::from(*all) * 2
         };
         let mut ext = cur;
-        // The extents sit at the end of the distance row, as in the capture: segments rather than
-        // a dropdown, so every extent shows; glyphs, since the words do not fit. The distance
-        // field stays in place (disabled) for To and Through All, so the buttons do not move.
-        let (typed, clicked) = ui_kit::expr_glyph_row(ui, "Distance A", distance, cur == 0, "Extents", &mut ext, &extent_glyphs());
-        enter |= typed;
+        // The extents are their own row under Direction (R203), segments as Direction's: every
+        // extent shows, as glyphs, and Distance A keeps the whole field column. The distance
+        // stays in place (disabled) for To, Through All and Between, so nothing moves.
+        let mut clicked = false;
+        form_row(ui, "Extents", |ui| clicked = ui_kit::segmented_glyphs(ui, &mut ext, &extent_glyphs(), &[]));
+        ui.add_enabled_ui(ext == 0, |ui| enter |= expr_row(ui, "Distance A", distance));
         if clicked && ext != cur {
             *all = ext == 2;
             set_to_object(&mut d.inputs, &mut d.active, ext == 1 || ext == 3);

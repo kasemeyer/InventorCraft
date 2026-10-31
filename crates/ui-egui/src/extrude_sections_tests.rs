@@ -241,40 +241,51 @@ fn boolean_row_fits_the_panel() {
 
 /// The extent buttons sit at the end of the distance row (the capture's row), after the field,
 /// and stay there with the field disabled when the extent is not a distance.
+/// The Distance field's width in points, from the accessibility tree.
+fn distance_field_width(h: &Harness, label: &str) -> f32 {
+    let tree = h.output.accesskit_update.as_ref().expect("an accessibility tree");
+    let bounds = tree
+        .nodes
+        .iter()
+        .find_map(|(_, n)| (n.role() == egui::accesskit::Role::TextInput && n.label() == Some(label)).then(|| n.bounds()).flatten())
+        .unwrap_or_else(|| panic!("{label} field drawn"));
+    (bounds.x1 - bounds.x0) as f32 / h.ctx.pixels_per_point()
+}
+
+/// The widest distance the template shows, laid out in the body font.
+fn widest_value(h: &Harness) -> f32 {
+    let font = egui::TextStyle::Body.resolve(&h.ctx.global_style());
+    h.ctx.fonts_mut(|f| f.layout_no_wrap("10.000 in".into(), font, egui::Color32::WHITE).size().x)
+}
+
+/// R203: the extents are their own row under Direction (as Direction is), and Distance A keeps
+/// the full field column, never narrower than "10.000 in"; SolidCraft's Distance too.
 #[test]
-fn extents_sit_at_the_end_of_the_distance_row() {
+fn extents_have_their_own_row_and_the_distance_keeps_its_width() {
     let mut h = extrude(true);
-    let place = |h: &Harness| {
-        let row = crate::scenario::rect_of("dialog:row:Distance A").expect("Distance A row drawn");
-        let strip = crate::scenario::rect_of("dialog:segments:Extents").expect("extent buttons drawn");
-        let field = crate::scenario::handle_at("dialog:Distance A").expect("Distance A field drawn");
-        assert!(row.contains_rect(strip), "the extent buttons are in the distance row: {strip:?} in {row:?}");
-        assert!((strip.right() - row.right()).abs() < 0.5, "the extent buttons end the row");
-        assert!(field.x < strip.left() && row.contains(field), "the field comes first, then the buttons");
-        assert!(crate::scenario::rect_of("dialog:row:Extents").is_none(), "no separate Extents row");
-        assert!(h.widget("Distance A").is_some(), "the field keeps its accessible name");
-        strip
-    };
-    let before = place(&h);
-    // Whether the Distance A field (the text input so labelled) takes typing.
-    let enabled = |h: &Harness| {
-        h.output.accesskit_update.as_ref().and_then(|tree| {
-            tree.nodes
-                .iter()
-                .find_map(|(_, n)| (n.role() == egui::accesskit::Role::TextInput && n.label() == Some("Distance A")).then(|| !n.is_disabled()))
-        })
-    };
-    assert_eq!(enabled(&h), Some(true), "a distance extent types the distance");
+    let direction = crate::scenario::rect_of("dialog:segments:Direction").expect("Direction drawn");
+    let extents = crate::scenario::rect_of("dialog:segments:Extents").expect("Extents drawn");
+    let distance = crate::scenario::rect_of("dialog:row:Distance A").expect("Distance A row drawn");
+    assert!(extents.top() >= direction.bottom() - 0.5 && extents.bottom() <= distance.top() + 0.5, "Direction, Extents, then Distance A");
+    assert!(!distance.intersects(extents), "the extent buttons are not in the distance row");
+    assert!(distance_field_width(&h, "Distance A") >= widest_value(&h), "Distance A holds 10.000 in");
+    // Through All disables the field; the rows do not move.
     click(&mut h, "Through All");
-    assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::Extrude { all: true, .. })), "Through All picked");
-    let after = place(&h);
-    assert_eq!(before, after, "the buttons do not move");
-    assert_eq!(enabled(&h), Some(false), "through all has no distance to type");
-    // By handle, as the extent and its word are named alike.
+    assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::Extrude { all: true, .. })));
+    assert_eq!(crate::scenario::rect_of("dialog:segments:Extents"), Some(extents), "the buttons do not move");
     h.step(&json!({"click": {"handle": "dialog:Extents:Distance"}})).unwrap();
     h.frames(2);
     assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::Extrude { all: false, .. })));
-    assert_eq!(enabled(&h), Some(true));
+
+    let mut sc = Harness::new();
+    sc.app.home.open = false;
+    sc.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    sc.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[60,40]})).unwrap();
+    sc.app.run("sketch.finish", json!({})).unwrap();
+    sc.app.start("solid.extrude");
+    sc.frames(2);
+    let label = ["Distance", "Distance A"].into_iter().find(|l| sc.widget(l).is_some()).expect("SolidCraft's distance");
+    assert!(distance_field_width(&sc, label) >= widest_value(&sc), "SolidCraft's distance holds 10.000 in");
 }
 
 /// A reversed asymmetric pair shows as Asymmetric; clicking that shown segment sets the plain
