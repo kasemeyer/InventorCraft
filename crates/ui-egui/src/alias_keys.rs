@@ -52,8 +52,8 @@ pub fn context(app: &SolveApp) -> Context {
     }
 }
 
-/// Whether an alias of this scope is live here.
-fn applies(scope: AliasScope, ctx: Context) -> bool {
+/// Whether an alias (or a navigation key) of this scope is live here.
+pub(crate) fn applies(scope: AliasScope, ctx: Context) -> bool {
     match scope {
         AliasScope::Everywhere => true,
         AliasScope::Model => matches!(ctx, Context::Part | Context::Assembly),
@@ -221,6 +221,19 @@ pub(crate) fn run_ui_action(app: &mut SolveApp, id: &str) -> bool {
         "ui.view_previous" => {
             crate::view_history::previous(app);
         }
+        "ui.view_next" => {
+            crate::view_history::next(app);
+        }
+        // Zoom All: everything shown, whatever is selected (a sheet: the sheet).
+        "ui.view_fit_all" if crate::sheet_canvas::shows(app) => app.animate_view("fit"),
+        "ui.view_fit_all" => app.animate_fit_all(),
+        // Zoom Selected: the selection, and nothing when nothing is selected.
+        "ui.zoom_selected" => {
+            if crate::viewport::selection_bounds(app).is_some() {
+                app.animate_view("fit");
+            }
+        }
+        "ui.look_at" => crate::viewport::look_at_selection(app),
         "ui.createDrawingView" => crate::documents::create_drawing_view(app),
         // Only a drawing has sheets to switch.
         "ui.previousSheet" => crate::drawing_menu::step_sheet(app, -1),

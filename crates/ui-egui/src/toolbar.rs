@@ -2442,6 +2442,16 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
         if alias {
             continue;
         }
+        // The profile's hold keys (Inventor's F2/F3/F4) navigate while held (`navigation::handle`);
+        // their press does nothing else. F2 away from the graphics window still renames.
+        if crate::navigation::hold_key_press(app, k, mods) {
+            continue;
+        }
+        // The profile's navigation keys (Inventor's Home, End, Page Up, Shift+F5), where live.
+        if let Some(action) = crate::navigation::key_action(app, k, mods) {
+            crate::alias_keys::run_ui_action(app, action);
+            continue;
+        }
         // The profile's function keys (Ruling B): F6 is Fit under SolidCraft, Home View under
         // Inventor.
         if let Some(action) = crate::alias_keys::function_key_action(app, k) {

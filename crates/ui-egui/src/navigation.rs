@@ -160,6 +160,24 @@ pub(crate) fn preset_chosen(app: &SolveApp) -> bool {
         || crate::profile::active(app).defaults.nav.as_deref().is_some_and(|nav| nav != app.preferences.nav)
 }
 
+/// The profile's navigation key (`navigation.keys`) this press runs where it is live: its UI action.
+pub(crate) fn key_action(app: &SolveApp, key: egui::Key, mods: egui::Modifiers) -> Option<&'static str> {
+    let ctx = crate::alias_keys::context(app);
+    scheme(app)
+        .keys
+        .iter()
+        .find(|k| crate::profile_navigation::key_matches(&k.key, key, mods) && crate::alias_keys::applies(k.scope, ctx))
+        .map(|k| k.action.as_str())
+}
+
+/// Whether a press of `key` is the profile's hold key (`navigation.hold_keys`): Inventor's F3 and
+/// F4 anywhere, its F2 only over the graphics window (elsewhere F2 renames, as Inventor's browser
+/// does). [`handle`] navigates while it is held.
+pub(crate) fn hold_key_press(app: &SolveApp, key: egui::Key, mods: egui::Modifiers) -> bool {
+    let plain = !(mods.shift || mods.ctrl || mods.command || mods.alt);
+    plain && scheme(app).hold_keys.contains_key(key.name()) && (key != egui::Key::F2 || app.viewport.mouse.is_some())
+}
+
 /// The mouse bindings in force, most specific first: the picked mapping's, else the profile's.
 pub(crate) fn bindings(app: &SolveApp) -> Vec<crate::prefs::NavBinding> {
     if preset_chosen(app) { crate::prefs::nav_preset(&app.preferences.nav).bindings.to_vec() } else { scheme(app).bindings() }
@@ -660,8 +678,25 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     if space_pan {
         ui.ctx().set_cursor_icon(if primary_down { egui::CursorIcon::Grabbing } else { egui::CursorIcon::Grab });
     }
-    // The fixed navigation mode (navigation bar), a held Space, or the preset's left-button binding.
-    let primary_nav = if space_pan { Some(NavMode::Pan) } else { app.viewport.nav.or(app.viewport.primary_nav) };
+    // The profile's hold keys (Inventor's F2 pan, F3 zoom, F4 orbit): while one is held over the
+    // view, a left drag navigates, as a held Space pans. F2 only over the view (it renames
+    // elsewhere); a text field or a dimension being edited keeps its keys.
+    let held = if (inside || primary_down) && !space_pan && !ui.ctx().egui_wants_keyboard_input() && !crate::dim_view::editing() {
+        scheme(app).hold(|k| ui.input(|i| i.key_down(k))).map(crate::profile_navigation::NavAction::mode)
+    } else {
+        None
+    };
+    if let Some(mode) = held {
+        ui.ctx().set_cursor_icon(match mode {
+            NavMode::Pan if primary_down => egui::CursorIcon::Grabbing,
+            NavMode::Pan => egui::CursorIcon::Grab,
+            NavMode::Zoom => egui::CursorIcon::ResizeVertical,
+            NavMode::Orbit => egui::CursorIcon::AllScroll,
+        });
+    }
+    // The fixed navigation mode (navigation bar), a held Space or hold key, or the preset's
+    // left-button binding.
+    let primary_nav = if space_pan { Some(NavMode::Pan) } else { held.or(app.viewport.nav).or(app.viewport.primary_nav) };
     let button = if middle {
         Some(crate::prefs::NavButton::Middle)
     } else if secondary_down {
@@ -1357,8 +1392,22 @@ mod tests {
     /// profile gives defaults for are read only through this module's resolvers (`zoom_sign`,
     /// `free_orbit`, `pivot`…), which put a preference the user set over the profile's value;
     /// `prefs.rs` (their store) and the Navigation page (`prefs/navigation.rs`) may touch them.
+    /// The profile's block itself (its wheel step and direction, drag-zoom, orbit style, pivot
+    /// glyph, mouse buttons, hold keys) is read here and in `profile_navigation.rs` only.
     #[test]
     fn hand_rolled_camera_input_is_rejected() {
+        const BLOCK: [&str; 10] = [
+            "navigation::scheme(",
+            ".hold_keys",
+            ".wheel_rate(",
+            ".wheel_step",
+            ".wheel_direction",
+            ".drag_zoom",
+            ".orbit_style",
+            ".pivot_glyph",
+            ".right_drag_orbit",
+            ".ctrl_left_drag_orbit",
+        ];
         const SCHEME: [&str; 5] = [
             "preferences.zoom_reverse",
             "preferences.free_orbit",
@@ -1400,7 +1449,8 @@ mod tests {
                 let code = text.split("\n#[cfg(test)]\nmod ").next().unwrap_or_default();
                 let scheme_allowed = name == "prefs.rs";
                 for (n, line) in code.lines().enumerate() {
-                    let scheme = !scheme_allowed && SCHEME.iter().any(|p| line.contains(p));
+                    let scheme = (!scheme_allowed && SCHEME.iter().any(|p| line.contains(p)))
+                        || (name != "profile_navigation.rs" && BLOCK.iter().any(|p| line.contains(p)));
                     if !line.trim_start().starts_with("//") && (scheme || PATTERNS.iter().any(|p| line.contains(p))) {
                         offenders.push(format!("{}:{}: {}", path.display(), n + 1, line.trim()));
                     }

@@ -96,8 +96,13 @@
     "buttons": {"pan": "middle", "orbit": "shift+middle", "zoom": "ctrl+middle"},
     "right_drag_orbit": false,
     "ctrl_left_drag_orbit": false,
-    "hold_keys": {},
-    "keys": [],
+    "hold_keys": {"F2": "pan", "F3": "zoom", "F4": "orbit"},
+    "keys": [
+      {"key": "Home", "action": "ui.view_fit_all", "scope": "everywhere"},
+      {"key": "End", "action": "ui.zoom_selected", "scope": "model"},
+      {"key": "PageUp", "action": "ui.look_at", "scope": "model"},
+      {"key": "Shift+F5", "action": "ui.view_next", "scope": "everywhere"}
+    ],
     "cursors": true
   },
   "aliases": [

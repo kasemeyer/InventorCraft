@@ -25,8 +25,8 @@ written out (unknown keys are errors); a profile without one navigates as SolidC
 | `buttons` | `{pan, orbit, zoom}`: `"middle"`, `"shift+middle"`, `"ctrl+middle"`… or `null` | middle / shift+middle / none | middle / shift+middle / ctrl+middle |
 | `right_drag_orbit` | a right drag orbits | `true` | `false` (the right button is the marking menu's) |
 | `ctrl_left_drag_orbit` | a Ctrl+left drag from empty space orbits | `true` | `false` |
-| `hold_keys` | `F1`–`F12` → `pan`, `zoom` or `orbit` while held (a left drag navigates) | none | none |
-| `keys` | `[{key, action, scope}]`: a key chord (`"Home"`, `"Shift+F5"`) → a UI action where the alias `scope` is live | none | none |
+| `hold_keys` | `F1`–`F12` → `pan`, `zoom` or `orbit` while held (a left drag navigates) | none | F2 pan, F3 zoom, F4 orbit |
+| `keys` | `[{key, action, scope}]`: a key chord (`"Home"`, `"Shift+F5"`) → a UI action where the alias `scope` is live | none | Home, End, Page Up, Shift+F5 (below) |
 | `cursors` | the pan, zoom and orbit cursors while navigating | `false` | `true` |
 
 SolidCraft's values are its behaviour before the block existed; the test
@@ -34,6 +34,26 @@ SolidCraft's values are its behaviour before the block existed; the test
 hold-key and navigation-key inputs and compares the camera with numbers recorded at 6a7a74e8.
 Inventor's values are its documented defaults (sources in the planning repository's
 `docs/evidence/navigation-fidelity-audit.md`).
+
+## Keys
+
+Inventor's navigation keys, as the profile lays them out (`navigation::key_action`,
+`navigation::hold_key_press`, dispatched by the shortcut loop in `toolbar.rs` before the function
+keys):
+
+| Key | Does | Where |
+|---|---|---|
+| F2 (held) | a left drag pans | over the graphics window; elsewhere F2 renames the selection |
+| F3 (held) | a left drag zooms (the profile's `drag_zoom`) | everywhere |
+| F4 (held) | a left drag orbits (the profile's orbit style and pivot) | where the view can orbit |
+| Home | Zoom All (`ui.view_fit_all`): everything shown, whatever is selected; a drawing's sheet | everywhere |
+| End | Zoom Selected (`ui.zoom_selected`): the selection; nothing when nothing is selected | a part or assembly |
+| Page Up | Look At (`ui.look_at`): the selected face, plane or sketch | a part or assembly |
+| Shift+F5 | Next View (`ui.view_next`): forward through the views F5 stepped back from | everywhere |
+| F5, F6 | Previous View, Home View (`function_keys`, unchanged) | everywhere |
+
+While a hold key is held the pointer shows the navigation's cursor. A text field, or a dimension
+being edited, keeps its keys. A held Space still pans in both profiles.
 
 ## Precedence over Preferences
 

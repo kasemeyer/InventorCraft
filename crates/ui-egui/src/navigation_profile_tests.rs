@@ -394,3 +394,171 @@ fn the_right_button_and_ctrl_left_orbit_only_under_solidcraft() {
         assert!(h.app.viewport.context_menu.is_some(), "{profile}: right-click opens the menu");
     }
 }
+
+// ---- F-2 item 4: hold keys and navigation keys ----
+
+/// A left drag from `from` by `by` with `key` held down throughout.
+fn held_drag(h: &mut Harness, key: &str, from: egui::Pos2, by: egui::Vec2) {
+    h.call("ui.key", json!({"key": key, "pressed": true}));
+    h.frames(2);
+    drag(h, from, by, "left", json!({}));
+    h.call("ui.key", json!({"key": key, "pressed": false}));
+    h.frames(2);
+}
+
+#[test]
+fn inventors_function_keys_navigate_while_held() {
+    let mut h = boxed("inventor");
+    let rect = h.app.viewport.rect.unwrap();
+    let empty = rect.left_top() + egui::vec2(300.0, 160.0);
+    // F2: pan with the left button, nothing selected or box-selected.
+    let before = h.app.cam;
+    held_drag(&mut h, "F2", empty, egui::vec2(60.0, 0.0));
+    assert!(h.app.cam.target.dist(before.target) > 1e-3 && h.app.cam.distance == before.distance && h.app.cam.yaw == before.yaw, "F2 pans");
+    assert!(h.app.session.selection.is_empty() && h.app.viewport.boxsel.is_none());
+    // F3: zoom, up zooms out (Inventor's drag-zoom).
+    // (A left drag navigates once egui has decided it is a drag, a few points in.)
+    let d = h.app.cam.distance;
+    held_drag(&mut h, "F3", empty, egui::vec2(0.0, -100.0));
+    let up = h.app.cam.distance / d;
+    assert!(up > 1.2 && up <= 1.0_f64.exp() + 1e-9, "F3 up zooms out: {up}");
+    let d = h.app.cam.distance;
+    held_drag(&mut h, "F3", empty, egui::vec2(0.0, 100.0));
+    assert!(h.app.cam.distance < d, "F3 down zooms in");
+    // F4: free orbit, through the pole.
+    let before = h.app.cam;
+    held_drag(&mut h, "F4", empty, egui::vec2(0.0, 400.0));
+    let turned = h.app.cam.back().dot(before.back()).clamp(-1.0, 1.0).acos();
+    assert!(turned > 1.5 && turned <= 3.2 + 1e-9, "F4 orbits: {turned}");
+    assert_eq!(h.app.cam.distance, before.distance);
+    // Let go, a left drag selects again (no navigation).
+    let before = h.app.cam;
+    drag(&mut h, empty, egui::vec2(60.0, 0.0), "left", json!({}));
+    assert_eq!(h.app.cam, before);
+}
+
+#[test]
+fn f2_renames_away_from_the_graphics_window_and_pans_over_it() {
+    let mut h = boxed("inventor");
+    let rect = h.app.viewport.rect.unwrap();
+    h.app.session.selection = vec![solidcraft_engine::Sel::Body { name: h.app.session.world_state().bodies[0].name.clone() }];
+    // Over the graphics window: F2 is the pan key, nothing is renamed.
+    h.frame_with(vec![egui::Event::PointerMoved(rect.center())]);
+    h.call("ui.key", json!({"key": "F2"}));
+    assert!(h.app.menu.rename.is_none(), "F2 over the view does not rename");
+    // Over the browser (off the view): F2 renames.
+    let browser = crate::scenario::rect_of("browser:card").expect("the browser is drawn");
+    h.frame_with(vec![egui::Event::PointerMoved(browser.center())]);
+    assert!(h.app.viewport.mouse.is_none());
+    h.call("ui.key", json!({"key": "F2"}));
+    assert!(h.app.menu.rename.is_some(), "F2 away from the view renames");
+    // SolidCraft: F2 renames over the view too.
+    let mut s = boxed("solidcraft");
+    s.app.session.selection = vec![solidcraft_engine::Sel::Body { name: s.app.session.world_state().bodies[0].name.clone() }];
+    s.frame_with(vec![egui::Event::PointerMoved(rect.center())]);
+    s.call("ui.key", json!({"key": "F2"}));
+    assert!(s.app.menu.rename.is_some());
+}
+
+/// The camera `act` leaves once the view stops moving, from `cam`.
+fn settled_after(h: &mut Harness, cam: Camera, act: impl FnOnce(&mut Harness)) -> Camera {
+    h.app.cam_anim = None;
+    h.app.cam = cam;
+    h.frames(2);
+    act(h);
+    h.frames(60);
+    h.app.cam
+}
+
+#[test]
+fn home_end_and_page_up_zoom_all_zoom_selected_and_look_at() {
+    let mut h = boxed("inventor");
+    h.app.preferences.look_at_anim = false;
+    let mut close = start_camera();
+    close.distance = 20.0;
+    close.target = Vec3::new(18.0, 12.0, 8.0);
+    let body = h.app.session.world_state().bodies[0].name.clone();
+    // A face selected: Home still frames everything (Zoom All), End frames the selection.
+    h.app.session.selection = vec![solidcraft_engine::Sel::Face { body: body.clone(), index: 0, point: Vec3::new(-20.0, 0.0, 0.0) }];
+    let home = settled_after(&mut h, close, |h| drop(h.call("ui.key", json!({"key": "Home"}))));
+    let all = settled_after(&mut h, close, |h| h.app.animate_fit_all());
+    assert_eq!(home, all, "Home = Zoom All");
+    let end = settled_after(&mut h, close, |h| drop(h.call("ui.key", json!({"key": "End"}))));
+    let selected = settled_after(&mut h, close, |h| h.app.animate_view("fit"));
+    assert_eq!(end, selected, "End = Zoom Selected");
+    assert_ne!(end, home);
+    // Nothing selected: End leaves the view.
+    h.app.session.selection.clear();
+    assert_eq!(settled_after(&mut h, close, |h| drop(h.call("ui.key", json!({"key": "End"})))), close);
+    // PageUp looks at the selected plane.
+    h.app.session.selection = vec![solidcraft_engine::Sel::Plane { name: "XY".into() }];
+    let look = settled_after(&mut h, close, |h| drop(h.call("ui.key", json!({"key": "PageUp"}))));
+    assert!(look.back().cross(Vec3::Z).len() < 1e-6, "PageUp = Look At: {:?}", look.back());
+    // Under SolidCraft none of them moves the view.
+    let mut s = boxed("solidcraft");
+    s.app.preferences.look_at_anim = false;
+    s.app.session.selection = vec![solidcraft_engine::Sel::Plane { name: "XY".into() }];
+    for key in ["Home", "End", "PageUp"] {
+        assert_eq!(settled_after(&mut s, close, |s| drop(s.call("ui.key", json!({"key": key})))), close, "{key}");
+    }
+}
+
+#[test]
+fn shift_f5_goes_forward_through_the_views_f5_went_back_through() {
+    let mut h = boxed("inventor");
+    h.app.preferences.look_at_anim = false;
+    let rect = h.app.viewport.rect.unwrap();
+    let c = rect.center();
+    let first = h.app.cam;
+    drag(&mut h, c, egui::vec2(80.0, 0.0), "middle", json!({}));
+    h.frames(3);
+    let second = h.app.cam;
+    drag(&mut h, c, egui::vec2(0.0, 80.0), "middle", json!({}));
+    h.frames(3);
+    let third = h.app.cam;
+    for want in [second, first] {
+        h.call("ui.key", json!({"key": "F5"}));
+        h.frames(5);
+        assert_eq!(h.app.cam, want, "F5 goes back");
+    }
+    for want in [second, third] {
+        h.call("ui.key", json!({"key": "F5", "shift": true}));
+        h.frames(5);
+        assert_eq!(h.app.cam, want, "Shift+F5 goes forward");
+    }
+    // Nothing further forward: the view stays.
+    h.call("ui.key", json!({"key": "F5", "shift": true}));
+    h.frames(5);
+    assert_eq!(h.app.cam, third);
+    // A new view drops the forward views.
+    h.call("ui.key", json!({"key": "F5"}));
+    h.frames(5);
+    drag(&mut h, c, egui::vec2(-40.0, 0.0), "middle", json!({}));
+    h.frames(3);
+    let fresh = h.app.cam;
+    h.call("ui.key", json!({"key": "F5", "shift": true}));
+    h.frames(5);
+    assert_eq!(h.app.cam, fresh);
+}
+
+#[test]
+fn navigation_keys_keep_to_their_scope() {
+    // PageUp (Look At) is a model key: in a drawing it neither looks at anything nor turns the sheet.
+    let mut h = Harness::new();
+    assert_eq!(h.call("ui.prefs", json!({"ui_profile": "inventor"}))["ok"], json!(true));
+    h.app.home.open = false;
+    h.app.run("drawing.new", json!({"properties": {"drawn_by": "TCI", "drawn_date": "2026-10-28"}})).unwrap();
+    h.frames(3);
+    let before = h.app.cam;
+    h.call("ui.key", json!({"key": "PageUp"}));
+    h.frames(30);
+    assert_eq!(h.app.cam, before);
+    // Home frames the sheet (Zoom All) after a zoom.
+    let rect = crate::scenario::rect_of("sheet_canvas").unwrap();
+    h.frame_with(vec![egui::Event::PointerMoved(rect.center()), wheel(-3.0)]);
+    h.frames(10);
+    assert_ne!(h.app.cam.distance, before.distance);
+    h.call("ui.key", json!({"key": "Home"}));
+    h.frames(30);
+    assert!((h.app.cam.distance - before.distance).abs() < 1e-9, "Home fits the sheet");
+}

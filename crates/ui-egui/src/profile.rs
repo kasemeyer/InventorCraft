@@ -31,6 +31,11 @@ pub const UI_ACTIONS: &[&str] = &[
     "ui.nextSheet",
     "ui.pan",
     "ui.orbit",
+    // Navigation keys (F-2): Zoom All, Zoom Selected, Look At and Next View.
+    "ui.view_fit_all",
+    "ui.zoom_selected",
+    "ui.look_at",
+    "ui.view_next",
 ];
 /// The one-key alias wait when a profile names none (Ruling 4).
 pub const DEFAULT_ALIAS_WAIT_MS: u32 = 750;

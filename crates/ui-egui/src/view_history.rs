@@ -22,6 +22,9 @@ pub struct ViewHistory {
     settled: Option<Camera>,
     /// Earlier settled views, oldest first.
     back: Vec<Camera>,
+    /// The views `previous` stepped back from, most recent last: `next` (Shift+F5) walks them
+    /// forward again. A new view settling drops them.
+    forward: Vec<Camera>,
     /// `previous` is moving to a popped view: settling there pushes nothing.
     restoring: bool,
 }
@@ -68,6 +71,7 @@ pub(crate) fn settle(app: &mut SolveApp, busy: bool) {
                 views.back.push(old);
                 let over = views.back.len().saturating_sub(MAX_VIEWS);
                 views.back.drain(..over);
+                views.forward.clear();
             }
             views.settled = Some(cam);
         }
@@ -85,6 +89,23 @@ pub(crate) fn previous(app: &mut SolveApp) -> bool {
     let Some(to) = app.views.back.pop() else {
         return false;
     };
+    if let Some(here) = app.views.settled {
+        app.views.forward.push(here);
+    }
+    app.views.restoring = true;
+    app.animate_to(to);
+    true
+}
+
+/// Next View (Inventor's Shift+F5): animate to the view `previous` last stepped back from; false
+/// when there is none. The view it leaves goes back on the back stack.
+pub(crate) fn next(app: &mut SolveApp) -> bool {
+    let Some(to) = app.views.forward.pop() else {
+        return false;
+    };
+    if let Some(here) = app.views.settled {
+        app.views.back.push(here);
+    }
     app.views.restoring = true;
     app.animate_to(to);
     true
