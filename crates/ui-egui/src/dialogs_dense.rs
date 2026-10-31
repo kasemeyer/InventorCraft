@@ -566,9 +566,15 @@ pub(super) fn direction_glyphs() -> [ui_kit::GlyphSegment; 4] {
     ]
 }
 
-/// Extrude's Extents segments in order (Distance, To, Through All), as [`direction_glyphs`].
-pub(super) fn extent_glyphs() -> [ui_kit::GlyphSegment; 3] {
-    [glyph_segment("Distance", glyph_distance), glyph_segment("To", glyph_to), glyph_segment("Through All", glyph_through_all)]
+/// Extrude's Extents segments in order (Distance, To, Through All, Between), as
+/// [`direction_glyphs`].
+pub(super) fn extent_glyphs() -> [ui_kit::GlyphSegment; 4] {
+    [
+        glyph_segment("Distance", glyph_distance),
+        glyph_segment("To", glyph_to),
+        glyph_segment("Through All", glyph_through_all),
+        glyph_segment("Between", glyph_between),
+    ]
 }
 
 fn glyph_segment(key: &'static str, glyph: fn(egui::Rect, Color32) -> Vec<egui::Shape>) -> ui_kit::GlyphSegment {
@@ -658,6 +664,21 @@ fn glyph_to(r: egui::Rect, ink: Color32) -> Vec<egui::Shape> {
     shapes
 }
 
+/// Between two faces: the arrow runs from a block under the profile to a block above it.
+fn glyph_between(r: egui::Rect, ink: Color32) -> Vec<egui::Shape> {
+    let (s, start, top) = glyph_extent(r);
+    let block = |y: f32| egui::Rect::from_min_max(egui::pos2(r.left() + s * 0.15, y), egui::pos2(r.right() - s * 0.15, y + s * 0.16));
+    let (upper, lower) = (block(top), block(start.y - s * 0.02));
+    let profile_y = (start.y + top) / 2.0 + s * 0.1;
+    let mut shapes = vec![
+        glyph_profile(r, profile_y, ink),
+        egui::Shape::rect_filled(upper, 1.0, ink.gamma_multiply(0.55)),
+        egui::Shape::rect_filled(lower, 1.0, ink.gamma_multiply(0.55)),
+    ];
+    shapes.extend(glyph_arrow(egui::pos2(start.x, lower.top()), egui::pos2(start.x, upper.bottom()), s, ink));
+    shapes
+}
+
 /// Through all: the arrow passes through a block.
 fn glyph_through_all(r: egui::Rect, ink: Color32) -> Vec<egui::Shape> {
     let (s, start, top) = glyph_extent(r);
@@ -737,6 +758,20 @@ fn glyph_new_solid(r: egui::Rect, ink: Color32) -> Vec<egui::Shape> {
 fn extrude_sections(app: &SolveApp, ui: &mut egui::Ui, d: &mut Dialog) -> bool {
     let mut enter = false;
     let has_bodies = !app.session.world_state().bodies.is_empty();
+    // Presets (the profile's `feature_presets`): No Preset is the template's values, Last Used
+    // the last extrude made's; a new panel opens with Last Used.
+    if crate::profile::active(app).workflow.feature_presets && d.editing.is_none() {
+        let old = usize::from(d.extra.get("preset").and_then(Value::as_str) == Some("last_used"));
+        let mut pick = old;
+        form_row(ui, "Presets", |ui| combo(ui, "ex_preset", &["No Preset", "Last Used"], &mut pick));
+        if pick != old {
+            let preset = if pick == 1 { last_used(app, "solid.extrude").cloned() } else { None };
+            if pick == 0 || preset.is_some() {
+                apply_extrude_preset(app, d, preset.as_ref());
+                d.extra.insert("preset".into(), json!(if pick == 1 { "last_used" } else { "none" }));
+            }
+        }
+    }
     let Kind::Extrude {
         distance,
         direction,
@@ -775,7 +810,15 @@ fn extrude_sections(app: &SolveApp, ui: &mut egui::Ui, d: &mut Dialog) -> bool {
                 *auto_op = false;
             }
         });
-        let cur = if to_object_on(&d.inputs) { 1 } else { usize::from(*all) * 2 };
+        // Between (3) is From Object + To Object, both of which the engine has.
+        let to = to_object_on(&d.inputs);
+        let cur = if to && object_on(&d.inputs, FROM_OBJECT) {
+            3
+        } else if to {
+            1
+        } else {
+            usize::from(*all) * 2
+        };
         let mut ext = cur;
         // The extents sit at the end of the distance row, as in the capture: segments rather than
         // a dropdown, so every extent shows; glyphs, since the words do not fit. The distance
@@ -784,9 +827,15 @@ fn extrude_sections(app: &SolveApp, ui: &mut egui::Ui, d: &mut Dialog) -> bool {
         enter |= typed;
         if clicked && ext != cur {
             *all = ext == 2;
-            set_to_object(&mut d.inputs, &mut d.active, ext == 1);
+            set_to_object(&mut d.inputs, &mut d.active, ext == 1 || ext == 3);
+            // Between picks the start face first.
+            if ext == 3 {
+                set_object(&mut d.inputs, &mut d.active, FROM_OBJECT, true);
+            } else if cur == 3 {
+                set_object(&mut d.inputs, &mut d.active, FROM_OBJECT, false);
+            }
         }
-        if ext == 1 {
+        if ext == 1 || ext == 3 {
             enter |= expr_row(ui, "To Offset", to_offset);
         }
         if two_sided(*direction) {

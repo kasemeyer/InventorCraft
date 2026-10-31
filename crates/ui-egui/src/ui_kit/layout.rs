@@ -89,7 +89,8 @@ pub(crate) fn expr_glyph_row(
     row(ui, label, |ui| {
         let t = Tokens::get();
         let control = ui.available_rect_before_wrap();
-        let strip = (row_height() * glyphs.len() as f32).min(control.width() * 0.6);
+        // Square segments up to 72 % of the column (four extents: Distance, To, Through All, Between).
+        let strip = (row_height() * glyphs.len() as f32).min(control.width() * 0.72);
         let strip_rect = egui::Rect::from_min_max(egui::pos2(control.right() - strip, control.top()), control.max);
         let field_rect = egui::Rect::from_min_max(control.min, egui::pos2((strip_rect.left() - t.space_4).max(control.left()), control.bottom()));
         let enter = ui

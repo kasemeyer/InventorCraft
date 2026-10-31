@@ -561,6 +561,10 @@ preference_settings! {
     /// lines up with existing ones); absent = on. Not written while empty.
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     point_alignment: std::collections::BTreeMap<String, bool> = Default::default();
+    /// Per profile id, each command's Last Used panel values (`workflow.feature_presets`;
+    /// Extrude's). Not written while empty.
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    feature_presets: std::collections::BTreeMap<String, std::collections::BTreeMap<String, serde_json::Value>> = Default::default();
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     split_faces: std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>> = Default::default();
     /// Interface language (a registered locale ID).

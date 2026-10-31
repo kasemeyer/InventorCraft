@@ -56,6 +56,14 @@ pub struct Workflow {
     /// parks that feature, and Finish Sketch reopens it with the new sketch's profiles picked
     /// (Inventor). Off: the sketch replaces the panel and Finish ends at the model.
     pub finish_sketch_resumes_feature: bool,
+    /// A feature panel (Extrude) offers Presets: No Preset (the template's values) and Last
+    /// Used (the last one made's, kept per profile in the preferences). Off: no Presets row,
+    /// nothing remembered.
+    pub feature_presets: bool,
+    /// With `feature_presets`, a new panel opens with Last Used (Inventor's own default) rather
+    /// than No Preset. The Inventor profile keeps it off: owner decision 7 (2026-10-25, "panels
+    /// open with template defaults, not last values") stands until the owner rules on it.
+    pub preset_opens_last_used: bool,
 }
 
 impl Default for Workflow {
@@ -79,6 +87,8 @@ impl Default for Workflow {
             origin_auto_hide: false,
             create_drawing_in_root_menu: false,
             finish_sketch_resumes_feature: false,
+            feature_presets: false,
+            preset_opens_last_used: false,
         }
     }
 }

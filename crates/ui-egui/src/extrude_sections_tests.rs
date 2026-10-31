@@ -120,7 +120,7 @@ fn direction_and_extent_glyphs_draw_arrows_not_words() {
     assert!(tips[3].len() == 2 && tips[3][0] < 0.0 && tips[3][1] > 0.0, "Asymmetric: both ways {:?}", tips[3]);
     assert!(tips[3][1] < -tips[3][0] * 0.8, "Asymmetric: unequal halves {:?}", tips[3]);
     let extents = dense::extent_glyphs();
-    assert_eq!(extents.iter().map(|g| g.key).collect::<Vec<_>>(), ["Distance", "To", "Through All"]);
+    assert_eq!(extents.iter().map(|g| g.key).collect::<Vec<_>>(), ["Distance", "To", "Through All", "Between"]);
     for g in direction.iter().chain(extents.iter()) {
         let shapes = (g.glyph)(square, ink);
         assert!(!shapes.iter().any(|s| matches!(s, egui::Shape::Text(_))), "{}: no text", g.key);
@@ -137,16 +137,18 @@ fn direction_and_extent_glyphs_draw_arrows_not_words() {
             [("Default", "既定".to_owned()), ("Flipped", "反転".to_owned()), ("Symmetric", "対称".to_owned()), ("Asymmetric", "非対称".to_owned())]
         );
         let tips: Vec<_> = dense::extent_glyphs().into_iter().map(|g| g.tip).collect();
-        assert_eq!(tips, ["距離", "終了", "貫通"]);
+        assert_eq!(tips, ["距離", "終了", "貫通", "開始-終了"]);
     }
     let blocks = |g: &crate::ui_kit::GlyphSegment| (g.glyph)(square, ink).iter().filter(|s| matches!(s, egui::Shape::Rect(_))).count();
-    assert_eq!(extents.iter().map(blocks).collect::<Vec<_>>(), [0, 1, 1], "To and Through All meet a block");
+    assert_eq!(extents.iter().map(blocks).collect::<Vec<_>>(), [0, 1, 1, 2], "To and Through All meet a block, Between two");
 }
 
 #[test]
 fn direction_and_extents_rows_fit_the_panel() {
     let h = extrude(true);
-    for (row, keys) in [("Direction", &["Default", "Flipped", "Symmetric", "Asymmetric"][..]), ("Extents", &["Distance", "To", "Through All"][..])] {
+    for (row, keys) in
+        [("Direction", &["Default", "Flipped", "Symmetric", "Asymmetric"][..]), ("Extents", &["Distance", "To", "Through All", "Between"][..])]
+    {
         let rect = crate::scenario::rect_of(&format!("dialog:segments:{row}")).unwrap_or_else(|| panic!("{row} row drawn"));
         let boolean = crate::scenario::rect_of("dialog:segments:Boolean").expect("Boolean row drawn");
         // Direction fills the field column; the extents end it (at the end of the distance row).

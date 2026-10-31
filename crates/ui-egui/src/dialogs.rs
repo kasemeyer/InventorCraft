@@ -740,26 +740,11 @@ impl Dialog {
         let has_bodies = !s.world_state().bodies.is_empty();
         let mut d = match id {
             "sketch.create" => Dialog::new(Kind::Sketch, vec![SelInput::new("Plane", PLANES | PLANAR_FACES, false)]),
-            "solid.extrude" => Dialog::new(
-                Kind::Extrude {
-                    distance: template_length(app, "10", "1"),
-                    direction: 0,
-                    operation: usize::from(has_bodies),
-                    auto_op: true,
-                    smart: crate::smart_extrude::Smart { auto_to_object: app.preferences.extrude_auto_to_object, ..Default::default() },
-                    distance2: template_length(app, "10", "1"),
-                    taper: "0 deg".into(),
-                    taper_present: false,
-                    to_offset: String::new(),
-                    start: String::new(),
-                    all: false,
-                    thin: false,
-                    wall: template_length(app, "2", "0.1"),
-                    wall_side: 0,
-                    wall2: template_length(app, "1", "0.05"),
-                },
-                vec![SelInput::new("Profiles", EXTRUDE_ACCEPT, true)],
-            ),
+            "solid.extrude" => {
+                let mut d = Dialog::new(extrude_kind(app), vec![SelInput::new("Profiles", EXTRUDE_ACCEPT, true)]);
+                restore_preset(app, &mut d);
+                d
+            }
             "solid.revolve" => Dialog::new(
                 Kind::Revolve { angle: "360 deg".into(), operation: 0, axis: None },
                 vec![SelInput::new("Profile", PROFILES, true), SelInput::new("Axis", AXES, false)],
@@ -2863,6 +2848,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     if cancel && !applied {
         app.applying = None;
     }
+    if applied {
+        remember_preset(app, &d);
+    }
     if !keep || cancel {
         crate::dialogs_motion::closed(app, &mut d, applied);
         if let Kind::Text(k) = &mut d.kind {
@@ -2888,6 +2876,120 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         Some((id, true)) => app.start_pinned(id),
         Some((id, false)) => app.start(id),
         None => {}
+    }
+}
+
+/// A new Extrude panel's values: the template's distances, no taper, the automatic boolean.
+fn extrude_kind(app: &SolveApp) -> Kind {
+    let has_bodies = !app.session.world_state().bodies.is_empty();
+    Kind::Extrude {
+        distance: template_length(app, "10", "1"),
+        direction: 0,
+        operation: usize::from(has_bodies),
+        auto_op: true,
+        smart: crate::smart_extrude::Smart { auto_to_object: app.preferences.extrude_auto_to_object, ..Default::default() },
+        distance2: template_length(app, "10", "1"),
+        taper: "0 deg".into(),
+        taper_present: false,
+        to_offset: String::new(),
+        start: String::new(),
+        all: false,
+        thin: false,
+        wall: template_length(app, "2", "0.1"),
+        wall_side: 0,
+        wall2: template_length(app, "1", "0.05"),
+    }
+}
+
+/// What Extrude's Last Used preset keeps: the Behavior and Advanced values, not the picks nor
+/// the boolean (which stays automatic).
+fn extrude_preset(d: &Dialog) -> Option<Value> {
+    let Kind::Extrude { distance, direction, distance2, taper, taper_present, start, all, thin, wall, wall_side, wall2, .. } = &d.kind else {
+        return None;
+    };
+    Some(json!({
+        "distance": distance, "direction": direction, "distance2": distance2, "taper": taper, "taper_present": taper_present,
+        "start": start, "all": all, "thin": thin, "wall": wall, "wall_side": wall_side, "wall2": wall2,
+        "convention": d.extra.get("convention"),
+    }))
+}
+
+/// Put a preset's values (or, with None, the template's: No Preset) into an Extrude panel.
+pub(crate) fn apply_extrude_preset(app: &SolveApp, d: &mut Dialog, preset: Option<&Value>) {
+    let fresh = Dialog::new(extrude_kind(app), Vec::new());
+    let from = match preset {
+        Some(v) => v.clone(),
+        None => extrude_preset(&fresh).unwrap_or_default(),
+    };
+    let Kind::Extrude { distance, direction, distance2, taper, taper_present, start, all, thin, wall, wall_side, wall2, smart, .. } = &mut d.kind
+    else {
+        return;
+    };
+    let text = |key: &str, into: &mut String| {
+        if let Some(v) = from.get(key).and_then(Value::as_str) {
+            *into = v.to_string();
+        }
+    };
+    text("distance", distance);
+    text("distance2", distance2);
+    text("taper", taper);
+    text("start", start);
+    text("wall", wall);
+    text("wall2", wall2);
+    let index = |key: &str| from.get(key).and_then(Value::as_u64).and_then(|v| usize::try_from(v).ok());
+    *direction = index("direction").unwrap_or(0);
+    // A remembered direction is the user's choice: the automatic one does not override it.
+    smart.manual_dir = preset.is_some() && *direction != 0;
+    *wall_side = index("wall_side").unwrap_or(0);
+    let flag = |key: &str| from.get(key).and_then(Value::as_bool).unwrap_or(false);
+    *taper_present = flag("taper_present");
+    *all = flag("all");
+    let thin_now = flag("thin");
+    if *thin != thin_now {
+        *thin = thin_now;
+        set_thin(&mut d.inputs, thin_now);
+    }
+    match from.get("convention").filter(|v| !v.is_null()) {
+        Some(v) => d.extra.insert("convention".into(), v.clone()),
+        None => d.extra.remove("convention"),
+    };
+}
+
+/// The command's Last Used values under the active profile, if it keeps presets.
+pub(crate) fn last_used<'a>(app: &'a SolveApp, command: &str) -> Option<&'a Value> {
+    let profile = crate::profile::active(app);
+    if !profile.workflow.feature_presets {
+        return None;
+    }
+    app.preferences.feature_presets.get(&profile.id)?.get(command)
+}
+
+/// A new Extrude panel opens with Last Used where the profile says so
+/// (`workflow.preset_opens_last_used`), else with No Preset (the template's values).
+fn restore_preset(app: &SolveApp, d: &mut Dialog) {
+    if crate::profile::active(app).workflow.preset_opens_last_used {
+        use_last_used(app, d);
+    }
+}
+
+/// Put the command's Last Used values into a new Extrude panel, if there are any.
+pub(crate) fn use_last_used(app: &SolveApp, d: &mut Dialog) -> bool {
+    let Some(v) = last_used(app, "solid.extrude").cloned() else { return false };
+    apply_extrude_preset(app, d, Some(&v));
+    d.extra.insert("preset".into(), json!("last_used"));
+    true
+}
+
+/// A new Extrude made: its values become Last Used, where the profile keeps presets. An edit
+/// changes nothing.
+fn remember_preset(app: &mut SolveApp, d: &Dialog) {
+    let profile = crate::profile::active(app);
+    if !profile.workflow.feature_presets || d.editing.is_some() {
+        return;
+    }
+    if let Some(v) = extrude_preset(d) {
+        let id = profile.id.clone();
+        app.preferences.feature_presets.entry(id).or_default().insert("solid.extrude".into(), v);
     }
 }
 
@@ -5796,3 +5898,7 @@ mod template_values_tests;
 #[cfg(test)]
 #[path = "extrude_sections_tests.rs"]
 mod extrude_sections_tests;
+
+#[cfg(test)]
+#[path = "dialogs_extrude_presets_tests.rs"]
+mod dialogs_extrude_presets;
