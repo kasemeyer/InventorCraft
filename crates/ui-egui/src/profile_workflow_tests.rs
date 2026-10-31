@@ -92,7 +92,8 @@ fn every_context_has_a_layout() {
     for ctx in MenuContext::ALL {
         assert!(layouts.contains_key(&ctx), "Inventor lacks a {ctx} marking menu");
     }
-    assert_eq!(layouts.len(), MenuContext::ALL.len());
+    // Inventor lays out the optional contexts too (R197's sketch-selected ring).
+    assert_eq!(layouts.len(), MenuContext::ALL.len() + MenuContext::OPTIONAL.len());
 
     let mut json: Value = serde_json::from_str(include_str!("../../../assets/profiles/inventor.json")).unwrap();
     json["workflow"]["marking_menu"]["browser"] = json!({"ring": EIGHT});
@@ -154,7 +155,11 @@ fn uncaptured_marking_menus_are_flagged() {
     assert_eq!(workflow_warnings(&inventor().workflow), Vec::<String>::new());
     for (ctx, layout) in inventor_layouts() {
         let evidence = layout.evidence.as_deref().unwrap_or_default();
-        assert!(evidence.starts_with("docs/evidence/screenshots/"), "{ctx}: {evidence:?}");
+        // A capture, or (R196) the owner's clean-room theme document.
+        assert!(
+            evidence.starts_with("docs/evidence/screenshots/") || evidence.starts_with("docs/evidence/clean-room-inventor-ui-theme.md"),
+            "{ctx}: {evidence:?}"
+        );
     }
     // A layout without one is flagged as unverified.
     let mut w = inventor().workflow.clone();

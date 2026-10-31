@@ -100,6 +100,9 @@ pub enum MenuContext {
     /// A drawing's sheet with no drawing tool running, no drawing panel open and nothing
     /// selected (spec §2.11). Every other drawing right-click is a list (R72).
     DrawingEmpty,
+    /// A part with a sketch picked (its Browser row or a profile of it in the view), not
+    /// editing a sketch. Optional: a profile that does not lay it out shows its empty ring.
+    SketchSelected,
 }
 
 impl MenuContext {
@@ -119,6 +122,9 @@ impl MenuContext {
         MenuContext::DrawingEmpty,
     ];
 
+    /// Contexts a profile may lay out; without one the menu falls back to another context's.
+    pub const OPTIONAL: [MenuContext; 1] = [MenuContext::SketchSelected];
+
     fn name(self) -> &'static str {
         match self {
             MenuContext::Face => "face",
@@ -133,6 +139,7 @@ impl MenuContext {
             MenuContext::AssemblyComponent => "assembly_component",
             MenuContext::AssemblyEmpty => "assembly_empty",
             MenuContext::DrawingEmpty => "drawing_empty",
+            MenuContext::SketchSelected => "sketch_selected",
         }
     }
 }
@@ -182,6 +189,7 @@ pub const MARKING_ACTIONS: &[&str] = &[
     "ui.createDrawingView",
     "ui.previousSheet",
     "ui.nextSheet",
+    "ui.editSketch",
 ];
 
 /// The ring has this many slots, clockwise from north.

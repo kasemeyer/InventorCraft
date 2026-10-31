@@ -450,3 +450,83 @@ fn the_face_ring_has_no_dead_select_tangencies_pill() {
     assert!(layout_of(&h, MenuContext::Face).unmapped.iter().any(|u| u == "SE: Select Tangencies"));
     assert_eq!(layout_of(&h, MenuContext::Edge).ring[3], "ui.tangentChain", "an edge keeps Select Tangent Chain");
 }
+
+/// A part with a finished 20 x 10 rectangle sketch "Base" on XY (unconsumed), nothing else.
+fn sketched(mut h: Harness) -> (Harness, u64) {
+    h.app.preferences.look_at_anim = false;
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[20,10]})).unwrap();
+    let id = h.app.session.active_sketch.unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.frames(2);
+    (h, id)
+}
+
+const SKETCH_SELECTED_RING: [&str; 8] =
+    ["ui.lookAt", "solid.extrude", "solid.revolve", "solid.hole", "ui.editSketch", "construct.plane.offset", "edit.undo", "inspect.measure"];
+
+/// A sketch picked in a part (its Browser row or its profile in the view) swaps Inventor's
+/// compass to Look At, Extrude, Revolve, Hole, Edit Sketch, Work Plane, Undo, Measure
+/// (clean-room theme doc §Marking menus, R197).
+#[test]
+fn a_selected_sketch_in_a_part_has_its_own_ring() {
+    for pick_of in [|id: u64| Sel::Feature { id }, |id: u64| Sel::Profile { sketch: id, index: 0 }] {
+        let (mut h, id) = sketched(inventor(DocumentKind::Part));
+        h.app.run("select.set", json!({"items": [pick_of(id)]})).unwrap();
+        assert_eq!(context(&h.app), MenuContext::SketchSelected, "{:?}", h.app.session.selection);
+        open(&mut h.app, pos2(400.0, 300.0));
+        let menu = describe(&h.app);
+        assert_eq!(ids(&menu, "radial"), SKETCH_SELECTED_RING, "{menu}");
+        for id in SKETCH_SELECTED_RING.iter().filter(|i| **i != "edit.undo") {
+            assert_eq!(entry(&menu, "radial", id)["enabled"], true, "{id} is live: {menu}");
+        }
+        // S: Edit Sketch opens that sketch.
+        pick(&mut h.app, "ui.editSketch").unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.active_sketch, Some(id), "Edit Sketch opens the picked sketch");
+    }
+}
+
+#[test]
+fn a_selected_sketchs_extrude_starts_with_its_profile_and_look_at_faces_it() {
+    let (mut h, id) = sketched(inventor(DocumentKind::Part));
+    h.app.run("ui.view", json!({"view": "iso"})).ok();
+    h.app.run("select.set", json!({"items": [Sel::Feature { id }]})).unwrap();
+    open(&mut h.app, pos2(400.0, 300.0));
+    pick(&mut h.app, "ui.lookAt").unwrap();
+    h.frames(30);
+    assert!(h.app.cam.back().z.abs() > 0.999, "facing the XY sketch: {:?}", h.app.cam.back());
+    h.app.run("select.set", json!({"items": [Sel::Feature { id }]})).unwrap();
+    open(&mut h.app, pos2(400.0, 300.0));
+    pick(&mut h.app, "solid.extrude").unwrap();
+    h.frames(2);
+    let d = h.app.dialog.as_ref().expect("Extrude opened");
+    assert!(matches!(d.kind, crate::dialogs::Kind::Extrude { .. }));
+    let items = &d.inputs[0].items;
+    assert!(
+        !items.is_empty() && items.iter().all(|s| matches!(s, Sel::Profile { sketch, .. } if *sketch == id)),
+        "the sketch's profile is picked: {items:?}"
+    );
+}
+
+/// SolidCraft has no marking menus: a picked sketch keeps its list menu, as before.
+#[test]
+fn solidcraft_keeps_its_menu_for_a_selected_sketch() {
+    let (mut h, id) = sketched(Harness::new());
+    h.app.run("select.set", json!({"items": [Sel::Feature { id }]})).unwrap();
+    open(&mut h.app, pos2(400.0, 300.0));
+    assert_eq!(describe(&h.app)["radial"], json!([]));
+    assert!(layout(&h.app).is_none() && ring(&h.app).is_none());
+}
+
+/// Without a `sketch_selected` layout a profile's picked sketch falls back to its empty ring.
+#[test]
+fn a_profile_without_a_sketch_selected_layout_falls_back_to_empty() {
+    let (mut h, id) = sketched(inventor(DocumentKind::Part));
+    h.app.run("select.set", json!({"items": [Sel::Feature { id }]})).unwrap();
+    let mut p = crate::profile::active(&h.app).clone();
+    p.workflow.marking_menu.as_mut().unwrap().remove(&MenuContext::SketchSelected);
+    assert!(crate::profile_workflow::validate_workflow(&p.workflow).is_empty(), "the layout is optional");
+    assert_eq!(super::sketch_context(&h.app, p.workflow.marking_menu.as_ref()), MenuContext::Empty);
+}

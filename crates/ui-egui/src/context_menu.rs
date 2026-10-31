@@ -1254,6 +1254,14 @@ fn id_of(p: &Value, k: &str) -> Option<u64> {
 }
 
 /// Run a menu item (what a click on it does). `at` places a rename box.
+/// Start a profile feature with every profile of a sketch picked.
+fn start_on_sketch(app: &mut SolveApp, command: &str, sketch: u64) {
+    let n = app.session.world_state().sketch(sketch).map_or(0, |s| s.profiles.len());
+    let items: Vec<Value> = (0..n).map(|i| json!({"type": "profile", "sketch": sketch, "index": i})).collect();
+    let _ = app.run("select.set", json!({ "items": items }));
+    app.start(command);
+}
+
 pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
     if !item.enabled || item.is_sep() || item.is_heading() {
         return;
@@ -1690,10 +1698,13 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         }
         "ui.extrudeSketch" => {
             if let Some(id) = id_of(&p, "sketch") {
-                let n = app.session.world_state().sketch(id).map_or(0, |s| s.profiles.len());
-                let items: Vec<Value> = (0..n).map(|i| json!({"type": "profile", "sketch": id, "index": i})).collect();
-                let _ = app.run("select.set", json!({ "items": items }));
-                app.start("solid.extrude");
+                start_on_sketch(app, "solid.extrude", id);
+            }
+        }
+        // The marking menu's Extrude / Revolve on a picked sketch's row.
+        "solid.extrude" | "solid.revolve" if id_of(&p, "sketch").is_some() => {
+            if let Some(id) = id_of(&p, "sketch") {
+                start_on_sketch(app, &item.id, id);
             }
         }
         "ui.lookAt" => {

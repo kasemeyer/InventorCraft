@@ -81,6 +81,27 @@ pub(crate) fn context(app: &SolveApp) -> MenuContext {
     } else if has(|s| matches!(s, Sel::Body { .. })) {
         MenuContext::Body
     } else {
+        sketch_context(app, layout(app))
+    }
+}
+
+/// The sketch the selection picks outside a sketch: a sketch's Browser row (`Sel::Feature`) or
+/// one of its profiles in the view.
+pub(crate) fn selected_sketch(app: &SolveApp) -> Option<u64> {
+    let doc = &app.session.doc;
+    app.session.selection.iter().find_map(|s| match s {
+        Sel::Profile { sketch, .. } => Some(*sketch),
+        Sel::Feature { id } if doc.feature(*id).is_some_and(|f| matches!(f.kind, solidcraft_engine::doc::FeatureKind::Sketch { .. })) => Some(*id),
+        _ => None,
+    })
+}
+
+/// A picked sketch's own ring where the layouts have one (Inventor's Look At … Edit Sketch),
+/// else the empty ring.
+pub(crate) fn sketch_context(app: &SolveApp, layouts: Option<&BTreeMap<MenuContext, MenuLayout>>) -> MenuContext {
+    if layouts.is_some_and(|l| l.contains_key(&MenuContext::SketchSelected)) && selected_sketch(app).is_some() {
+        MenuContext::SketchSelected
+    } else {
         MenuContext::Empty
     }
 }
@@ -278,11 +299,30 @@ pub(crate) fn item(app: &SolveApp, id: &str, ctx: MenuContext) -> Item {
                 (MenuContext::Sketch | MenuContext::SketchLine | MenuContext::SketchDimension | MenuContext::Tool, Some(sketch)) => {
                     look.with(json!({ "sketch": sketch }))
                 }
+                (MenuContext::SketchSelected, _) => match selected_sketch(app) {
+                    Some(sketch) => look.with(json!({ "sketch": sketch })),
+                    None => look.on(false),
+                },
                 (MenuContext::Face | MenuContext::Edge | MenuContext::Body, _) => {
                     let can = solidcraft_engine::find_command("view.normal_to").is_some_and(|c| c.info(&app.session).disabled_reason.is_none());
                     look.with(json!({ "camera": app.cam })).on(can)
                 }
                 _ => look.on(false),
+            }
+        }
+        "ui.editSketch" => match selected_sketch(app) {
+            Some(sketch) => act("ui.editSketch", "Edit Sketch", "sketch").with(json!({ "sketch": sketch })),
+            None => act("ui.editSketch", "Edit Sketch", "sketch").on(false),
+        },
+        // A picked sketch's Browser row: Extrude and Revolve take its profiles, as the row's own
+        // Extrude does (a picked profile is already the preselection).
+        "solid.extrude" | "solid.revolve"
+            if ctx == MenuContext::SketchSelected && !app.session.selection.iter().any(|s| matches!(s, Sel::Profile { .. })) =>
+        {
+            let item = cmd(app, id, solidcraft_engine::find_command(id).map_or(id, |c| c.label));
+            match selected_sketch(app) {
+                Some(sketch) => item.with(json!({ "sketch": sketch })),
+                None => item,
             }
         }
         "ui.previousView" => {
