@@ -137,6 +137,9 @@ pub struct TreeState {
     pub constraint_reveal: Option<(u64, u64)>,
     /// The picked constraint's value box at the browser's foot (R185).
     pub value_box: Option<ValueBox>,
+    /// A click on the row a lone constraint pick leads from (constraint, row, time): it renames
+    /// the row once a double-click can no longer follow (R185's slow second click).
+    pub slow_click: Option<(u64, u64, f64)>,
     /// Folders picked in the feature history (features use the engine selection).
     pub picked_timeline_groups: Vec<u64>,
     /// Last feature-history item clicked, for Shift ranges (`f:<id>` or `g:<id>`).
@@ -2677,6 +2680,10 @@ mod constraint_tests;
 #[path = "browser_constraint_value_tests.rs"]
 mod constraint_value_tests;
 
+#[cfg(test)]
+#[path = "browser_constraint_rename_tests.rs"]
+mod constraint_rename_tests;
+
 // ---------------------------------------------------------------------------------------------
 // Constraint rows and component status (Plan E-2 Task 4, spec §6.4)
 // ---------------------------------------------------------------------------------------------
@@ -2761,11 +2768,26 @@ fn shows_status(app: &SolveApp) -> bool {
 thread_local! {
     /// The Modify box's row was drawn since the last frame began (or Modify just opened).
     static MODIFY_DRAWN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// The same for a constraint's inline rename box (R185).
+    static RENAME_DRAWN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Modify opened: its row draws on the next frame.
 pub(crate) fn modify_opened() {
     MODIFY_DRAWN.with(|d| d.set(true));
+}
+
+/// A constraint's inline rename opened: its row draws on the next frame.
+pub(crate) fn inline_rename_opened() {
+    RENAME_DRAWN.with(|d| d.set(true));
+}
+
+/// The constraint `app.menu.rename` renames in a row, if any.
+fn renaming_constraint(app: &SolveApp) -> Option<u64> {
+    match app.menu.rename.as_ref().filter(|r| r.inline)?.what {
+        crate::context_menu::RenameWhat::Constraint(c) => Some(c),
+        _ => None,
+    }
 }
 
 /// Picked constraints that no longer exist are dropped, every frame, whether or not the browser
@@ -2774,6 +2796,13 @@ pub(crate) fn modify_opened() {
 pub(crate) fn prune_picked_constraints(app: &mut SolveApp) {
     if app.menu.modify.is_some() && !MODIFY_DRAWN.with(|d| d.replace(false)) {
         app.menu.modify = None;
+    }
+    // A constraint renamed in a row that is not drawn (folded away) goes to the floating box.
+    if renaming_constraint(app).is_some()
+        && !RENAME_DRAWN.with(|d| d.replace(false))
+        && let Some(r) = app.menu.rename.as_mut()
+    {
+        r.inline = false;
     }
     let rows = &app.session.constraint_report.rows;
     if app.tree.picked_constraints.iter().any(|p| !rows.iter().any(|r| r.id == *p)) {
@@ -2885,8 +2914,16 @@ pub(crate) fn constraint_row(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, und
         MODIFY_DRAWN.with(|d| d.set(true));
         modify_box(app, ui, rect, depth, id, under);
     }
+    // Renamed in this row (F2, a slow second click; R185): the row the pick leads from.
+    let rename_under = app.tree.constraint_row.filter(|(c, _)| *c == id).map_or(0, |(_, u)| u);
+    let renaming = renaming_constraint(app) == Some(id) && under == rename_under;
+    if let (true, Some(rect)) = (renaming, row_rect) {
+        RENAME_DRAWN.with(|d| d.set(true));
+        constraint_rename_box(app, ui, rect, id, under, depth);
+    }
     let typed = app.menu.modify.as_ref().filter(|m| m.constraint == id && m.under == under);
-    let error = typed.and_then(|m| m.error.clone());
+    let renamed = app.menu.rename.as_ref().filter(|_| renaming && renaming_constraint(app) == Some(id));
+    let error = typed.and_then(|m| m.error.clone()).or_else(|| renamed.and_then(|r| r.error.clone()));
     if let Some(error) = &error {
         modify_error(ui, depth, error);
     }
@@ -2912,12 +2949,37 @@ pub(crate) fn constraint_row(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, und
         resp.clone().on_hover_text(tip);
     }
     if r.clicked {
-        pick_constraint(app, id, ui.input(|i| i.modifiers.command || i.modifiers.ctrl));
+        let ctrl = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
+        let lead = app.tree.picked_constraints == [id] && app.tree.constraint_row == Some((id, under));
+        if r.double {
+            // A fast double-click keeps joint rows' behaviour: the pick toggles, Edit opens.
+            app.tree.slow_click = None;
+            pick_constraint(app, id, ctrl);
+        } else if lead && !ctrl {
+            // A second click on the picked row: a rename, unless it turns into a double-click.
+            app.tree.slow_click = Some((id, under, ui.input(|i| i.time)));
+        } else {
+            pick_constraint(app, id, ctrl);
+        }
         app.tree.constraint_row = Some((id, under));
     }
     // A double-click edits it (the Constrain panel, "EDIT Constrain").
     if r.double {
         crate::dialogs_constraint::open_edit(app, id);
+    }
+    if let Some((c, u, at)) = app.tree.slow_click
+        && (c, u) == (id, under)
+    {
+        let wait = ui.ctx().options(|o| o.input_options.max_double_click_delay);
+        let now = ui.input(|i| i.time);
+        if app.tree.picked_constraints != [id] {
+            app.tree.slow_click = None;
+        } else if now - at > wait {
+            app.tree.slow_click = None;
+            crate::context_menu::rename_constraint_inline(app, id, row_rect.map(|r| r.left_bottom()).unwrap_or_default());
+        } else {
+            ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64((wait - (now - at)).max(0.0)));
+        }
     }
     // Its list (R72: a list, never a ring): the row becomes the pick first, as a joint's does.
     if let Some(at) = r.secondary {
@@ -2964,6 +3026,59 @@ fn modify_box(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect, depth: usize, id
             m.error = None;
         }
         app.menu.modify = Some(m);
+    }
+}
+
+/// A constraint's name typed in its row (R185): it opens with the name selected; Enter renames
+/// it (`constraint.edit {name}`, one step) unless `check_name` refuses the name, when the box
+/// stays with the reason under the row; Escape cancels, and leaving the box keeps a good name.
+fn constraint_rename_box(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect, id: u64, under: u64, depth: usize) {
+    let Some(mut rename) = app.menu.rename.take() else { return };
+    let left = label_left(row.left(), depth);
+    let edit_rect = Rect::from_min_max(pos2(left, row.top() + 1.0), pos2(row.right() - 3.0, row.bottom() - 1.0));
+    ui.painter().rect_filled(edit_rect, 3.0, Tokens::get().field);
+    let edit_id = ui.id().with(("constraint_rename", id, under));
+    let response = crate::ui_kit::inline_name(ui, edit_rect, edit_id, &mut rename.text);
+    crate::scenario::publish_handle(&format!("rename:constraint:{id}:{under}"), edit_rect.center());
+    let was_focused = rename.focused;
+    if !rename.focused {
+        if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), edit_id) {
+            let end = rename.text.chars().count();
+            state.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(end))));
+            state.store(ui.ctx(), edit_id);
+        }
+        response.request_focus();
+        rename.focused = true;
+    }
+    let (escape, enter) = ui.input(|i| (i.key_pressed(egui::Key::Escape), i.key_pressed(egui::Key::Enter)));
+    let left_box = was_focused && response.lost_focus() && !enter;
+    if escape {
+        // Dropping the state cancels it: no step.
+        return;
+    }
+    if response.changed() {
+        rename.error = None;
+    }
+    if !enter && !left_box {
+        app.menu.rename = Some(rename);
+        return;
+    }
+    let name = rename.text.trim().to_string();
+    let current = app.session.doc.assembly.constraint(&id.to_string()).map(|c| c.name.clone()).unwrap_or_default();
+    if name == current || name.is_empty() {
+        return;
+    }
+    match solidcraft_engine::doc::constraints::check_name(&app.session.doc.assembly, &name, Some(id)) {
+        Ok(()) => crate::context_menu::commit_rename(app, &rename),
+        // Clicking away from a refused name leaves the name as it was.
+        Err(_) if left_box => {}
+        Err(e) => {
+            app.set_status(e.to_string(), true);
+            rename.error = Some(e.to_string());
+            // Enter gave up the box's focus: it takes it back on the next frame.
+            rename.focused = false;
+            app.menu.rename = Some(rename);
+        }
     }
 }
 

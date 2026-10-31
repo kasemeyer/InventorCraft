@@ -300,6 +300,8 @@ pub struct Rename {
     pub(crate) focused: bool,
     /// Edited in the browser row itself (a double-click on a body), not in the floating box.
     pub(crate) inline: bool,
+    /// Why the typed name was refused (a constraint's row keeps its box open with it, R185).
+    pub(crate) error: Option<String>,
 }
 
 /// A constraint's offset or angle typed in its browser row (Modify): Enter edits the offset,
@@ -1824,6 +1826,13 @@ pub fn toggle_visibility(app: &mut SolveApp) {
 /// Rename what is selected (F2): one body, sketch or feature, construction plane, component
 /// picked in the browser, or canvas.
 pub fn rename_selection(app: &mut SolveApp, at: Pos2) -> bool {
+    // A picked constraint is renamed in its row (R185), as Inventor's browser does.
+    if let [c] = app.tree.picked_constraints.as_slice()
+        && app.session.selection.is_empty()
+    {
+        rename_constraint_inline(app, *c, at);
+        return true;
+    }
     let what = match (app.session.selection.as_slice(), app.tree.picked_components.as_slice(), app.tree.picked_canvases.as_slice()) {
         ([Sel::Body { name }], [], []) => RenameWhat::Body(name.clone()),
         ([Sel::Feature { id }], [], []) => RenameWhat::Feature(*id),
@@ -1865,6 +1874,15 @@ fn tangent_chain(app: &mut SolveApp) {
     }
 }
 
+/// Rename constraint `id` in the row its pick leads from (F2, a slow second click; R185).
+pub(crate) fn rename_constraint_inline(app: &mut SolveApp, id: u64, at: Pos2) {
+    start_rename(app, RenameWhat::Constraint(id), at);
+    if let Some(r) = app.menu.rename.as_mut() {
+        r.inline = true;
+    }
+    crate::browser::inline_rename_opened();
+}
+
 pub fn start_rename(app: &mut SolveApp, what: RenameWhat, at: Pos2) {
     let doc = &app.session.doc;
     let text = match &what {
@@ -1879,7 +1897,7 @@ pub fn start_rename(app: &mut SolveApp, what: RenameWhat, at: Pos2) {
         RenameWhat::Joint(j) => doc.assembly.joints.iter().find(|x| x.id == *j).map(|x| x.name.clone()).unwrap_or_default(),
         RenameWhat::Constraint(c) => doc.assembly.constraint(&c.to_string()).map(|x| x.name.clone()).unwrap_or_default(),
     };
-    app.menu.rename = Some(Rename { what, text, at, focused: false, inline: false });
+    app.menu.rename = Some(Rename { what, text, at, focused: false, inline: false, error: None });
 }
 
 pub(crate) fn commit_rename(app: &mut SolveApp, r: &Rename) {
