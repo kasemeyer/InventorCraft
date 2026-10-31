@@ -355,6 +355,19 @@ fn the_control_channel_drive_reports_the_refusal() {
     assert_eq!(form(&h).constraint, mate, "an unsuppressed pick opens its panel");
 }
 
+/// Wave 1 item 12: Drive has one way in. The panel opener has no second route that could skip
+/// `open`'s refusal; `ui.start` still opens a drivable pick's panel and refuses a suppressed one
+/// (above).
+#[test]
+fn drive_opens_only_through_open() {
+    let (mut h, mate) = contact_setup();
+    h.app.tree.picked_constraints = vec![mate];
+    assert!(crate::dialogs_assembly::start(&h.app, "ui.constraintDrive").is_none(), "no second route");
+    h.call("ui.start", json!({"command": "ui.constraintDrive"}));
+    h.frames(2);
+    assert_eq!(form(&h).constraint, mate, "ui.start opens it through open");
+}
+
 #[test]
 fn steps_move_one_frame() {
     let (mut h, mate) = contact_setup();

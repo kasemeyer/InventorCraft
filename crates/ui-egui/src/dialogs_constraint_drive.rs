@@ -407,14 +407,6 @@ pub fn open(app: &mut SolveApp, id: u64) {
     app.dialog = Some(Dialog::new(Kind::Assembly(Asm::DriveConstraint(Box::new(form))), vec![]));
 }
 
-/// `ui.constraintDrive` started without a row (the control channel): the first picked
-/// constraint's panel.
-pub fn start(app: &SolveApp) -> Option<(Kind, Vec<crate::selection::SelInput>)> {
-    let id = *app.tree.picked_constraints.first()?;
-    let form = DriveForm::new(app, id)?;
-    Some((Kind::Assembly(Asm::DriveConstraint(Box::new(form))), vec![]))
-}
-
 /// Once a frame (from the preview update): with the Drive panel open, the occurrences the shown
 /// frame moves, at their world poses (none at the start pose). Publishes the running count
 /// `constraint_drives` and `constraint_drive_moved` (0 when no panel shows a frame).

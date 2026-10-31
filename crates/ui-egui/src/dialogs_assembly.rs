@@ -231,7 +231,8 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "joint.gear" | "joint.rack_pinion" | "joint.screw" => crate::dialogs_coupling::start(app, id)?,
         "joint.cam" => crate::dialogs_coupling::cam::start(app),
         "constraint.create" => return crate::dialogs_constraint::start(app),
-        "ui.constraintDrive" => return crate::dialogs_constraint_drive::start(app),
+        // Drive has one way in, `dialogs_constraint_drive::open` (from `SolveApp::start` and the
+        // row menu), which says why a suppressed or Lost pick can't be driven (R162).
         "inspect.interference" => (
             Asm::Interference { result: None, overlaps: Vec::new(), of: Vec::new(), clearance: "0".into() },
             vec![SelInput::new("Bodies (all if none)", BODIES, true)],
