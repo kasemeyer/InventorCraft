@@ -68,6 +68,8 @@ pub(crate) struct DrawnGlyph {
     pub(crate) hot: bool,
     /// Anchors drawn faded: behind a face from where the view looks (R176).
     pub(crate) faded: usize,
+    /// Lit: the pointer is on it or its browser row is picked (the selection ring).
+    pub(crate) lit: bool,
 }
 
 thread_local! {
@@ -85,8 +87,43 @@ fn placed(app: &SolveApp, proj: &Proj) -> Vec<(u64, Pos2, [Option<Pos2>; 2], boo
     placed_world(app, proj).into_iter().map(|(id, at, anchors, sick)| (id, at, anchors.map(|a| a.map(|a| a.1)), sick)).collect()
 }
 
-/// [`placed`] with each anchor's world point too.
-fn placed_world(app: &SolveApp, proj: &Proj) -> Vec<(u64, Pos2, [Option<(Vec3, Pos2)>; 2], bool)> {
+/// One glyph as placed on screen: (id, its point, its anchors (world, screen), sick).
+type Placed = (u64, Pos2, [Option<(Vec3, Pos2)>; 2], bool);
+
+thread_local! {
+    /// The glyphs placed for a view and report (`placed_key`): the click, the hover and the
+    /// drawing of one frame place them once.
+    static PLACED: RefCell<Option<(u64, Vec<Placed>)>> = const { RefCell::new(None) };
+}
+
+/// What [`placed_world`] depends on: the camera and viewport, the shown set and the rows.
+fn placed_key(app: &SolveApp, proj: &Proj) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    format!("{:?}{:?}", app.cam, proj.rect).hash(&mut h);
+    app.session.shown_constraints.hash(&mut h);
+    for r in report_rows(app) {
+        r.id.hash(&mut h);
+        std::mem::discriminant(&r.status).hash(&mut h);
+        for p in r.anchors.iter().flatten() {
+            [p.x, p.y, p.z].map(f64::to_bits).hash(&mut h);
+        }
+    }
+    h.finish()
+}
+
+/// [`placed`] with each anchor's world point too (once per view and report, [`PLACED`]).
+fn placed_world(app: &SolveApp, proj: &Proj) -> Vec<Placed> {
+    let key = placed_key(app, proj);
+    if let Some(hit) = PLACED.with(|p| p.borrow().as_ref().filter(|(k, _)| *k == key).map(|(_, v)| v.clone())) {
+        return hit;
+    }
+    let placed = place_glyphs(app, proj);
+    PLACED.with(|p| *p.borrow_mut() = Some((key, placed.clone())));
+    placed
+}
+
+fn place_glyphs(app: &SolveApp, proj: &Proj) -> Vec<Placed> {
     glyphs(app)
         .into_iter()
         .filter_map(|(id, m, sick)| {
@@ -137,8 +174,17 @@ pub(crate) fn draw(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let mut drawn = Vec::new();
     let mut checks = 0;
     for (id, at, anchors, sick) in placed_world(app, proj) {
-        let Some(kind) = report_rows(app).find(|r| r.id == id).map(|r| r.kind) else { continue };
-        let colour = if sick { t.error } else { t.accent };
+        let Some((kind, suppressed)) = report_rows(app).find(|r| r.id == id).map(|r| (r.kind, r.status == ConstraintStatus::Suppressed)) else {
+            continue;
+        };
+        // A suppressed one is dim, as its browser row (R177).
+        let colour = if sick {
+            t.error
+        } else if suppressed {
+            t.text_dim
+        } else {
+            t.accent
+        };
         let picked = app.tree.picked_constraints.contains(&id);
         let leaders: Vec<(Vec3, Pos2)> = anchors.into_iter().flatten().collect();
         let mut faded = 0;
@@ -152,14 +198,14 @@ pub(crate) fn draw(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
             painter.circle_filled(*a, 2.0, c);
         }
         let lit = hot == Some(id) || picked;
-        crate::icons::markers::constraint_glyph(painter, at, kind, colour);
+        crate::icons::markers::constraint_glyph(painter, at, kind, colour, GLYPH_SIZE);
         // Lit by the pointer or the row's pick: a selection ring round the plate.
         if lit {
             let ring = egui::Rect::from_center_size(at, egui::vec2(GLYPH_SIZE + 5.0, GLYPH_SIZE + 5.0));
             painter.rect_stroke(ring, 4.5, Stroke::new(2.0, t.sel_edge), egui::StrokeKind::Middle);
         }
         crate::scenario::publish_handle(&format!("glyph:constraint:{id}"), at);
-        drawn.push(DrawnGlyph { id, at, colour, leaders: leaders.len(), hot: hot == Some(id), faded });
+        drawn.push(DrawnGlyph { id, at, colour, leaders: leaders.len(), hot: hot == Some(id), faded, lit });
     }
     DRAWN.with(|d| *d.borrow_mut() = drawn);
 }
@@ -211,17 +257,25 @@ pub(crate) fn prompt(app: &SolveApp) -> Option<&'static str> {
     app.viewport.show_pick.then_some("ui.constraint.show_prompt")
 }
 
-/// A click in the view while Show waits: a component shows its constraints; anything else ends
-/// the wait. True when the click was taken.
-pub(crate) fn pick(app: &mut SolveApp, sel: Option<&Sel>) -> bool {
+/// End Show's wait for a component click, and its prompt with it (a click, Esc, another
+/// command). True when it was waiting.
+pub(crate) fn end_wait(app: &mut SolveApp) -> bool {
     if !app.viewport.show_pick {
         return false;
     }
     app.viewport.show_pick = false;
-    // The prompt goes with the wait.
     let asked = crate::i18n::tr("ui.constraint.show_prompt");
     if app.status.as_ref().is_some_and(|(text, _, _)| text == asked) {
         app.status = None;
+    }
+    true
+}
+
+/// A click in the view while Show waits: a component shows its constraints; anything else ends
+/// the wait. True when the click was taken.
+pub(crate) fn pick(app: &mut SolveApp, sel: Option<&Sel>) -> bool {
+    if !end_wait(app) {
+        return false;
     }
     if let Some(o) = sel.and_then(|s| occurrence_of(app, s)) {
         let _ = app.run("constraint.show", json!({ "occurrences": [o] }));

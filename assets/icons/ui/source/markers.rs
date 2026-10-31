@@ -151,16 +151,25 @@ pub(crate) fn status(painter: &egui::Painter, r: egui::Rect, name: &str, col: Co
 /// problem). Our own marks, not a vendor's: two facing bars (Mate), an opened corner with its arc
 /// (Angle), a circle on a line (Tangent), a ring on its axis (Insert), mirrored wedges about a
 /// centre line (Symmetry).
-pub(crate) fn constraint_glyph(painter: &egui::Painter, at: Pos2, kind: solidcraft_engine::doc::constraints::ConstraintKind, col: Color32) {
+pub(crate) fn constraint_glyph(
+    painter: &egui::Painter,
+    at: Pos2,
+    kind: solidcraft_engine::doc::constraints::ConstraintKind,
+    col: Color32,
+    size: f32,
+) {
     use solidcraft_engine::doc::constraints::ConstraintKind as K;
     let t = Tokens::get();
     let ic = t.icons;
-    let half = crate::constraint_overlay::GLYPH_SIZE / 2.0;
+    // Drawn on a 16-point plate; `size` scales it.
+    let k = (size / 16.0).max(0.25);
+    let half = size / 2.0;
     let plate = egui::Rect::from_center_size(at, vec2(half * 2.0, half * 2.0));
-    painter.rect_filled(plate.expand(1.5), 3.5, ic.marker_halo);
-    painter.rect(plate, 3.0, t.panel, Stroke::new(1.2, col), egui::StrokeKind::Inside);
-    let ink = Stroke::new(1.6, col);
-    let p = |x: f32, y: f32| at + vec2(x, y);
+    painter.rect_filled(plate.expand(1.5 * k), 3.5 * k, ic.marker_halo);
+    painter.rect(plate, 3.0 * k, t.panel, Stroke::new(1.2 * k, col), egui::StrokeKind::Inside);
+    let ink = Stroke::new(1.6 * k, col);
+    let thin = Stroke::new(1.1 * k, col);
+    let p = |x: f32, y: f32| at + vec2(x, y) * k;
     match kind {
         K::Mate => {
             painter.line_segment([p(-4.5, -2.0), p(4.5, -2.0)], ink);
@@ -175,19 +184,19 @@ pub(crate) fn constraint_glyph(painter: &egui::Painter, at: Pos2, kind: solidcra
                     p(-4.5 + 5.5 * a.cos(), 4.0 + 5.5 * a.sin())
                 })
                 .collect();
-            painter.add(egui::Shape::line(arc, Stroke::new(1.1, col)));
+            painter.add(egui::Shape::line(arc, thin));
         }
         K::Tangent => {
             painter.line_segment([p(-5.0, 4.5), p(5.0, 4.5)], ink);
-            painter.circle_stroke(p(0.0, 0.5), 3.6, ink);
+            painter.circle_stroke(p(0.0, 0.5), 3.6 * k, ink);
         }
         K::Insert => {
-            painter.circle_stroke(at, 3.8, ink);
-            painter.line_segment([p(0.0, -5.5), p(0.0, 5.5)], Stroke::new(1.1, col));
+            painter.circle_stroke(at, 3.8 * k, ink);
+            painter.line_segment([p(0.0, -5.5), p(0.0, 5.5)], thin);
         }
         K::Symmetry => {
             for y in [-5.0, -1.5, 2.0] {
-                painter.line_segment([p(0.0, y), p(0.0, y + 2.0)], Stroke::new(1.1, col));
+                painter.line_segment([p(0.0, y), p(0.0, y + 2.0)], thin);
             }
             painter.add(egui::Shape::convex_polygon(vec![p(-1.8, -3.0), p(-1.8, 3.0), p(-5.0, 0.0)], col, Stroke::NONE));
             painter.add(egui::Shape::convex_polygon(vec![p(1.8, -3.0), p(5.0, 0.0), p(1.8, 3.0)], col, Stroke::NONE));

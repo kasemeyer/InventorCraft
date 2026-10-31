@@ -3645,7 +3645,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::ref_images::show(app, ui, &painter, &proj);
     crate::dialogs_assembly::origins(app, &painter, &proj);
     crate::dialogs_assembly::joint_glyphs(app, &painter, &proj);
-    app.viewport.constraint_hover = hover.filter(|_| inside).and_then(|p| crate::constraint_overlay::hit(app, &proj, p));
+    // As a click on a glyph, not while sketching.
+    app.viewport.constraint_hover =
+        hover.filter(|_| inside && app.session.active_sketch.is_none()).and_then(|p| crate::constraint_overlay::hit(app, &proj, p));
     crate::constraint_overlay::draw(app, &painter, &proj);
     overlays(app, &painter, &proj);
     crate::dim_view::show(app, ui, &painter, &proj);

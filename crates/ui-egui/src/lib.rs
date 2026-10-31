@@ -1002,7 +1002,7 @@ impl SolveApp {
 
     fn start_with_variant_memory(&mut self, id: &str, remember_variant: bool) {
         // Any command ends Show's wait for a component click.
-        self.viewport.show_pick = false;
+        constraint_overlay::end_wait(self);
         if id == "ui.palette" {
             shortcut_box::open(self, None);
             return;

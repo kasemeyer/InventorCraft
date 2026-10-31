@@ -298,3 +298,81 @@ fn anchors_behind_faces_fade() {
         assert_eq!(of("Mate:2").faded, 0, "top-face anchors are in view");
     }
 }
+
+/// R177: a suppressed constraint's glyph draws dimmed, as its browser row, not in the accent.
+#[test]
+fn a_suppressed_glyph_is_dim() {
+    for mut h in [blocks(), blocks_on(Harness::new())] {
+        let mut p = mate_ab(&h, 50.0, 25.0);
+        p["suppressed"] = json!(true);
+        run(&mut h, "constraint.create", p);
+        run(&mut h, "constraint.show", json!({"occurrences": ["B"]}));
+        h.frames(2);
+        let t = crate::theme::Tokens::get();
+        let drawn = drawn_glyphs();
+        assert_eq!(drawn.len(), 1, "{drawn:?}");
+        assert_eq!(drawn[0].colour, t.text_dim, "dim, like the suppressed row");
+    }
+}
+
+/// Task 7 review: a picked row lights its glyph (the reverse of hovering a glyph lighting rows).
+#[test]
+fn a_picked_row_lights_its_glyph() {
+    let mut h = blocks();
+    let p = mate_ab(&h, 50.0, 25.0);
+    run(&mut h, "constraint.create", p);
+    let (mate, b) = (constraint_id(&h, "Mate:1"), occ(&h, "B"));
+    run(&mut h, "constraint.show", json!({"occurrences": ["B"]}));
+    h.frames(2);
+    assert!(!drawn_glyphs()[0].lit);
+    h.step(&json!({"click": {"handle": format!("row:constraint:{mate}:{b}")}})).unwrap();
+    h.frames(2);
+    assert!(drawn_glyphs()[0].lit, "the picked row's glyph is lit");
+}
+
+/// Task 7 review: with the Constrain panel open, a click on a glyph is a pick for the panel (the
+/// face under it), not a pick of the glyph's constraint.
+#[test]
+fn the_constrain_panel_takes_clicks_over_glyphs() {
+    let mut h = blocks();
+    // The Insert's glyph sits on the hole's rim, over the plate and the pin.
+    run(&mut h, "constraint.create", insert_plate_pin());
+    run(&mut h, "constraint.show", json!({"occurrences": ["Plate"]}));
+    h.frames(2);
+    let s = drawn_glyphs()[0].at;
+    h.app.start("constraint.create");
+    h.frames(3);
+    h.step(&json!({"click": [s.x, s.y]})).unwrap();
+    h.frames(3);
+    assert!(h.app.tree.picked_constraints.is_empty(), "the glyph's constraint is not picked");
+    let Some(crate::dialogs::Kind::Assembly(crate::dialogs_assembly::Asm::Constraint(f))) = h.app.dialog.as_ref().map(|d| &d.kind) else {
+        panic!("the panel is open")
+    };
+    assert!(f.picks[0].is_some(), "the click filled the panel's first pick: {:?} hover {:?} at {s:?}", f.picks, f.hover);
+}
+
+/// Task 7 review: in a sketch, the pointer on a glyph does not light it (as a click does not
+/// pick it); and Esc ends Show's wait with its prompt.
+#[test]
+fn sketching_ignores_glyph_hover_and_esc_ends_the_show_wait() {
+    let mut h = blocks();
+    let p = mate_ab(&h, 50.0, 25.0);
+    run(&mut h, "constraint.create", p);
+    run(&mut h, "constraint.show", json!({"occurrences": ["B"]}));
+    h.frames(2);
+    let s = drawn_glyphs()[0].at;
+    run(&mut h, "sketch.create", json!({"plane": "XY"}));
+    h.step(&json!({"move": [s.x, s.y]})).unwrap();
+    h.frames(3);
+    assert_eq!(h.app.viewport.constraint_hover, None, "no glyph hover while sketching");
+    run(&mut h, "sketch.finish", json!({}));
+    run(&mut h, "select.clear", json!({}));
+    h.app.start("constraint.show");
+    h.frames(2);
+    let prompt = crate::i18n::tr("ui.constraint.show_prompt");
+    assert_eq!(crate::status_bar::texts(&h.app).left, prompt);
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.frames(2);
+    assert!(!h.app.viewport.show_pick, "Esc ends the wait");
+    assert_ne!(crate::status_bar::texts(&h.app).left, prompt, "and its prompt");
+}
