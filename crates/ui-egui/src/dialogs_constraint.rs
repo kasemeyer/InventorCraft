@@ -349,6 +349,16 @@ pub(crate) fn units(app: &SolveApp) -> String {
     if unit.is_empty() { "mm".into() } else { unit.to_string() }
 }
 
+/// Edit constraint `id` in the Constrain panel ("EDIT Constrain", R143): the record's values and
+/// the same pick input as a new one; OK sends only the touched fields ([`commit`], R162). A Lost
+/// constraint opens too (its picks are the record's; a rename needs nothing re-resolved, R134).
+pub fn open_edit(app: &mut SolveApp, id: u64) {
+    let Some(form) = ConstraintForm::edit(app, id) else { return };
+    app.tool = None;
+    app.dialog =
+        Some(crate::dialogs::Dialog::new(Kind::Assembly(Asm::Constraint(Box::new(form))), vec![SelInput::new("ui.constraint.picks", PICKS, false)]));
+}
+
 /// What the panel's one selection input takes: the viewport's hover, click and Select Other
 /// reach the panel through it; a pick goes into the form ([`take`]), never into the input.
 pub const PICKS: Accept = FACES | EDGES | VERTICES | PLANES | AXES | ORIGIN;

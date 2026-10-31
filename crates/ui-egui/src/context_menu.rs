@@ -65,6 +65,12 @@ pub enum Target {
     Joint {
         id: u64,
     },
+    /// An assembly constraint's browser row: under Relationships (`under` 0) or under the
+    /// placement of one of its two components (Plan E-2 Task 5).
+    Constraint {
+        id: u64,
+        under: u64,
+    },
     /// A command (toolbar button, panel drop-down row, S box row).
     ToolbarCommand {
         id: String,
@@ -123,6 +129,9 @@ pub struct Item {
     /// A check-mark entry (a profile's `menu_labels` "Grounded"): drawn checked or unchecked.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub checked: Option<bool>,
+    /// The hover text, shown on a disabled entry too (why it is disabled).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tip: Option<String>,
 }
 
 impl Item {
@@ -141,6 +150,7 @@ impl Item {
             children: Vec::new(),
             swatch: None,
             checked: None,
+            tip: None,
         }
     }
     fn heading(label: &str) -> Item {
@@ -154,6 +164,7 @@ impl Item {
             children: Vec::new(),
             swatch: None,
             checked: None,
+            tip: None,
         }
     }
     fn is_sep(&self) -> bool {
@@ -197,6 +208,7 @@ pub(crate) fn cmd(app: &SolveApp, id: &str, label: &str) -> Item {
         children: Vec::new(),
         swatch: None,
         checked: None,
+        tip: None,
     }
 }
 
@@ -224,6 +236,7 @@ pub(crate) fn act(id: &str, label: &str, icon: &str) -> Item {
         children: Vec::new(),
         swatch: None,
         checked: None,
+        tip: None,
     }
 }
 
@@ -245,6 +258,8 @@ pub struct MenuState {
     pending: Option<(Pos2, Target)>,
     /// An inline rename in progress.
     pub rename: Option<Rename>,
+    /// A constraint's value typed in its browser row (Modify).
+    pub modify: Option<Modify>,
     /// A delete waiting for its confirmation (it takes or breaks other features).
     pub confirm: Option<crate::delete::Pending>,
     /// Identical copies Extract to File found, waiting to be linked too.
@@ -274,6 +289,7 @@ pub enum RenameWhat {
     Canvas(u64),
     View(String),
     Joint(u64),
+    Constraint(u64),
 }
 
 #[derive(Clone, Debug)]
@@ -284,6 +300,18 @@ pub struct Rename {
     pub(crate) focused: bool,
     /// Edited in the browser row itself (a double-click on a body), not in the floating box.
     pub(crate) inline: bool,
+}
+
+/// A constraint's offset or angle typed in its browser row (Modify): Enter edits the offset,
+/// Escape cancels; a value that cannot be used keeps the box open with `error`.
+#[derive(Clone, Debug)]
+pub struct Modify {
+    pub constraint: u64,
+    /// The row it is typed in: 0 = Relationships, else the placement it is drawn under.
+    pub under: u64,
+    pub text: String,
+    pub error: Option<String>,
+    pub(crate) focused: bool,
 }
 
 /// Radial slots, clockwise from the top.
@@ -417,6 +445,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::NamedViews => vec![act("ui.newView", "New Named View", "perspective")],
         Target::Section => crate::browser::section_items(app),
         Target::Joint { id } => joint_items(app, *id),
+        Target::Constraint { id, .. } => constraint_items(app, *id),
         Target::ToolbarCommand { id } => crate::toolbar_custom::command_items(app, id),
         Target::Toolbar => crate::toolbar_custom::toolbar_items(app),
         Target::Workspace => {
@@ -827,6 +856,59 @@ fn joint_items(app: &SolveApp, id: u64) -> Vec<Item> {
         // Hiding a joint hides only its glyph: it still constrains and moves the parts.
         act("browser.visibility", "Show/Hide", "eye").key("V").with(json!({ "joints": joints, "visible": hidden })),
     ]
+}
+
+/// A constraint row's list (spec §6.4; R72: a list, built through `marking_menu::item`). The
+/// right-click was not captured, so DOC 7's order: Edit, Modify, Suppress, Delete, Drive, Lock
+/// Turn (Insert only), Other Half, Find in Window; then Rename. Every row carries
+/// `{constraint}`; the row it was opened on is the menu's target (Modify and Other Half read it).
+fn constraint_items(app: &SolveApp, id: u64) -> Vec<Item> {
+    use crate::i18n::tr;
+    use solidcraft_engine::doc::constraints::ConstraintKind;
+    let Some(c) = app.session.doc.assembly.constraint(&id.to_string()) else { return Vec::new() };
+    let params = json!({ "constraint": id });
+    let entry = |command: &str, label: &str| {
+        let mut item = crate::marking_menu::item(app, command, crate::profile_workflow::MenuContext::Empty).with(params.clone());
+        item.label = tr(label).to_string();
+        item
+    };
+    let mut suppress = entry("constraint.suppress", "ui.constraint.suppress");
+    suppress.checked = Some(c.suppressed);
+    let mut drive = entry("ui.constraintDrive", "ui.constraint.drive");
+    // The engine's refusal, before it is asked (R162): a suppressed or Lost constraint can't be driven.
+    drive.tip = drive_refusal(app, id);
+    let drive = if drive.tip.is_some() { drive.on(false) } else { drive };
+    let mut v = vec![
+        entry("constraint.edit", "ui.constraint.edit"),
+        entry("ui.constraintModify", "ui.constraint.modify"),
+        suppress,
+        entry("constraint.delete", "ui.constraint.delete"),
+        drive,
+    ];
+    if c.kind == ConstraintKind::Insert {
+        let mut lock = entry("ui.constraintLock", "ui.constraint.lock");
+        lock.checked = Some(c.lock);
+        v.push(lock);
+    }
+    v.push(entry("ui.constraintOtherHalf", "ui.constraint.other_half"));
+    v.push(entry("ui.constraintFind", "ui.constraint.find"));
+    v.push(Item::sep());
+    v.push(act("ui.rename", "Rename", "rename").with(params));
+    v
+}
+
+/// Why `constraint.drive` would refuse constraint `id` (its words, `cmd/constraints.rs` `drive`):
+/// it is suppressed, or Lost.
+pub(crate) fn drive_refusal(app: &SolveApp, id: u64) -> Option<String> {
+    use solidcraft_engine::doc::constraints::ConstraintStatus;
+    let c = app.session.doc.assembly.constraint(&id.to_string())?;
+    if c.suppressed {
+        return Some(crate::i18n::format("ui.constraint.drive_suppressed", &[("name", &c.name)]));
+    }
+    match &app.session.constraint_report.rows.iter().find(|r| r.id == id)?.status {
+        ConstraintStatus::Lost { reason } => Some(crate::i18n::format("ui.constraint.drive_lost", &[("name", &c.name), ("reason", reason)])),
+        _ => None,
+    }
 }
 
 fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
@@ -1347,6 +1429,8 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 RenameWhat::View(v.to_string())
             } else if let Some(j) = id_of(&p, "joint") {
                 RenameWhat::Joint(j)
+            } else if let Some(c) = id_of(&p, "constraint") {
+                RenameWhat::Constraint(c)
             } else {
                 return;
             };
@@ -1479,6 +1563,43 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 && let Err(e) = crate::render_workspace::enter(app, workspace == "render")
             {
                 app.set_status(e, true);
+            }
+        }
+        // A constraint row's list (Plan E-2 Task 5). Edit opens the Constrain panel on it; its OK
+        // sends only the touched fields (R162).
+        "constraint.edit" if p.as_object().is_some_and(|o| o.len() == 1) && p.get("constraint").is_some() => {
+            if let Some(id) = id_of(&p, "constraint") {
+                crate::dialogs_constraint::open_edit(app, id);
+            }
+        }
+        "ui.constraintModify" => {
+            if let Some(id) = id_of(&p, "constraint") {
+                start_modify(app, id, menu_under(app, id));
+            }
+        }
+        // Plan E-2 Task 6 opens the Drive panel here; until then the row says why it can't drive.
+        "ui.constraintDrive" => {
+            if let Some(why) = id_of(&p, "constraint").and_then(|id| drive_refusal(app, id)) {
+                app.set_status(why, true);
+            }
+        }
+        "ui.constraintLock" => {
+            if let Some(c) = id_of(&p, "constraint").and_then(|id| app.session.doc.assembly.constraint(&id.to_string())) {
+                let params = json!({ "constraint": c.id, "lock": !c.lock });
+                let _ = app.run("constraint.edit", params);
+            }
+        }
+        "ui.constraintOtherHalf" => {
+            if let Some(id) = id_of(&p, "constraint") {
+                other_half(app, id, menu_under(app, id));
+            }
+        }
+        "ui.constraintFind" => {
+            if let Some(row) = id_of(&p, "constraint").and_then(|id| app.session.constraint_report.rows.iter().find(|r| r.id == id)) {
+                let bb = crate::dialogs_assembly::occurrence_bounds(&app.session, &row.occurrences);
+                if !bb.is_empty() {
+                    app.frame_bounds(bb);
+                }
             }
         }
         "ui.findJoint" => {
@@ -1737,6 +1858,7 @@ pub fn start_rename(app: &mut SolveApp, what: RenameWhat, at: Pos2) {
         RenameWhat::Canvas(c) => doc.canvases.iter().find(|x| x.id == *c).map(|x| x.name.clone()).unwrap_or_default(),
         RenameWhat::View(v) => v.clone(),
         RenameWhat::Joint(j) => doc.assembly.joints.iter().find(|x| x.id == *j).map(|x| x.name.clone()).unwrap_or_default(),
+        RenameWhat::Constraint(c) => doc.assembly.constraint(&c.to_string()).map(|x| x.name.clone()).unwrap_or_default(),
     };
     app.menu.rename = Some(Rename { what, text, at, focused: false, inline: false });
 }
@@ -1758,7 +1880,85 @@ pub(crate) fn commit_rename(app: &mut SolveApp, r: &Rename) {
         RenameWhat::Canvas(c) => drop(app.run("canvas.edit", json!({ "canvas": c, "name": name }))),
         RenameWhat::View(v) => drop(app.run("view.rename", json!({ "view": v, "name": name }))),
         RenameWhat::Joint(j) => drop(app.run("joint.edit", json!({ "joint": j, "name": name }))),
+        // Only the name: the picks are not looked at again, so a Lost constraint renames (R134).
+        RenameWhat::Constraint(c) => drop(app.run("constraint.edit", json!({ "constraint": c, "name": name }))),
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// A constraint row's Modify and Other Half (Plan E-2 Task 5)
+// ---------------------------------------------------------------------------------------------
+
+/// The row the open (or last) menu was opened on, for constraint `id`: its placement, or 0 for
+/// Relationships (and for a list reached without a row).
+fn menu_under(app: &SolveApp, id: u64) -> u64 {
+    match app.menu.target {
+        Target::Constraint { id: t, under } if t == id => under,
+        _ => 0,
+    }
+}
+
+/// Modify: the constraint's value typed in its row, starting from the record's own text (its
+/// expression, else the number; never a re-formatted value, R162).
+pub fn start_modify(app: &mut SolveApp, id: u64, under: u64) {
+    let Some(c) = app.session.doc.assembly.constraint(&id.to_string()) else { return };
+    let text = solidcraft_engine::constraints::Draft::edit(c).offset.unwrap_or_default();
+    app.menu.rename = None;
+    app.menu.modify = Some(Modify { constraint: id, under, text, error: None, focused: false });
+}
+
+/// What is wrong with `text` as constraint `id`'s offset (a catalog id), before anything is sent:
+/// nothing typed, not a value of its kind (a length; an angle for an Angle), or beyond the
+/// engine's range (`MAX_OFFSET_MM` / `MAX_OFFSET_DEG`).
+pub(crate) fn modify_problem(app: &SolveApp, id: u64, text: &str) -> Option<&'static str> {
+    use solidcraft_engine::doc::constraints::{MAX_OFFSET_DEG, MAX_OFFSET_MM};
+    use solidcraft_engine::doc::expr::Kind as ValueKind;
+    let text = text.trim();
+    if text.is_empty() {
+        return Some("ui.constraint.type_a_value");
+    }
+    let angle = app.session.doc.assembly.constraint(&id.to_string()).is_some_and(|c| c.kind.is_angle());
+    match app.session.doc.eval(text, if angle { ValueKind::Angle } else { ValueKind::Length }) {
+        Ok(v) if v.is_finite() => {
+            let (v, cap) = if angle { (v.to_degrees(), MAX_OFFSET_DEG) } else { (v, MAX_OFFSET_MM) };
+            (v.abs() > cap).then_some("ui.constraint.too_large")
+        }
+        // A number beyond a double's range evaluates to infinity.
+        Err(e) if e.to_string().contains("finite") => Some("ui.constraint.too_large"),
+        _ => Some("ui.constraint.not_a_number"),
+    }
+}
+
+/// Enter in the Modify box: `constraint.edit {constraint, offset}` (one step; only the offset),
+/// or the box stays open naming the problem (no step).
+pub fn commit_modify(app: &mut SolveApp) {
+    let Some(mut m) = app.menu.modify.take() else { return };
+    let error = match modify_problem(app, m.constraint, &m.text) {
+        Some(problem) => Some(crate::i18n::tr(problem).to_string()),
+        None => app
+            .run("constraint.edit", json!({ "constraint": m.constraint, "offset": m.text.trim() }))
+            .err()
+            .map(|e| e.replace("constraint.edit: ", "")),
+    };
+    if let Some(error) = error {
+        m.error = Some(error);
+        // Enter gave up the box's focus: it takes it back on the next frame.
+        m.focused = false;
+        app.menu.modify = Some(m);
+    }
+}
+
+/// Other Half: the same constraint's row under its other component becomes the one the pick
+/// leads from, and the browser scrolls to it (from Relationships: the first component's row).
+fn other_half(app: &mut SolveApp, id: u64, under: u64) {
+    let Some(row) = app.session.constraint_report.rows.iter().find(|r| r.id == id) else { return };
+    let (a, b) = (row.occurrences.first().copied().unwrap_or(0), row.occurrences.get(1).copied().unwrap_or(0));
+    let other = if under == a { b } else { a };
+    if app.tree.picked_constraints != [id] {
+        crate::browser::pick_constraint(app, id, false);
+    }
+    app.tree.constraint_row = Some((id, other));
+    app.tree.constraint_reveal = Some((id, other));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2236,7 +2436,12 @@ pub fn list_row_lit(ui: &mut egui::Ui, item: &Item, lit: bool) -> Option<Item> {
         return None;
     }
     let row = kit_item(item, lit);
-    (row.show(ui).clicked() && item.enabled).then(|| item.clone())
+    let mut response = row.show(ui);
+    if let Some(tip) = &item.tip {
+        // A disabled entry says why (a constraint's Drive, R162).
+        response = response.on_disabled_hover_text(tip.as_str()).on_hover_text(tip.as_str());
+    }
+    (response.clicked() && item.enabled).then(|| item.clone())
 }
 
 fn kit_item(item: &Item, lit: bool) -> crate::ui_kit::MenuItem<'_> {
@@ -2578,3 +2783,7 @@ mod workspace_menu_tests {
         assert!(h.app.viewport.context_menu.is_some());
     }
 }
+
+#[cfg(test)]
+#[path = "constraint_menu_tests.rs"]
+mod constraint_menu_tests;

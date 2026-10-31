@@ -18,7 +18,7 @@ pub struct Pending {
 }
 
 /// What Delete acts on now: the selection (bodies not locked), plus the components picked in
-/// the browser (their occurrences).
+/// the browser (their occurrences) and the canvases, joints and constraints picked there.
 pub fn selection_params(app: &SolveApp) -> Value {
     use solidcraft_engine::Sel;
     let mut items: Vec<Sel> = Vec::new();
@@ -36,11 +36,19 @@ pub fn selection_params(app: &SolveApp) -> Value {
         }
     }
     let occurrences: Vec<u64> = app.tree.picked_components.iter().filter_map(|c| app.session.doc.occurrence_of(*c).map(|o| o.id)).collect();
-    json!({ "items": items, "occurrences": occurrences, "canvases": app.tree.picked_canvases, "joints": app.tree.picked_joints })
+    json!({
+        "items": items,
+        "occurrences": occurrences,
+        "canvases": app.tree.picked_canvases,
+        "joints": app.tree.picked_joints,
+        "constraints": app.tree.picked_constraints,
+    })
 }
 
 fn is_empty(p: &Value) -> bool {
-    ["items", "occurrences", "components", "canvases", "joints"].iter().all(|k| p.get(*k).and_then(Value::as_array).is_none_or(|a| a.is_empty()))
+    ["items", "occurrences", "components", "canvases", "joints", "constraints"]
+        .iter()
+        .all(|k| p.get(*k).and_then(Value::as_array).is_none_or(|a| a.is_empty()))
 }
 
 fn shared_occurrences(app: &SolveApp, params: &Value) -> bool {
@@ -153,6 +161,8 @@ fn run(app: &mut SolveApp, params: &Value) {
             app.tree.picked_components.clear();
             app.tree.picked_canvases.clear();
             app.tree.picked_joints.clear();
+            app.tree.picked_constraints.clear();
+            app.tree.constraint_row = None;
             if let Some(s) = r["skipped"].as_array().and_then(|a| a.first()).and_then(Value::as_str) {
                 app.set_status(format!("deleted; {s}"), false);
             }

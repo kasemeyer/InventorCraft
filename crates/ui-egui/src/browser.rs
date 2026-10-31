@@ -128,6 +128,11 @@ pub struct TreeState {
     pub picked_joints: Vec<u64>,
     /// Constraints picked in the tree: each one's three rows draw selected.
     pub picked_constraints: Vec<u64>,
+    /// The constraint row the pick leads from (constraint id, the placement it is under; 0 =
+    /// Relationships): the row clicked, or the one Other Half moved to.
+    pub constraint_row: Option<(u64, u64)>,
+    /// Scroll to this constraint row (and open its placement) the next time it draws.
+    pub constraint_reveal: Option<(u64, u64)>,
     /// Folders picked in the feature history (features use the engine selection).
     pub picked_timeline_groups: Vec<u64>,
     /// Last feature-history item clicked, for Shift ranges (`f:<id>` or `g:<id>`).
@@ -1085,6 +1090,7 @@ fn rows_scrolling(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions, shr
     // The row was reached and scrolled to, or isn't in the tree (a body a later feature removes):
     // either way the reveal is done.
     app.tree.reveal = None;
+    app.tree.constraint_reveal = None;
 }
 
 fn finish_browser(app: &mut SolveApp, ui: &mut egui::Ui, acts: Actions) {
@@ -1275,7 +1281,8 @@ fn occurrence_key(path: &[u64]) -> String {
 fn occurrence_rows(app: &mut SolveApp, ui: &mut egui::Ui, path: Vec<u64>, depth: usize, acts: &mut Actions) {
     let Some(placement) = model_placement(app, &path) else { return };
     let key = occurrence_key(&path);
-    if reveals_in_occurrence(app, &path) {
+    // A body to reveal below it, or one of its constraint rows (Other Half): it opens.
+    if reveals_in_occurrence(app, &path) || app.tree.constraint_reveal.is_some_and(|(_, under)| under == placement.occurrence) {
         app.tree.collapsed.remove(&key);
     }
     let open = is_open(app, &key, true);
@@ -2674,6 +2681,13 @@ pub(crate) struct DrawnConstraint {
     pub(crate) badges: Vec<String>,
     pub(crate) tip: Option<String>,
     pub(crate) selected: bool,
+    /// The row the pick leads from ([`TreeState::constraint_row`]).
+    pub(crate) lead: bool,
+    /// Modify's text, while the value is typed in this row.
+    pub(crate) modify: Option<String>,
+    /// Modify's message, and its colour, under the row.
+    pub(crate) error: Option<String>,
+    pub(crate) error_color: Option<Color32>,
 }
 
 /// The constraint rows drawn in the last frame, in order.
@@ -2814,6 +2828,24 @@ pub(crate) fn constraint_row(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, und
         ..Default::default()
     };
     let r = draw_row(ui, ui.id().with(("constraint", id, under)), &look);
+    let row_rect = r.resp.as_ref().map(|resp| resp.rect);
+    // Other Half: scrolled to once.
+    if app.tree.constraint_reveal == Some((id, under)) {
+        if let Some(rect) = row_rect {
+            ui.scroll_to_rect(rect, Some(egui::Align::Center));
+        }
+        app.tree.constraint_reveal = None;
+    }
+    // Modify: the value typed in this row.
+    let modifying = app.menu.modify.as_ref().is_some_and(|m| m.constraint == id && m.under == under);
+    if let (true, Some(rect)) = (modifying, row_rect) {
+        modify_box(app, ui, rect, depth, id, under);
+    }
+    let typed = app.menu.modify.as_ref().filter(|m| m.constraint == id && m.under == under);
+    let error = typed.and_then(|m| m.error.clone());
+    if let Some(error) = &error {
+        modify_error(ui, depth, error);
+    }
     CONSTRAINTS.with(|d| {
         d.borrow_mut().push(DrawnConstraint {
             id,
@@ -2825,6 +2857,10 @@ pub(crate) fn constraint_row(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, und
             badges: badges.iter().map(|b| b.to_string()).collect(),
             tip: tip.clone(),
             selected,
+            lead: selected && app.tree.constraint_row == Some((id, under)),
+            modify: typed.map(|m| m.text.clone()),
+            error_color: error.as_ref().map(|_| t.error),
+            error,
         })
     });
     if let (Some(resp), Some(tip)) = (&r.resp, tip) {
@@ -2832,7 +2868,68 @@ pub(crate) fn constraint_row(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, und
     }
     if r.clicked {
         pick_constraint(app, id, ui.input(|i| i.modifiers.command || i.modifiers.ctrl));
+        app.tree.constraint_row = Some((id, under));
     }
+    // A double-click edits it (the Constrain panel, "EDIT Constrain").
+    if r.double {
+        crate::dialogs_constraint::open_edit(app, id);
+    }
+    // Its list (R72: a list, never a ring): the row becomes the pick first, as a joint's does.
+    if let Some(at) = r.secondary {
+        if !app.tree.picked_constraints.contains(&id) {
+            pick_constraint(app, id, false);
+        }
+        app.tree.constraint_row = Some((id, under));
+        crate::context_menu::open_for(app, at, Target::Constraint { id, under });
+    }
+}
+
+/// Modify's box over the row's label (the browser's own container): it opens with its text
+/// selected; Enter edits the offset ([`crate::context_menu::commit_modify`]), Escape or leaving
+/// it cancels.
+fn modify_box(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect, depth: usize, id: u64, under: u64) {
+    let Some(mut m) = app.menu.modify.take() else { return };
+    // Where the label starts: the fold arrow, the eye column and the icon come first.
+    let left = row.left() + 2.0 + depth as f32 * INDENT + 14.0 + 18.0 + 21.0;
+    let edit_rect = Rect::from_min_max(pos2(left, row.top() + 1.0), pos2(row.right() - 3.0, row.bottom() - 1.0));
+    ui.painter().rect_filled(edit_rect, 3.0, Tokens::get().field);
+    let edit_id = ui.id().with(("constraint_modify", id, under));
+    let response = crate::ui_kit::inline_name(ui, edit_rect, edit_id, &mut m.text);
+    crate::scenario::publish_handle(&format!("modify:constraint:{id}:{under}"), edit_rect.center());
+    let was_focused = m.focused;
+    if !m.focused {
+        if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), edit_id) {
+            let end = m.text.chars().count();
+            state.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(end))));
+            state.store(ui.ctx(), edit_id);
+        }
+        response.request_focus();
+        m.focused = true;
+    }
+    let (escape, enter) = ui.input(|i| (i.key_pressed(egui::Key::Escape), i.key_pressed(egui::Key::Enter)));
+    if escape {
+        // Dropping the state cancels it: no step.
+    } else if enter {
+        app.menu.modify = Some(m);
+        crate::context_menu::commit_modify(app);
+    } else if was_focused && response.lost_focus() {
+        // Clicked away: nothing is sent.
+    } else {
+        if response.changed() {
+            m.error = None;
+        }
+        app.menu.modify = Some(m);
+    }
+}
+
+/// Modify's message under its row, in the error colour.
+fn modify_error(ui: &mut egui::Ui, depth: usize, error: &str) {
+    let t = Tokens::get();
+    let font = FontId::proportional(t.font_small);
+    let galley = ui.painter().layout(error.to_string(), font, t.error, (ui.available_width() - 60.0).max(40.0));
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), galley.size().y + 4.0), Sense::hover());
+    let left = rect.left() + 2.0 + depth as f32 * INDENT + 14.0 + 18.0 + 21.0;
+    ui.painter().galley(pos2(left, rect.top() + 2.0), galley, t.error);
 }
 
 /// A click on a constraint's row: it becomes the pick (or, with Ctrl, toggles in or out of it).

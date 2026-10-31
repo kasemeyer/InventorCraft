@@ -1545,6 +1545,17 @@ impl SolveApp {
         cam
     }
 
+    /// Frame `bounds` as Fit frames a selection (`animate_view("fit")`'s path, animated, refitted
+    /// once the viewport's layout is known): a constraint's Find in Window.
+    pub(crate) fn frame_bounds(&mut self, bounds: solidcraft_engine::geom::Aabb3) {
+        let from = self.cam;
+        self.pending_fit = Some((from, bounds, true));
+        let to = self.fitted_bounds(from, &bounds);
+        let request = self.pending_fit.take();
+        self.animate_to(to);
+        self.pending_fit = request;
+    }
+
     fn fitted_bounds(&self, mut cam: Camera, bounds: &solidcraft_engine::geom::Aabb3) -> Camera {
         if let Some(layout) = &self.viewport.layout {
             return viewport_layout::fit_bounds(cam, bounds, layout, self.perspective_view()).unwrap_or(cam);

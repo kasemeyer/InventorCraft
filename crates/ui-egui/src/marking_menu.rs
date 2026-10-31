@@ -250,6 +250,13 @@ pub(crate) fn item(app: &SolveApp, id: &str, ctx: MenuContext) -> Item {
         "ui.createDrawingView" => {
             act("ui.createDrawingView", "Create Drawing View", "camera").on(app.session.doc.kind != DocumentKind::Drawing && !app.file_picker_busy())
         }
+        // A constraint row's list (Plan E-2 Task 5; list-only, not ring actions): the context menu
+        // gives them the constraint.
+        "ui.constraintModify" => act(id, crate::i18n::tr("ui.constraint.modify"), "dimension"),
+        "ui.constraintDrive" => act(id, crate::i18n::tr("ui.constraint.drive"), "drive"),
+        "ui.constraintLock" => act(id, crate::i18n::tr("ui.constraint.lock"), "ground"),
+        "ui.constraintOtherHalf" => act(id, crate::i18n::tr("ui.constraint.other_half"), "select"),
+        "ui.constraintFind" => act(id, crate::i18n::tr("ui.constraint.find"), "fit"),
         "ui.findBrowser" => {
             let body = bodies().into_iter().next();
             act("ui.findBrowser", "Find in Browser", "list").on(body.is_some()).with(json!({ "body": body }))
