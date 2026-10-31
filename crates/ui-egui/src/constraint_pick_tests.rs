@@ -331,6 +331,17 @@ fn origin_picks_from_the_browser() {
     assert!(crate::scenario::handle_at(&fold).is_some(), "B's Origin folder is listed");
     h.step(&json!({"click": {"handle": fold}})).unwrap();
     h.frames(3);
+    // An occurrence's own rows never shadow the document Origin's label handles (the s37
+    // regression: a "fold:Origin" click opened the last occurrence's folder instead).
+    h.step(&json!({"click": {"handle": "fold:Origin"}})).unwrap();
+    h.frames(3);
+    let opened: Vec<String> = crate::scenario::handles("row:occurrence_origin:")
+        .into_iter()
+        .map(|x| x.0)
+        .filter(|n| n.matches(':').count() == 3 && !n.starts_with(&format!("row:occurrence_origin:{b}:")))
+        .collect();
+    assert!(opened.is_empty(), "fold:Origin opens the document's Origin, not {opened:?}");
+    assert!(crate::browser::is_open(&h.app, "origin", false), "the document's Origin opened");
     h.step(&json!({"click": {"handle": format!("row:occurrence_origin:{b}:XY")}})).unwrap();
     h.frames(3);
     assert_eq!(form(&h).picks[0], Some(GeoRef { occurrence: b, geo: Geo::Origin { item: OriginItem::Xy } }));

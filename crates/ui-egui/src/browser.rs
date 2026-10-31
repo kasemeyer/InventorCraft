@@ -378,6 +378,10 @@ pub(crate) struct Row<'a> {
     /// An automation name unique where the label repeats (a drawing's Border on each sheet):
     /// its handles are published under this too, besides the label's.
     pub(crate) handle: Option<&'a str>,
+    /// Publish only `handle`, not the label's handles: a nested row whose label repeats a
+    /// top-level row's (an occurrence's own Origin folder and its XY…) must not shadow it, since
+    /// a label lookup takes the row drawn last.
+    pub(crate) handle_only: bool,
 }
 
 /// How a row relates to what the selection and the 3D view's pointer light.
@@ -466,7 +470,9 @@ pub(crate) fn draw_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
     if let Some(open) = row.fold {
         crate::ui_kit::disclosure(ui.painter(), pos2(x + 6.0, cy), open, if hover_on == 1 { t.text } else { t.text_dim });
         out.fold = resp.clicked() && click_on == 1;
-        crate::scenario::publish_handle(&format!("fold:{}", row.label), fold_r.center());
+        if !row.handle_only {
+            crate::scenario::publish_handle(&format!("fold:{}", row.label), fold_r.center());
+        }
         if let Some(h) = row.handle {
             crate::scenario::publish_handle(&format!("fold:{h}"), fold_r.center());
         }
@@ -533,7 +539,9 @@ pub(crate) fn draw_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
         crate::scenario::publish_handle(&format!("badge:{b}:{}", row.label), br.center());
         bx += 15.0;
     }
-    crate::scenario::publish_handle(&format!("row:{}", row.label), r.center());
+    if !row.handle_only {
+        crate::scenario::publish_handle(&format!("row:{}", row.label), r.center());
+    }
     if let Some(h) = row.handle {
         crate::scenario::publish_handle(&format!("row:{h}"), r.center());
     }
@@ -1562,13 +1570,13 @@ fn origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &Actio
 fn occurrence_origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, occurrence: u64, depth: usize) {
     let key = format!("oo:{occurrence}");
     let open = is_open(app, &key, false);
-    let r = draw_row(ui, ui.id().with(&key), &Row { depth, fold: Some(open), icon: "origin", label: "Origin", ..Default::default() });
-    if let Some(rect) = r.rect {
-        crate::scenario::publish_handle(
-            &format!("fold:occurrence_origin:{occurrence}"),
-            pos2(rect.left() + 8.0 + depth as f32 * INDENT, rect.center().y),
-        );
-    }
+    // Its own handles only: the labels repeat the document's Origin folder above it.
+    let handle = format!("occurrence_origin:{occurrence}");
+    let r = draw_row(
+        ui,
+        ui.id().with(&key),
+        &Row { depth, fold: Some(open), icon: "origin", label: "Origin", handle: Some(&handle), handle_only: true, ..Default::default() },
+    );
     if r.fold || r.clicked {
         toggle(app, &key, false);
     }
@@ -1576,10 +1584,12 @@ fn occurrence_origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, occurrence: u64
         return;
     }
     for (k, label, icon, _) in origin_entries(app) {
-        let r = draw_row(ui, ui.id().with((&key, k)), &Row { depth: depth + 1, icon, label, ..Default::default() });
-        if let Some(rect) = r.rect {
-            crate::scenario::publish_handle(&format!("row:occurrence_origin:{occurrence}:{k}"), rect.center());
-        }
+        let handle = format!("occurrence_origin:{occurrence}:{k}");
+        let r = draw_row(
+            ui,
+            ui.id().with((&key, k)),
+            &Row { depth: depth + 1, icon, label, handle: Some(&handle), handle_only: true, ..Default::default() },
+        );
         if r.clicked {
             crate::dialogs_constraint::pick_origin(app, occurrence, k);
         }
