@@ -4,9 +4,6 @@
 
 use std::sync::mpsc;
 
-#[cfg(all(feature = "audio-linux", target_os = "linux"))]
-use rodio_linux as rodio;
-
 /// The `Services::play_samples` hook, or None when the thread can't start.
 pub fn player() -> Option<Box<dyn Fn(Vec<f32>, u32)>> {
     let (tx, rx) = mpsc::channel::<(Vec<f32>, u32)>();

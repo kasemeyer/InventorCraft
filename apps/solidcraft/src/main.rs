@@ -21,7 +21,7 @@
 #[cfg(not(target_os = "macos"))]
 #[path = "../../../assets/icons/app/shared/source/app_icon.rs"]
 mod app_icon;
-#[cfg(any(all(feature = "audio", any(target_os = "windows", target_os = "macos")), all(feature = "audio-linux", target_os = "linux")))]
+#[cfg(all(feature = "audio", any(target_os = "windows", target_os = "macos", target_os = "linux")))]
 mod audio;
 mod control_server;
 mod device_lost;
@@ -235,6 +235,17 @@ fn case_variants(exts: &[&str]) -> Vec<String> {
     all
 }
 
+/// The constraint pop's player (R175, R183), or None in a build without the audio feature.
+#[cfg(all(feature = "audio", any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+fn play_samples() -> Option<Box<dyn Fn(Vec<f32>, u32)>> {
+    audio::player()
+}
+
+#[cfg(not(all(feature = "audio", any(target_os = "windows", target_os = "macos", target_os = "linux"))))]
+fn play_samples() -> Option<Box<dyn Fn(Vec<f32>, u32)>> {
+    None
+}
+
 fn services(cc: &eframe::CreationContext<'_>) -> Services {
     let parent = rfd::AsyncFileDialog::new().set_parent(cc);
     let open_parent = parent.clone();
@@ -299,8 +310,7 @@ fn services(cc: &eframe::CreationContext<'_>) -> Services {
         })),
         graphics_path: graphics_path().map(|p| p.to_string_lossy().to_string()),
         // The constraint pop (R175); silent in a build without the audio feature.
-        #[cfg(any(all(feature = "audio", any(target_os = "windows", target_os = "macos")), all(feature = "audio-linux", target_os = "linux")))]
-        play_samples: audio::player(),
+        play_samples: play_samples(),
         window_system: window_system_now(),
         http_get: Some(std::sync::Arc::new(http_get)),
         http_download: Some(std::sync::Arc::new(http_download)),

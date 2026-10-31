@@ -9,13 +9,12 @@ default-run = "solidcraft"
 
 [features]
 default = ["raytrace-cpu", "bundled-render-library", "audio"]
-# The constraint audio notification (R175, `src/audio.rs`): plays the pop through rodio/cpal.
-# Windows (WASAPI) and macOS (Core Audio) need nothing installed, so it is on by default there.
-# Linux needs ALSA's development files (Arch: `alsa-lib`; Debian/Ubuntu: `libasound2-dev`;
-# Fedora: `alsa-lib-devel`), so it is opt-in: `cargo build -p solidcraft --features audio-linux`.
-# The browser build and Linux CI build without it and stay silent.
+# The constraint audio notification (R175, R183; `src/audio.rs`): plays the pop through rodio/cpal,
+# on by default on every desktop target. Windows (WASAPI) and macOS (Core Audio) need nothing
+# installed; Linux needs ALSA's development files (Arch: `alsa-lib`, present by default;
+# Debian/Ubuntu: `libasound2-dev`; Fedora: `alsa-lib-devel`). Where ALSA is absent (CI images),
+# build with `--no-default-features` (plus any other features wanted): the app is then silent.
 audio = ["dep:rodio"]
-audio-linux = ["dep:rodio-linux"]
 bundled-render-library = ["solidcraft-engine/bundled-render-library"]
 raytrace-cpu = ["solidcraft-engine/raytrace-cpu"]
 
@@ -56,11 +55,8 @@ keyring = { version = "3.6", default-features = false, features = ["apple-native
 [target.'cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))'.dependencies]
 quick-xml = { workspace = true }
 
-[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
+[target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))'.dependencies]
 rodio = { version = "0.21.1", default-features = false, features = ["playback"], optional = true }
-
-[target.'cfg(target_os = "linux")'.dependencies]
-rodio-linux = { package = "rodio", version = "0.21.1", default-features = false, features = ["playback"], optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 hidapi = { version = "2.6.7", default-features = false, features = ["windows-native"] }
