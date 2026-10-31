@@ -144,6 +144,90 @@ fn a_part_design_keeps_its_own_copy() {
     h.app.session.doc_mut().kind = solidcraft_engine::doc::DocumentKind::Part;
     h.app.session.selection = vec![Sel::Occurrence { path: vec![occ] }];
     assert_eq!(super::picked_placements(&h.app), super::Picked::Other);
+    // Copy takes the feature path: its own refusal, and no occurrence on the clipboard.
+    assert!(!super::copy(&mut h.app), "nothing to copy as features");
+    assert_eq!(h.app.status.as_ref().map(|s| s.0.as_str()), Some("Select sketch geometry or timeline features to copy"));
+    assert!(h.app.occurrence_clipboard.is_empty(), "no occurrence copied");
+}
+
+/// A component made in the assembly (`component.create`) keeps its bodies as geometry (the
+/// ruled behaviour): its body is not a placement, and Copy never fills the occurrence clipboard.
+#[test]
+fn a_component_made_in_the_assembly_keeps_its_geometry_on_copy() {
+    for (mut h, _) in both() {
+        h.app.run("component.create", json!({"name": "Q", "grounded": false})).unwrap();
+        h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [80, 0, 0]})).unwrap();
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        let q = h.app.session.doc.occurrences.iter().find(|o| o.name == "Q:1").unwrap().id;
+        let body = h
+            .app
+            .session
+            .world_state()
+            .bodies
+            .iter()
+            .find(|b| crate::dialogs_assembly::occurrence_path_of_body(&h.app.session, &b.name).is_some_and(|p| p.last() == Some(&q)))
+            .map(|b| b.name.clone())
+            .expect("Q's body");
+        h.app.session.selection = vec![Sel::Body { name: body }];
+        assert_eq!(super::picked_placements(&h.app), super::Picked::Other, "Q's body is geometry");
+        let occurrences = h.app.session.doc.occurrences.len();
+        let _ = super::copy(&mut h.app);
+        assert!(h.app.occurrence_clipboard.is_empty(), "no occurrence on the clipboard");
+        let _ = super::paste(&mut h.app, None);
+        assert_eq!(h.app.session.doc.occurrences.len(), occurrences, "no new occurrence");
+    }
+}
+
+/// Revert All Positions with Create Copy on takes the copy back: no second occurrence is left
+/// sitting on the source, and the copy's step is gone.
+#[test]
+fn revert_all_positions_with_create_copy_takes_the_copy_back() {
+    for (mut h, occ) in both() {
+        let component = component_of(&h, occ);
+        h.app.session.selection = vec![Sel::Occurrence { path: vec![occ] }];
+        let undo = h.app.session.undo.len();
+        h.app.start("solid.move");
+        h.frames(3);
+        assert_eq!(h.app.tree.occurrence_move.as_ref().map(|m| m.occurrence), Some(occ));
+        h.step(&json!({"widget": "Create Copy"})).unwrap();
+        h.frames(2);
+        assert_eq!(copies(&h, component).len(), 2, "the copy exists while Create Copy is on");
+        h.step(&json!({"widget": "Revert All Positions"})).unwrap();
+        h.frames(2);
+        assert!(h.app.tree.occurrence_move.is_none(), "the panel closed");
+        assert_eq!(copies(&h, component).len(), 1, "no copy left on the source");
+        assert_eq!(h.app.session.undo.len(), undo, "the copy's step is undone");
+        assert!(h.app.session.pending_moves.is_empty());
+    }
+}
+
+/// The Position panel's Move with placements and a root body, or with two placements, refuses
+/// with a reason instead of opening the root body's Move/Copy.
+#[test]
+fn position_move_of_a_mixed_or_several_placement_pick_is_refused() {
+    for (mut h, occ) in both() {
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [-50, -50, 0]})).unwrap();
+        let root =
+            h.app.session.world_state().bodies.iter().find(|b| h.app.session.doc.model_body_component(b) == 0).map(|b| b.name.clone()).unwrap();
+        h.app.session.selection = vec![Sel::Occurrence { path: vec![occ] }, Sel::Body { name: root }];
+        h.app.start("solid.move");
+        h.frames(2);
+        assert!(h.app.dialog.is_none(), "no body Move/Copy");
+        assert!(h.app.tree.occurrence_move.is_none(), "no occurrence Move/Copy");
+        assert_eq!(h.app.status.as_ref().map(|s| (s.0.as_str(), s.2)), Some(("Move or copy components or bodies, not both", true)));
+        // Two placements of P.
+        h.app.session.selection = vec![Sel::Occurrence { path: vec![occ] }];
+        assert!(super::copy(&mut h.app));
+        assert!(super::paste(&mut h.app, None));
+        let two: Vec<Sel> = copies(&h, component_of(&h, occ)).iter().map(|o| Sel::Occurrence { path: vec![o.id] }).collect();
+        assert_eq!(two.len(), 2);
+        h.app.session.selection = two;
+        h.app.start("solid.move");
+        h.frames(2);
+        assert!(h.app.dialog.is_none(), "no body Move/Copy");
+        assert!(h.app.tree.occurrence_move.is_none(), "no occurrence Move/Copy");
+        assert_eq!(h.app.status.as_ref().map(|s| (s.0.as_str(), s.2)), Some(("Move or copy one component at a time", true)));
+    }
 }
 
 /// Two copied placements, the second of which is gone by the paste: the first is pasted and

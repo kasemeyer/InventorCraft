@@ -3201,6 +3201,8 @@
   "ui.object_type": "对象类型",
   "ui.objects": "对象",
   "ui.occurrence_move.grounded": "{name} 已固定：打开“创建副本”以放置副本",
+  "ui.occurrence_move.mixed": "请移动或复制部件或实体，不能同时选择两者",
+  "ui.occurrence_move.several": "一次只能移动或复制一个部件",
   "ui.offer_to_stand_up_y_up_files": "提供站立 Y-up 文件",
   "ui.offset": "偏移",
   "ui.offset_plane": "偏移平面",

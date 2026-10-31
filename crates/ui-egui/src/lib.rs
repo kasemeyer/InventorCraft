@@ -1077,14 +1077,27 @@ impl SolveApp {
         // In an assembly a picked placement (its row, or its body, face or edge in the view)
         // moves, or with Create Copy copies, as an occurrence, never as a root body (R186): the
         // same resolver as Copy / Paste.
-        if id == "solid.move"
-            && let edit_clipboard::Picked::Placements(paths) = edit_clipboard::picked_placements(self)
-            && let [path] = paths.as_slice()
-        {
-            if let Some(o) = path.last().copied() {
-                browser::open_occurrence_move(self, o, path.clone());
+        // Placements with something else, or several placements, are refused with the reason
+        // rather than falling to the root body's Move/Copy.
+        if id == "solid.move" {
+            match edit_clipboard::picked_placements(self) {
+                edit_clipboard::Picked::Placements(paths) => {
+                    match paths.as_slice() {
+                        [path] => {
+                            if let Some(o) = path.last().copied() {
+                                browser::open_occurrence_move(self, o, path.clone());
+                            }
+                        }
+                        _ => self.set_status(crate::i18n::tr("ui.occurrence_move.several"), true),
+                    }
+                    return;
+                }
+                edit_clipboard::Picked::Mixed => {
+                    self.set_status(crate::i18n::tr("ui.occurrence_move.mixed"), true);
+                    return;
+                }
+                edit_clipboard::Picked::Other => {}
             }
-            return;
         }
         if id == "material.properties.validate" {
             self.material_card_review = Some(material_card_review::ReviewWindow::default());

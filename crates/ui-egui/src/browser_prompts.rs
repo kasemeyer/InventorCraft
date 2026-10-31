@@ -96,6 +96,8 @@ pub(crate) fn occurrence_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.tree.occurrence_move = None;
         }
         ui_kit::Action::Apply => {
+            // Revert All with Create Copy on takes the copy back too: no copy is left on the source.
+            end_copy(app, &mut m);
             let _ = app.run("component.revert_position", json!({}));
             app.tree.occurrence_move = None;
         }

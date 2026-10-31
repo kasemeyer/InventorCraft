@@ -3201,6 +3201,8 @@
   "ui.object_type": "Object Type",
   "ui.objects": "Objects",
   "ui.occurrence_move.grounded": "{name} is grounded: turn on Create Copy to place a copy",
+  "ui.occurrence_move.mixed": "Move or copy components or bodies, not both",
+  "ui.occurrence_move.several": "Move or copy one component at a time",
   "ui.offer_to_stand_up_y_up_files": "Offer to stand up Y-up files",
   "ui.offset": "Offset",
   "ui.offset_plane": "Offset Plane",

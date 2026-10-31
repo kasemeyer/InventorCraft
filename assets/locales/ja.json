@@ -3201,6 +3201,8 @@
   "ui.object_type": "オブジェクトタイプ",
   "ui.objects": "オブジェクト",
   "ui.occurrence_move.grounded": "{name} は接地されています: コピーを配置するには [コピーを作成] をオンにします",
+  "ui.occurrence_move.mixed": "コンポーネントかボディのどちらかを移動またはコピーしてください (両方は不可)",
+  "ui.occurrence_move.several": "移動またはコピーできるコンポーネントは一度に 1 つです",
   "ui.offer_to_stand_up_y_up_files": "Y-upファイルを正立させるか確認",
   "ui.offset": "オフセット",
   "ui.offset_plane": "オフセット平面",
