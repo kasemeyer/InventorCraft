@@ -20,6 +20,8 @@ mod model;
 
 pub(crate) mod drawing;
 mod features;
+mod value_box;
+pub(crate) use value_box::ValueBox;
 pub(crate) mod history;
 
 #[cfg(test)]
@@ -133,6 +135,8 @@ pub struct TreeState {
     pub constraint_row: Option<(u64, u64)>,
     /// Scroll to this constraint row (and open its placement) the next time it draws.
     pub constraint_reveal: Option<(u64, u64)>,
+    /// The picked constraint's value box at the browser's foot (R185).
+    pub value_box: Option<ValueBox>,
     /// Folders picked in the feature history (features use the engine selection).
     pub picked_timeline_groups: Vec<u64>,
     /// Last feature-history item clicked, for Shift ranges (`f:<id>` or `g:<id>`).
@@ -1081,7 +1085,10 @@ fn browser_rows_hugging(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Action
 fn rows_scrolling(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions, shrink_height: bool) {
     prepare_model(app);
     acts.lit = Lit::of(app);
+    // The picked constraint's value box keeps the foot of the pane (R185).
+    let foot = value_box::height(app);
     egui::ScrollArea::vertical()
+        .max_height((ui.available_height() - foot).max(0.0))
         // The card may animate all the way down to its header.
         .min_scrolled_height(0.0)
         .auto_shrink([false, shrink_height])
@@ -1095,6 +1102,9 @@ fn rows_scrolling(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions, shr
                 component_rows(app, ui, 0, 0, acts);
             }
         });
+    if foot > 0.0 {
+        value_box::show(app, ui);
+    }
     // The row was reached and scrolled to, or isn't in the tree (a body a later feature removes):
     // either way the reveal is done.
     app.tree.reveal = None;
@@ -2662,6 +2672,10 @@ mod browser_history_tests;
 #[cfg(test)]
 #[path = "browser_constraint_tests.rs"]
 mod constraint_tests;
+
+#[cfg(test)]
+#[path = "browser_constraint_value_tests.rs"]
+mod constraint_value_tests;
 
 // ---------------------------------------------------------------------------------------------
 // Constraint rows and component status (Plan E-2 Task 4, spec §6.4)
