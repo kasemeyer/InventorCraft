@@ -432,7 +432,25 @@ pub(crate) enum PanelAction {
 
 /// A sketch-modify panel that applies with "Apply" and stays open for the next one.
 fn repeatable(d: &Dialog) -> bool {
-    matches!(&d.kind, Kind::SketchModify(k) if crate::sketch_modify_ui::repeatable(k)) && d.editing.is_none() && !d.extra.contains_key("pattern")
+    let sketch =
+        matches!(&d.kind, Kind::SketchModify(k) if crate::sketch_modify_ui::repeatable(k)) && d.editing.is_none() && !d.extra.contains_key("pattern");
+    // Constrain's Apply places one and keeps the panel for the next (spec §6.2); an edit has none.
+    sketch || matches!(&d.kind, Kind::Assembly(crate::dialogs_assembly::Asm::Constraint(f)) if f.editing.is_none())
+}
+
+/// The Constrain panel acts (OK, Apply, Enter) only once its picks are in and its preview
+/// refused nothing; every other panel answers true.
+fn constraint_acts(d: &Dialog) -> bool {
+    match &d.kind {
+        Kind::Assembly(crate::dialogs_assembly::Asm::Constraint(f)) => crate::dialogs_constraint::acts(f),
+        _ => true,
+    }
+}
+
+/// The panel edits something that exists: a feature, or a constraint (its heading takes the
+/// shared `dialog.edit_title` form, R143).
+fn edits(d: &Dialog) -> bool {
+    d.editing.is_some() || matches!(&d.kind, Kind::Assembly(crate::dialogs_assembly::Asm::Constraint(f)) if f.editing.is_some())
 }
 
 /// A feature panel that applies with "+" and stays open for the next one, where the profile asks.
@@ -449,8 +467,8 @@ pub(crate) fn can_act(app: &SolveApp, d: &Dialog, action: PanelAction) -> bool {
     }
     match action {
         PanelAction::Cancel => true,
-        PanelAction::Ok => app.applying.is_none() && !matches!(d.kind, Kind::Sketch | Kind::Measure { .. }),
-        PanelAction::ApplyAndContinue => app.applying.is_none() && (continues(app, d) || repeatable(d)),
+        PanelAction::Ok => app.applying.is_none() && !matches!(d.kind, Kind::Sketch | Kind::Measure { .. }) && constraint_acts(d),
+        PanelAction::ApplyAndContinue => app.applying.is_none() && (continues(app, d) || repeatable(d)) && constraint_acts(d),
     }
 }
 
@@ -2553,7 +2571,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let wide = matches!(&d.kind, Kind::Motion(k) if k.wide());
 
     let raw_title = title(&d.kind);
-    let heading = if d.editing.is_some() { crate::i18n::format("dialog.edit_title", &[("title", tr(raw_title))]) } else { tr(raw_title).to_string() };
+    let heading = if edits(&d) { crate::i18n::format("dialog.edit_title", &[("title", tr(raw_title))]) } else { tr(raw_title).to_string() };
     let frame = crate::ui_kit::Panel::feature_frame(ctx, app.ui.layout, side);
     // OK is offered once the inputs make a feature.
     let has_ok = !matches!(d.kind, Kind::Sketch | Kind::Measure { .. });
@@ -2563,6 +2581,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         Kind::ChatContext => true,
         Kind::Material { editor, .. } if editor.editing() => false,
         Kind::SaveMesh(_) => crate::dialogs_save_mesh::ready(&d.inputs),
+        Kind::Assembly(crate::dialogs_assembly::Asm::Constraint(f)) => crate::dialogs_constraint::acts(f),
         Kind::SketchModify(crate::sketch_modify_ui::Mod::Corner { .. }) => {
             // Corner dialogs: preview errors are visual only; validation errors from
             // `apply_commands` go to `d.error`. OK stays enabled when the preview fails.
@@ -2580,7 +2599,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     };
     let panel = crate::ui_kit::Panel::new(&heading, egui::Id::new(("sc_dialog", title(&d.kind))), anchor, drag_bounds, side, frame)
         .actions(ok_label, close_label);
-    let panel = if matches!(d.kind, Kind::Appearance(_) | Kind::Material { .. }) {
+    let panel = if matches!(d.kind, Kind::Appearance(_) | Kind::Material { .. } | Kind::Assembly(crate::dialogs_assembly::Asm::Constraint(_))) {
         panel.width(t.form_card_width + t.form_label_width + t.space_6)
     } else if wide {
         let panel = panel.wide();
@@ -2625,7 +2644,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             let spec = dense::command(&d.kind).and_then(solidcraft_engine::find_command);
             let icon = spec.as_ref().map_or("", |s| s.icon);
             let label = spec.as_ref().map_or(heading.as_str(), |s| tr(s.label));
-            let label = if d.editing.is_some() { heading.as_str() } else { label };
+            let label = if edits(&d) { heading.as_str() } else { label };
             let heading = crate::ui_kit::FeatureOptions {
                 icon,
                 title: label,
@@ -2711,7 +2730,13 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         && !matches!(&d.kind, Kind::Motion(k) if k.wide())
         && !matches!(&d.kind, Kind::Material { editor, .. } if editor.editing());
     let report_active = app.issue_report.draft.is_some();
-    if !report_active && !menu_enter && enter_applies && app.applying.is_none() && (enter || canvas_enter || (enter_free && nothing_focused)) {
+    if !report_active
+        && !menu_enter
+        && enter_applies
+        && app.applying.is_none()
+        && constraint_acts(&d)
+        && (enter || canvas_enter || (enter_free && nothing_focused))
+    {
         ok = true;
     }
     // OK, "+" or Cancel asked for from outside the footer (the marking menu) acts like its

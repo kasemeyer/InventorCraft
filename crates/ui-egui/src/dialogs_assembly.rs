@@ -114,6 +114,8 @@ pub enum Asm {
     },
     /// Motion Trace: a picked point's path, previewed; OK keeps it as a 3D sketch spline.
     Trace(Box<TraceForm>),
+    /// Constrain (Plan E-2): the Place Constraint panel.
+    Constraint(Box<crate::dialogs_constraint::ConstraintForm>),
 }
 
 /// The snap under the cursor, remembered for the selection it was found for.
@@ -189,6 +191,8 @@ impl Asm {
             Asm::Cam(_) => "CAM",
             Asm::Interference { .. } => "INTERFERENCE",
             Asm::Trace(_) => "MOTION TRACE",
+            // Title case (R138); an edit is headed through `dialog.edit_title` (R143).
+            Asm::Constraint(_) => "Constrain",
         }
     }
 
@@ -222,6 +226,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         }
         "joint.gear" | "joint.rack_pinion" | "joint.screw" => crate::dialogs_coupling::start(app, id)?,
         "joint.cam" => crate::dialogs_coupling::cam::start(app),
+        "constraint.create" => return crate::dialogs_constraint::start(app),
         "inspect.interference" => (
             Asm::Interference { result: None, overlaps: Vec::new(), of: Vec::new(), clearance: "0".into() },
             vec![SelInput::new("Bodies (all if none)", BODIES, true)],
@@ -738,6 +743,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
             }
         }
         Asm::Trace(f) => enter |= trace::rows(app, ui, f, inputs),
+        Asm::Constraint(f) => enter |= crate::dialogs_constraint::rows_keys(app, ui, f).1,
     }
     enter
 }
@@ -988,6 +994,7 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
         // The check runs from its Compute button; OK only closes.
         Asm::Interference { .. } => Vec::new(),
         Asm::Trace(f) => cmd("motion.trace.keep", trace::params(s, f, inputs)?),
+        Asm::Constraint(f) => crate::dialogs_constraint::commands(f)?,
     })
 }
 
