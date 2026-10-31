@@ -123,8 +123,8 @@ fn c_waits_for_ch_then_constrains() {
     assert_eq!(h.app.alias.fired, None, "a part has no C alias");
 }
 
-/// Spec §6.9: SolidCraft's JOINTS panel gains Constrain beside Joint (a SolidCraft panel promotes
-/// at most four, so Rigid Group moves to the panel's list) and the three show commands in its list.
+/// Spec §6.9 and R165: SolidCraft's JOINTS panel gains Constrain and the three show commands in
+/// its list; its face stays as it was (Joint, As-built Joint, Joint Origin, Rigid Group).
 #[test]
 fn solidcraft_joints_panel_gains_the_four() {
     let sc = solidcraft();
@@ -134,12 +134,13 @@ fn solidcraft_joints_panel_gains_the_four() {
     }
     assert_eq!(
         face(&sc, Assembly, "ASSEMBLE", "JOINTS"),
-        owned(&[("joint.create", L), ("constraint.create", L), ("joint.as_built", L), ("joint.origin", L)])
+        owned(&[("joint.create", L), ("joint.as_built", L), ("joint.origin", L), ("joint.rigid_group", L)])
     );
+    // R165: SolidCraft keeps its face; Constrain is the list's first entry, right after rigid_group.
     let after: Vec<&str> = joints.commands[joints.promoted..].iter().map(String::as_str).collect();
-    assert_eq!(after.first(), Some(&"joint.rigid_group"));
+    assert_eq!(after.first(), Some(&"constraint.create"));
     let shows: Vec<&str> = after.into_iter().filter(|c| c.starts_with("constraint.")).collect();
-    assert_eq!(shows, ["constraint.show", "constraint.show_sick", "constraint.hide_all"]);
+    assert_eq!(shows, ["constraint.create", "constraint.show", "constraint.show_sick", "constraint.hide_all"]);
     assert!(sc.aliases.iter().all(|a| a.command != "constraint.create"), "SolidCraft binds no key to Constrain");
 }
 
