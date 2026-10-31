@@ -71,8 +71,11 @@ pub struct ConstraintForm {
     prims: [Option<Prim>; 3],
     /// The hovered candidate as resolved in the world.
     hover_prim: Option<Prim>,
-    /// Hover lookups by entity (R162): `geo_at` + resolve run only when the key changes.
-    memo: RefCell<Vec<(HoverKey, Option<(GeoRef, Prim)>)>>,
+    /// Hover lookups by entity (R162): `geo_at` + resolve run only when the key changes; with
+    /// whether the type refused what the entity is (R188).
+    memo: RefCell<Vec<(HoverKey, Option<(GeoRef, Prim)>, bool)>>,
+    /// The hovered entity is something the type does not take (R188): the status line says why.
+    pub refused: bool,
     /// The design revision the last preview ran on.
     preview_rev: u64,
 }
@@ -132,6 +135,7 @@ impl ConstraintForm {
             prims: [None, None, None],
             hover_prim: None,
             memo: RefCell::new(Vec::new()),
+            refused: false,
             preview_rev: 0,
         }
     }
@@ -441,8 +445,13 @@ fn entity(sel: &Sel) -> Sel {
 /// [`candidate`] with its world primitive, memoised on the hovered entity and what the armed slot
 /// takes (R162): `geo_at` and the resolve run only when one of them changes.
 fn candidate_prim(s: &Session, f: &ConstraintForm, sel: &Sel) -> Option<(GeoRef, Prim)> {
+    lookup(s, f, sel).0
+}
+
+/// [`candidate_prim`], and whether the type refuses what the entity is (an Insert's face, R188).
+fn lookup(s: &Session, f: &ConstraintForm, sel: &Sel) -> (Option<(GeoRef, Prim)>, bool) {
     if f.wants_part() {
-        return None;
+        return (None, false);
     }
     let key = HoverKey {
         entity: entity(sel),
@@ -453,17 +462,21 @@ fn candidate_prim(s: &Session, f: &ConstraintForm, sel: &Sel) -> Option<(GeoRef,
         taken: [f.picks[0].as_ref().map(|g| g.occurrence), f.picks[1].as_ref().map(|g| g.occurrence)],
         revision: s.revision,
     };
-    if let Some((_, hit)) = f.memo.borrow().iter().find(|(k, _)| *k == key) {
-        return hit.clone();
+    if let Some((_, hit, refused)) = f.memo.borrow().iter().find(|(k, ..)| *k == key) {
+        return (hit.clone(), *refused);
     }
     RESOLVES.set(RESOLVES.get() + 1);
-    let found = resolve_sel(s, sel).filter(|(g, p)| f.legal(g, p.kind()));
+    let resolved = resolve_sel(s, sel);
+    let slot = f.armed.min(f.pick_count().saturating_sub(1));
+    let first = if slot == 0 { None } else { f.kind_of(0) };
+    let refused = resolved.as_ref().is_some_and(|(_, p)| !accepts(f.kind, slot, first, p.kind()));
+    let found = resolved.filter(|(g, p)| f.legal(g, p.kind()));
     let mut memo = f.memo.borrow_mut();
     if memo.len() >= 16 {
         memo.remove(0);
     }
-    memo.push((key, found.clone()));
-    found
+    memo.push((key, found.clone(), refused));
+    (found, refused)
 }
 
 /// The pick under a viewport selection, or None when it is not legal for the armed slot (spec §6.3 step 2).
@@ -580,10 +593,24 @@ pub(crate) fn prompt(app: &SolveApp) -> Option<&'static str> {
     if f.wants_part() {
         return Some("ui.constraint.prompt_part");
     }
+    if f.refused {
+        return Some(match f.kind {
+            ConstraintKind::Insert => "ui.constraint.refuse_insert",
+            ConstraintKind::Angle => "ui.constraint.refuse_angle",
+            _ => "ui.constraint.refuse_tangent",
+        });
+    }
     if f.ready() {
         return None;
     }
-    Some(["ui.constraint.prompt_1", "ui.constraint.prompt_2", "ui.constraint.prompt_3"][f.armed.min(2)])
+    // Per type (R188): what the armed pick takes; an Angle's third is its reference axis.
+    let [one, two] = match f.kind {
+        ConstraintKind::Angle => ["ui.constraint.prompt_angle_1", "ui.constraint.prompt_angle_2"],
+        ConstraintKind::Tangent => ["ui.constraint.prompt_tangent_1", "ui.constraint.prompt_tangent_2"],
+        ConstraintKind::Insert => ["ui.constraint.prompt_insert_1", "ui.constraint.prompt_insert_2"],
+        ConstraintKind::Mate | ConstraintKind::Symmetry => ["ui.constraint.prompt_1", "ui.constraint.prompt_2"],
+    };
+    Some([one, two, "ui.constraint.prompt_3"][f.armed.min(2)])
 }
 
 /// The predicted offset as the value box shows it: document units, three decimals.
@@ -603,6 +630,17 @@ pub(crate) fn value_text(angle: bool, offset: f64, units: &str) -> String {
 }
 
 // ---- overlay ----
+
+/// The pointer is over `nearest` (the first hit under it) and the panel took nothing there: is
+/// that something the type does not take (an Insert's face, R188)? The status line says why.
+pub(crate) fn hover_refusal(app: &mut SolveApp, nearest: Option<&crate::viewport::Hit>) {
+    let Some(mut d) = app.dialog.take() else { return };
+    if let Kind::Assembly(Asm::Constraint(f)) = &mut d.kind {
+        let sel = nearest.and_then(crate::viewport::hit_sel);
+        f.refused = sel.is_some_and(|sel| lookup(&app.session, f, &sel).1);
+    }
+    app.dialog = Some(d);
+}
 
 /// The hovered candidate (found again only when the hovered entity changes) and the picks, each
 /// in its slot's colour: a face as its plane's patch, a line or a cylinder's axis as a line

@@ -621,3 +621,33 @@ fn a_root_body_face_is_a_fixed_pick() {
     assert!(!near(&after, &before, 1e-6), "the component moves");
     assert!((after[3][2] - (before[3][2] - 17.0)).abs() < 1e-6, "B's top is flush with the root box's: {after:?}");
 }
+
+/// R188: each type prompts for what it takes, and Insert's hover takes circular edges only (a
+/// face says why it is refused), on both profiles.
+#[test]
+fn each_type_prompts_for_its_picks_and_insert_takes_rims_only() {
+    for mut h in [inventor(Assembly), Harness::new()] {
+        constraint_blocks(&mut h);
+        h.app.start("constraint.create");
+        h.frames(3);
+        let prompt = |h: &Harness| crate::status_bar::texts(&h.app).left;
+        assert_eq!(prompt(&h), "Pick the first face, edge, axis or point", "Mate");
+        press(&mut h, "Angle");
+        assert_eq!(prompt(&h), "Pick the first face or edge", "Angle");
+        press(&mut h, "Tangent");
+        assert_eq!(prompt(&h), "Pick the first face: a plane or a cylinder", "Tangent");
+        press(&mut h, "Insert");
+        assert_eq!(prompt(&h), "Pick a circular edge", "Insert");
+        hover(&mut h, A_TOP, 3);
+        assert_eq!(form(&h).hover, None, "a plane is no Insert pick");
+        assert_eq!(prompt(&h), "Insert takes circular edges", "the hovered face is refused with a reason");
+        hover(&mut h, [200.0, 0.0, 10.0], 3);
+        assert_eq!(form(&h).hover.as_ref().map(|x| x.1), Some(PrimKind::Circle), "the hole's rim is highlighted");
+        assert_eq!(prompt(&h), "Pick a circular edge");
+        click_world(&mut h, [200.0, 0.0, 10.0]);
+        crate::test_support::clicks_expire(&mut h);
+        let g = form(&h).picks[0].clone().expect("the rim is pick 1");
+        assert_eq!(solidcraft_engine::constraints::classify(&h.app.session, &g), Some(PrimKind::Circle));
+        assert_eq!(prompt(&h), "Pick the second circular edge");
+    }
+}

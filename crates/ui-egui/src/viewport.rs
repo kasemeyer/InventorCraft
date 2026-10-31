@@ -3068,6 +3068,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         candidate(app, &hits).map(|(h, s)| (h, Some(s)))
     };
     app.viewport.hover = cand.as_ref().map(|c| c.0.clone());
+    // The Constrain panel says why it takes nothing under the pointer (R188).
+    crate::dialogs_constraint::hover_refusal(app, if cand.is_none() { hits.first() } else { None });
     // Place Component's ghost follows the pointer over the view, holding still while it navigates.
     if !navigating {
         crate::place_component::hover(app, hover.filter(|p| inside && !crate::shell::covered(app, *p)));
