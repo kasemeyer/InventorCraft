@@ -17,7 +17,8 @@ pub struct Pending {
     pub report: Value,
 }
 
-/// What Delete acts on now: the selection (bodies not locked), plus the components picked in
+/// What Delete acts on now: the selection (bodies not locked, unless they map to a placement),
+/// plus the components picked in
 /// the browser (their occurrences) and the canvases, joints and constraints picked there.
 pub fn selection_params(app: &SolveApp) -> Value {
     use solidcraft_engine::Sel;
@@ -28,7 +29,10 @@ pub fn selection_params(app: &SolveApp) -> Value {
         && app.session.active_component == 0
         && app.session.active_sketch.is_none();
     let mut placed: Vec<u64> = Vec::new();
-    for s in app.session.selection.iter().filter(|s| !matches!(s, Sel::Body { name } if app.session.visibility.locked_bodies.contains(name))) {
+    // A lock guards a body's features, not where its part is placed: a locked body of a placed
+    // part maps to the placement like any other pick (wave 1 item 15); other locked bodies stay
+    // out.
+    for s in app.session.selection.iter() {
         if top
             && let Sel::Body { name: body } | Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } = s
             && let Some(o) = crate::dialogs_assembly::occurrence_path_of_body(&app.session, body).and_then(|p| p.last().copied())
@@ -36,6 +40,9 @@ pub fn selection_params(app: &SolveApp) -> Value {
             if !placed.contains(&o) {
                 placed.push(o);
             }
+            continue;
+        }
+        if matches!(s, Sel::Body { name } if app.session.visibility.locked_bodies.contains(name)) {
             continue;
         }
         // A MidPoint glyph shared by lines whose midpoints meet removes every constraint it

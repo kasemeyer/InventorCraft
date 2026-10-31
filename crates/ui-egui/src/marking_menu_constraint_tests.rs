@@ -286,6 +286,36 @@ fn delete_takes_the_picked_placement() {
     assert_eq!(crate::delete::selection_params(&p.app)["items"], json!([{"type": "body", "name": "Block"}]));
 }
 
+/// R178 edge (wave 1 item 15): a LOCKED body of a placed part means its placement like any other
+/// pick (a lock guards the part's features, not where it is placed); a locked body of the root's
+/// own stays out of Delete.
+#[test]
+fn a_locked_body_of_a_placed_part_deletes_its_placement() {
+    let mut h = blocks();
+    let b = occ(&h, "B");
+    let body = h
+        .app
+        .session
+        .model
+        .state()
+        .bodies
+        .iter()
+        .find(|x| crate::dialogs_assembly::occurrence_path_of_body(&h.app.session, &x.name).and_then(|p| p.last().copied()) == Some(b))
+        .map(|x| x.name.clone())
+        .expect("B's body");
+    h.app.session.visibility.locked_bodies.push(body.clone());
+    h.app.session.selection = vec![Sel::Body { name: body }];
+    let p = crate::delete::selection_params(&h.app);
+    assert_eq!(p["occurrences"], json!([b]), "{p}");
+    assert_eq!(p["items"], json!([]), "{p}");
+    // The root's own locked body is still left alone.
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, -60, 0], "body_name": "Loose"})).unwrap();
+    h.app.session.visibility.locked_bodies.push("Loose".into());
+    h.app.session.selection = vec![Sel::Body { name: "Loose".into() }];
+    let p = crate::delete::selection_params(&h.app);
+    assert_eq!((p["items"].clone(), p["occurrences"].clone()), (json!([]), json!([])), "{p}");
+}
+
 /// R179: Grounded over two picked placements is checked only when both are grounded, sets both
 /// to the opposite in one step; with only the root's body picked it is disabled.
 #[test]
