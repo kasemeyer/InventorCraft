@@ -12,8 +12,9 @@ use solidcraft_engine::Sel;
 use solidcraft_engine::doc::DocumentKind;
 
 use crate::SolveApp;
-use crate::context_menu::{Item, act, cmd};
+use crate::context_menu::{Item, Target, act, cmd};
 use crate::dialogs::{Kind, PanelAction};
+use crate::dialogs_assembly::Asm;
 use crate::profile_workflow::{MenuContext, MenuLayout};
 
 /// Capture pixels at 175 % scaling (Ruling 9) to logical points.
@@ -91,7 +92,60 @@ pub(crate) fn holds_keys(app: &SolveApp) -> bool {
     app.viewport.context_menu.is_some() && layout(app).is_some()
 }
 
+/// An open Constrain or Drive panel's right-click is a list by the dialog's kind, not the panel
+/// ring (R72; spec §6.7: these panels have no capture). Only where the profile has marking menus.
+fn kind_list(app: &SolveApp) -> Option<&'static [&'static str]> {
+    layout(app)?;
+    match &app.dialog.as_ref()?.kind {
+        Kind::Assembly(Asm::Constraint(_)) => Some(&["ui.ok", "ui.applyContinue", "ui.cancel"]),
+        Kind::Assembly(Asm::DriveConstraint(_)) => Some(&["ui.ok", "ui.cancel"]),
+        _ => None,
+    }
+}
+
+/// The one placement the selection names in an assembly (a picked placement, or the component of
+/// a picked body, face, edge or vertex): the target whose context-menu list the ring's list items
+/// come from (R136). None with nothing, the root's bodies, or several placements picked.
+fn selected_placement(app: &SolveApp) -> Option<Vec<u64>> {
+    if app.session.doc.kind != DocumentKind::Assembly {
+        return None;
+    }
+    let mut paths: Vec<Vec<u64>> = Vec::new();
+    for sel in &app.session.selection {
+        let path = match sel {
+            Sel::Occurrence { path } => Some(path.clone()),
+            Sel::Body { name: body } | Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } => {
+                crate::dialogs_assembly::occurrence_path_of_body(&app.session, body)
+            }
+            _ => None,
+        };
+        if let Some(path) = path.filter(|p| !p.is_empty())
+            && !paths.contains(&path)
+        {
+            paths.push(path);
+        }
+    }
+    match <[Vec<u64>; 1]>::try_from(paths) {
+        Ok([path]) => Some(path),
+        Err(_) => None,
+    }
+}
+
+/// A list entry the target's context-menu list also carries takes that item's label, check and
+/// parameters: the context menu is the one producer (R136; Grounded and its check).
+fn from_context(mut item: Item, listed: &[Item]) -> Item {
+    if let Some(src) = listed.iter().find(|l| l.id == item.id && l.id != "-") {
+        item.label.clone_from(&src.label);
+        item.checked = src.checked;
+        item.params.clone_from(&src.params);
+    }
+    item
+}
+
 fn current(app: &SolveApp) -> Option<(MenuContext, &'static MenuLayout)> {
+    if kind_list(app).is_some() {
+        return None;
+    }
     let ctx = context(app);
     // A drawing's sheet has no part or sketch ring: only a panel's and its empty sheet's (R15).
     if app.session.doc.kind == DocumentKind::Drawing && !matches!(ctx, MenuContext::Panel | MenuContext::DrawingEmpty) {
@@ -108,8 +162,12 @@ pub(crate) fn ring(app: &SolveApp) -> Option<Vec<Item>> {
 
 /// The overflow list items, or None without a layout for the context.
 pub(crate) fn overflow(app: &SolveApp) -> Option<Vec<Item>> {
+    if let Some(list) = kind_list(app) {
+        return Some(list.iter().map(|id| item(app, id, MenuContext::Panel)).collect());
+    }
     let (ctx, l) = current(app)?;
-    Some(l.overflow.iter().map(|id| item(app, id, ctx)).collect())
+    let listed = selected_placement(app).map(|path| crate::context_menu::items(app, &Target::Occurrence { path })).unwrap_or_default();
+    Some(l.overflow.iter().map(|id| from_context(item(app, id, ctx), &listed)).collect())
 }
 
 /// The key the profile maps to a UI action (F5 for Previous View under Inventor).
@@ -311,3 +369,7 @@ fn drawing_item(app: &SolveApp, id: &str) -> Option<Item> {
 #[cfg(test)]
 #[path = "marking_menu_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "marking_menu_constraint_tests.rs"]
+mod marking_menu_constraint_tests;

@@ -2018,8 +2018,11 @@ pub fn open_for(app: &mut SolveApp, at: Pos2, target: Target) {
         && if crate::sheet_canvas::shows(app) {
             // A sheet shows a ring only where the profile lays one out for it (R15).
             crate::marking_menu::ring(app).is_some()
+        } else if crate::marking_menu::layout(app).is_some() {
+            // The profile's ring, unless the context is a list (an open Constrain or Drive panel, R72).
+            crate::marking_menu::ring(app).is_some()
         } else {
-            app.preferences.radial_context_menu || crate::marking_menu::layout(app).is_some()
+            app.preferences.radial_context_menu
         };
     app.menu.target = target;
     app.menu.flick = false;

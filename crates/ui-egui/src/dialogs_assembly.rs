@@ -409,6 +409,17 @@ pub(crate) fn occurrence_of_body(s: &Session, body: &str) -> Option<u64> {
     path.last().copied()
 }
 
+/// The placement path of a world body's occurrence (empty for the root design's bodies).
+pub(crate) fn occurrence_path_of_body(s: &Session, body: &str) -> Option<Vec<u64>> {
+    let st = s.world_state();
+    let b = st.body(body)?;
+    if s.doc.model_body_component(b) == 0 {
+        return Some(Vec::new());
+    }
+    let model = s.model.state();
+    s.doc.body_frames_with_source(&model).into_iter().find(|(world, ..)| world == body).map(|(_, _, _, path, _)| path)
+}
+
 /// Centre and unit normal of the circle through a polyline's points, if it lies on one.
 pub fn circle_of(pts: &[Vec3]) -> Option<(Vec3, Vec3)> {
     let n = pts.len();
