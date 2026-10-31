@@ -84,6 +84,22 @@
   "letter_keys": "aliases",
   "alias_wait_ms": 750,
   "function_keys": {"F5": "ui.view_previous", "F6": "ui.view_home"},
+  "navigation": {
+    "wheel_direction": "forward_zooms_out",
+    "wheel_step": 0.15,
+    "wheel_smoothing": false,
+    "zoom_to_cursor": true,
+    "drag_zoom": "up_zooms_out",
+    "orbit_style": "free",
+    "orbit_pivot": "model_point_under_cursor",
+    "pivot_glyph": true,
+    "buttons": {"pan": "middle", "orbit": "shift+middle", "zoom": "ctrl+middle"},
+    "right_drag_orbit": false,
+    "ctrl_left_drag_orbit": false,
+    "hold_keys": {},
+    "keys": [],
+    "cursors": true
+  },
   "aliases": [
     {"keys": "S", "command": "sketch.create", "scope": "model"},
     {"keys": "M", "command": "inspect.measure", "scope": "everywhere"},

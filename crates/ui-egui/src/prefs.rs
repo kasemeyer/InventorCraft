@@ -56,7 +56,7 @@ impl NavKeys {
     const SHIFT_ALT: NavKeys = NavKeys { shift: true, ctrl: false, alt: true };
 
     /// All of these keys are held (Ctrl is Cmd on macOS).
-    fn held(self, m: Modifiers) -> bool {
+    pub(crate) fn held(self, m: Modifiers) -> bool {
         (!self.shift || m.shift) && (!self.ctrl || m.ctrl || m.command) && (!self.alt || m.alt)
     }
 }
@@ -201,6 +201,20 @@ impl Prefs {
     pub fn trackpad_pans(&self) -> bool {
         self.nav != TOUCHPAD_NAV && self.trackpad_pan
     }
+}
+
+/// The navigation preferences an interface profile's `navigation` block gives a default for: the
+/// mouse mapping, the wheel's direction, the orbit's style and centre, zoom to the cursor and wheel
+/// smoothing. Each follows the profile until the user sets it (`Prefs::navigation_set`).
+pub const PROFILE_NAV_PREFS: [&str; 6] = ["nav", "zoom_reverse", "free_orbit", "orbit_around", "zoom_to_cursor", "smooth_wheel_zoom"];
+
+/// The user picks a mouse mapping: it and its wheel direction are theirs from now on, over the
+/// interface profile's (`PROFILE_NAV_PREFS`).
+pub(crate) fn choose_preset(app: &mut SolveApp, id: &str) {
+    let preset = nav_preset(id);
+    app.preferences.nav = preset.id.into();
+    app.preferences.zoom_reverse = preset.reverse_zoom;
+    app.preferences.navigation_set.extend(["nav".to_string(), "zoom_reverse".to_string()]);
 }
 
 /// The preset with this id (the default for an unknown one).
@@ -454,7 +468,7 @@ preference_settings! {
     nav: String = "fusion".into(), PAGE_NAVIGATION;
     /// Opt in to rotation through both poles with roll, without the Shift axis-snap spring.
     /// Independent of mouse bindings; false also preserves existing saved presets' behavior.
-    free_orbit: bool = false, PAGE_NAVIGATION => check_tr("nav.free_orbit.label");
+    free_orbit: bool = false, PAGE_NAVIGATION;
     /// View orientation widget: original signed axes (default) or compact cube.
     navigator_style: NavigatorStyle = NavigatorStyle::default(), PAGE_NAVIGATION;
     /// Show the radial ring and enable hold/flick gestures for viewport context menus.
@@ -464,13 +478,19 @@ preference_settings! {
     /// Mouse gestures: a ring of tools on the right button.
     mouse_gestures: crate::mouse_gesture::Config = Default::default(), PAGE_NAVIGATION;
     /// The wheel zooms out when turned forward.
-    zoom_reverse: bool = false, PAGE_NAVIGATION => check("Reverse zoom direction");
+    zoom_reverse: bool = false, PAGE_NAVIGATION;
     /// What an orbit turns around.
     orbit_around: OrbitAround = OrbitAround::default(), PAGE_NAVIGATION;
     /// The cursor preference as releases before the origin option saved it (`true` = the point
     /// under the cursor). [`migrate`] folds it into `orbit_around` when saved preferences are
     /// read, so an existing choice survives the upgrade; this version only writes `false`.
     orbit_cursor: bool = false, PAGE_NAVIGATION;
+    /// The navigation preferences the user has set ([`PROFILE_NAV_PREFS`], by the Preferences
+    /// page or `ui.prefs`): these win over the interface profile's `navigation` block, the others
+    /// follow it (`navigation::user_chose`). Restore Defaults on the page empties it. Not written
+    /// while empty.
+    #[serde(skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    navigation_set: std::collections::BTreeSet<String> = Default::default(), PAGE_NAVIGATION;
     /// Whether a connected 3D mouse moves the view.
     space_mouse_enabled: bool = true, PAGE_NAVIGATION => check("Navigate with the 3D mouse");
     /// Whether a picture of the connected 3D mouse, moving as it does, sits in the 3D view's lower
@@ -595,9 +615,9 @@ preference_settings! {
     /// own, so the workspace keeps the whole window width.
     browser_float: bool = false, PAGE_INTERFACE;
     /// The wheel zooms toward the point under the cursor (else toward the view's centre).
-    zoom_to_cursor: bool = true, PAGE_NAVIGATION => check("Zoom to the cursor", "The wheel zooms toward the point under the cursor (off: toward the view's centre)");
+    zoom_to_cursor: bool = true, PAGE_NAVIGATION;
     /// Spread discrete wheel input across frames (off: apply each event immediately).
-    smooth_wheel_zoom: bool = true, PAGE_NAVIGATION => check("Smooth wheel zoom", "Turn off to apply each wheel event immediately, without a smoothing tail");
+    smooth_wheel_zoom: bool = true, PAGE_NAVIGATION;
     /// Two-finger trackpad scroll pans (off: it zooms like the wheel); pinch always zooms.
     trackpad_pan: bool = true, PAGE_NAVIGATION;
     /// Horizontal trackpad and thumb-wheel scrolling pans the view the other way (#2007).
@@ -974,7 +994,13 @@ fn defaults(app: &mut SolveApp, page: usize) {
             app.ui.layout = app.preferences.layout;
         }
         PAGE_AI => app.ui.agent_cursor = Default::default(),
-        PAGE_NAVIGATION | PAGE_DESIGN => {}
+        // The page's navigation settings follow the interface profile again, its mouse mapping too.
+        PAGE_NAVIGATION => {
+            if let Some(nav) = &crate::profile::active(app).defaults.nav {
+                app.preferences.nav = nav.clone();
+            }
+        }
+        PAGE_DESIGN => {}
         PAGE_SHORTCUTS => crate::keymap::reset(app, None),
         PAGE_GRAPHICS => {
             app.ui.visual_style = 0;
@@ -1079,13 +1105,14 @@ pub fn set_autosave(app: &mut SolveApp) {
     }
 }
 
-/// Which navigation dragging `button` with `mods` held does under the preset.
+/// Which navigation dragging `button` with `mods` held does: under the mouse mapping the user
+/// picked, else under the interface profile's buttons (`navigation::bindings`).
 pub fn nav_mode(app: &SolveApp, button: NavButton, mods: Modifiers) -> Option<NavMode> {
     // With mouse gestures on, the right button opens the ring of tools instead of orbiting.
     if button == NavButton::Right && crate::mouse_gesture::active(app) {
         return None;
     }
-    nav_preset(&app.preferences.nav).mode(button, mods)
+    crate::navigation::bindings(app).into_iter().find(|b| b.button == button && b.keys.held(mods)).map(|b| b.mode)
 }
 
 /// +1, or −1 when horizontal scrolling pans the other way (#2007).
@@ -1112,21 +1139,21 @@ pub fn manipulator_free_held(app: &SolveApp, m: Modifiers) -> bool {
     held.primary || (app.preferences.manipulator_free_alt && held.alt)
 }
 
-/// +1, or −1 when the wheel zooms the other way.
-pub fn zoom_sign(app: &SolveApp) -> f64 {
-    if app.preferences.zoom_reverse { -1.0 } else { 1.0 }
+/// The face, vertex or edge point under a screen position, if any.
+pub(crate) fn model_point_under(app: &SolveApp, proj: &crate::viewport::Proj, at: Pos2) -> Option<Vec3> {
+    use crate::viewport::Hit;
+    crate::viewport::pick(app, proj, at).into_iter().find_map(|h| match h {
+        Hit::Face { point, .. } | Hit::Vertex { point, .. } => Some(point),
+        Hit::Edge { mid, .. } => Some(mid),
+        _ => None,
+    })
 }
 
 /// The model point under a screen position. Over empty space: the centre of the visible bodies
 /// and sketches (what Fit frames), or the view's centre when nothing is visible.
 pub(crate) fn pivot_under(app: &SolveApp, proj: &crate::viewport::Proj, at: Pos2) -> Vec3 {
-    use crate::viewport::Hit;
-    for h in crate::viewport::pick(app, proj, at) {
-        match h {
-            Hit::Face { point, .. } | Hit::Vertex { point, .. } => return point,
-            Hit::Edge { mid, .. } => return mid,
-            _ => {}
-        }
+    if let Some(p) = model_point_under(app, proj, at) {
+        return p;
     }
     // Over empty space: the middle of the bodies in view, not of everything shown (#2616).
     if let Some(c) = crate::viewport::in_view_centre(app, proj) {
@@ -1758,7 +1785,8 @@ fn space_mouse_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
         });
         // The calibrated device moving as it does, with the test model beside it, then its dead zones.
         let (device, raw) = (app.space_mouse.device.clone(), app.space_mouse.raw.into());
-        let (boat, motion, reverse) = (&mut app.space_mouse.boat, app.space_mouse.motion, (app.preferences.zoom_reverse, app.preferences.free_orbit));
+        let free = crate::navigation::free_orbit(app);
+        let (boat, motion, reverse) = (&mut app.space_mouse.boat, app.space_mouse.motion, (app.preferences.zoom_reverse, free));
         if let Some(calibration) = device.as_ref().and_then(|device| app.preferences.space_mouse_calibrations.get_mut(device)) {
             ui_kit::divider(ui, "space_mouse_picture");
             // Under each circle's axes, what the view does with them: the rows' own labels.
@@ -2287,6 +2315,9 @@ pub fn set(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::Valu
     if p.get("layout").is_some() {
         app.ui.layout = new.layout;
     }
+    let mut new = new;
+    // A navigation preference asked for by name is the user's from now on, over the profile's.
+    new.navigation_set.extend(PROFILE_NAV_PREFS.iter().filter(|k| p.get(**k).is_some()).map(|k| k.to_string()));
     app.preferences = new;
     if units_changed {
         default_units_changed(app);
@@ -3959,7 +3990,7 @@ mod tests {
             assert_eq!(nav_mode(&app, NavButton::Left, mods), None);
             assert_eq!(nav_mode(&app, NavButton::Right, mods), None);
         }
-        assert_eq!(zoom_sign(&app), 1.0, "the wheel turns the usual way");
+        assert_eq!(crate::navigation::zoom_sign(&app), 1.0, "the wheel turns the usual way");
         let mut other = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         other.load_prefs(&app.prefs());
         assert_eq!(other.preferences.nav, "blender");
@@ -3978,7 +4009,7 @@ mod tests {
         assert!(matches!(nav_mode(&app, NavButton::Middle, ctrl), Some(NavMode::Pan)));
         set(&mut app, &json!({"nav": "inventor", "zoom_reverse": true})).unwrap();
         assert!(matches!(nav_mode(&app, NavButton::Middle, ctrl), Some(NavMode::Zoom)));
-        assert_eq!(zoom_sign(&app), -1.0);
+        assert_eq!(crate::navigation::zoom_sign(&app), -1.0);
         assert!(matches!(nav_mode(&app, NavButton::Right, none), Some(NavMode::Orbit)), "right drag orbits everywhere");
         assert_eq!(nav_mode(&app, NavButton::Left, none), None, "left drag selects");
         let shift_alt = Modifiers { shift: true, alt: true, ..Default::default() };

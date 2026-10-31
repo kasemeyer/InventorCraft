@@ -1488,6 +1488,7 @@
   "prefs.mouse": "鼠标与触控板",
   "prefs.mouse_heading": "鼠标",
   "prefs.mouse_mapping": "鼠标映射",
+  "prefs.nav_follows_profile": "在此处更改之前，此设置跟随界面配置文件（Inventor 或 SolidCraft）。在此处更改后，您的设置优先于配置文件；“恢复默认值”会将其交还给配置文件。",
   "prefs.navigation": "导航",
   "prefs.navigation_note": "鼠标、触控板和3D鼠标如何移动视图。",
   "prefs.not_on_gpu": "此 GPU 不支持",

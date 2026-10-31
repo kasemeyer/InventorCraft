@@ -65,6 +65,8 @@ pub struct Profile {
     pub omitted: BTreeMap<String, String>,
     /// Part-workflow switches and marking-menu layouts (Plan B-2).
     pub workflow: crate::profile_workflow::Workflow,
+    /// How the wheel, the mouse buttons and the navigation keys move the view (R210).
+    pub navigation: crate::profile_navigation::Navigation,
     ribbons: [Ribbon; 3], // in `DocumentKind::ALL` order
     /// Per kind, the index of the first kind with the same ribbon (`ribbon_identity`).
     shared: [usize; 3],
@@ -587,6 +589,7 @@ pub fn solidcraft() -> Profile {
         browser: BrowserLayout::default(),
         omitted: BTreeMap::new(),
         workflow: crate::profile_workflow::Workflow::default(),
+        navigation: crate::profile_navigation::Navigation::solidcraft(),
         shared: shared(&ribbons),
         ribbons,
     }
@@ -625,6 +628,9 @@ struct ProfileJson {
     omitted: BTreeMap<String, String>,
     #[serde(default)]
     workflow: crate::profile_workflow::Workflow,
+    /// None: the base profile's.
+    #[serde(default)]
+    navigation: Option<crate::profile_navigation::Navigation>,
     #[serde(default)]
     home: HomeJson,
     panels: BTreeMap<String, PanelJson>,
@@ -777,6 +783,7 @@ pub fn parse(text: &str, base: &Profile) -> Result<Profile, String> {
         browser: json.browser,
         omitted: json.omitted,
         workflow: json.workflow,
+        navigation: json.navigation.unwrap_or_else(|| base.navigation.clone()),
         shared: shared(&ribbons),
         ribbons,
     })
@@ -965,6 +972,7 @@ pub fn validate(profile: &Profile) -> Vec<String> {
         }
     }
     out.extend(crate::profile_workflow::validate_workflow(&profile.workflow));
+    out.extend(crate::profile_navigation::validate(&profile.navigation, &profile.function_keys));
     out
 }
 
@@ -1019,6 +1027,8 @@ pub fn choose(app: &mut SolveApp, id: &str) -> Result<(), String> {
     let d = &profile.defaults;
     if let Some(nav) = &d.nav {
         app.preferences.nav = nav.clone();
+        // The profile's own mapping: its `navigation` buttons rule until the user picks one.
+        app.preferences.navigation_set.remove("nav");
     }
     if let Some(navigator) = d.navigator {
         app.preferences.navigator_style = navigator;

@@ -4615,8 +4615,11 @@ fn axis_view_orbit(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) -> bool {
         app.cancel_view_animation();
         // The compass ring turns about up only: no tilt, and no snap that would change it.
         let ring = app.viewport.axis_drag_ring;
-        let dy = if ring { 0.0 } else { f64::from(p.y - last.y) };
-        orbit_drag(app, rect, f64::from(p.x - last.x), dy, None, shift && !ring, false);
+        if ring {
+            crate::navigation::turn_about_up(app, f64::from(p.x - last.x));
+        } else {
+            orbit_drag(app, rect, f64::from(p.x - last.x), f64::from(p.y - last.y), None, shift, false);
+        }
         app.viewport.axis_drag = Some(p);
         ui.ctx().request_repaint();
     }
@@ -4665,7 +4668,7 @@ fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
             format!(
                 "View from {}. Click again to reverse. Drag to orbit{}.",
                 name.to_uppercase(),
-                if app.preferences.free_orbit { "" } else { "; hold Shift to snap" }
+                if crate::navigation::free_orbit(app) { "" } else { "; hold Shift to snap" }
             ),
         );
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -4741,7 +4744,7 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
                 crate::i18n::tr("nav.touchpad.orbit")
             } else if app.preferences.nav == crate::prefs::OPENSCAD_NAV {
                 "Orbit (left drag on empty space; Shift+left drag box-selects)"
-            } else if app.preferences.free_orbit {
+            } else if crate::navigation::free_orbit(app) {
                 "Orbit (right drag)"
             } else {
                 "Orbit (right drag; hold Shift to snap)"

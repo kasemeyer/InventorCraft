@@ -37,6 +37,125 @@ impl NavCaps {
     pub const RENDER: NavCaps = NavCaps { orbit: true, pick: false };
 }
 
+/// The active interface profile's navigation block (R210).
+pub(crate) fn scheme(app: &SolveApp) -> &'static crate::profile_navigation::Navigation {
+    &crate::profile::active(app).navigation
+}
+
+fn default_prefs() -> &'static crate::prefs::Prefs {
+    static DEFAULTS: std::sync::OnceLock<crate::prefs::Prefs> = std::sync::OnceLock::new();
+    DEFAULTS.get_or_init(Default::default)
+}
+
+/// Whether the user set the navigation preference `key` (one of `prefs::PROFILE_NAV_PREFS`): they
+/// changed it on the Preferences page or by `ui.prefs` (`Prefs::navigation_set`), or it holds
+/// something other than its default (saved before the profile's block existed). A preference the
+/// user set wins; the others follow the interface profile's `navigation` block.
+pub(crate) fn user_chose<T: PartialEq>(app: &SolveApp, key: &str, get: impl Fn(&crate::prefs::Prefs) -> &T) -> bool {
+    app.preferences.navigation_set.contains(key) || get(&app.preferences) != get(default_prefs())
+}
+
+/// Turning the wheel away zooms out: the user's Reverse zoom direction, else the profile's.
+pub(crate) fn wheel_zooms_out(app: &SolveApp) -> bool {
+    if user_chose(app, "zoom_reverse", |p| &p.zoom_reverse) {
+        app.preferences.zoom_reverse
+    } else {
+        scheme(app).wheel_direction == crate::profile_navigation::WheelDirection::ForwardZoomsOut
+    }
+}
+
+/// +1, or -1 when the wheel zooms the other way ([`wheel_zooms_out`]).
+pub(crate) fn zoom_sign(app: &SolveApp) -> f64 {
+    if wheel_zooms_out(app) { -1.0 } else { 1.0 }
+}
+
+/// Orbits turn about the screen's axes through the poles: the user's Free orbit, else the
+/// profile's orbit style.
+pub(crate) fn free_orbit(app: &SolveApp) -> bool {
+    if user_chose(app, "free_orbit", |p| &p.free_orbit) {
+        app.preferences.free_orbit
+    } else {
+        scheme(app).orbit_style == crate::profile_navigation::OrbitStyle::Free
+    }
+}
+
+/// The wheel zooms about the point under the cursor: the user's Zoom to the cursor, else the
+/// profile's.
+pub(crate) fn zoom_to_cursor(app: &SolveApp) -> bool {
+    if user_chose(app, "zoom_to_cursor", |p| &p.zoom_to_cursor) { app.preferences.zoom_to_cursor } else { scheme(app).zoom_to_cursor }
+}
+
+/// Each wheel notch is spread over frames: the user's Smooth wheel zoom, else the profile's.
+pub(crate) fn smooth_wheel(app: &SolveApp) -> bool {
+    if user_chose(app, "smooth_wheel_zoom", |p| &p.smooth_wheel_zoom) { app.preferences.smooth_wheel_zoom } else { scheme(app).wheel_smoothing }
+}
+
+/// What an orbit turns about.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Pivot {
+    ViewCentre,
+    Origin,
+    /// The model point under the cursor, else the centre of the geometry in view (the
+    /// preference's "Under the cursor").
+    Cursor,
+    /// The model point under the cursor, else the view's centre (a profile's
+    /// `model_point_under_cursor`).
+    CursorElseCentre,
+    /// The centre of the selection, else the view's centre.
+    Selection,
+}
+
+/// The user's Orbit around, else the profile's orbit pivot.
+pub(crate) fn pivot(app: &SolveApp) -> Pivot {
+    use crate::profile_navigation::OrbitPivot;
+    if user_chose(app, "orbit_around", |p| &p.orbit_around) {
+        return match app.preferences.orbit_around {
+            OrbitAround::ViewCentre => Pivot::ViewCentre,
+            OrbitAround::Origin => Pivot::Origin,
+            OrbitAround::Cursor => Pivot::Cursor,
+        };
+    }
+    match scheme(app).orbit_pivot {
+        OrbitPivot::ViewCentre => Pivot::ViewCentre,
+        OrbitPivot::ModelPointUnderCursor => Pivot::CursorElseCentre,
+        OrbitPivot::Selection => Pivot::Selection,
+    }
+}
+
+/// The orbit's centre for a drag that began at `at`: none for the view's centre, else a point
+/// chosen once, when the drag begins (`ViewportState::orbit_pivot`).
+fn pivot_point(app: &mut SolveApp, rect: Rect, at: Pos2) -> Option<Vec3> {
+    let kind = pivot(app);
+    match kind {
+        Pivot::ViewCentre => return None,
+        Pivot::Origin => return Some(Vec3::ZERO),
+        _ => {}
+    }
+    if let Some(p) = app.viewport.orbit_pivot {
+        return Some(p);
+    }
+    let proj = projection(app, rect);
+    let p = match kind {
+        Pivot::Cursor => pivot_under(app, &proj, at),
+        Pivot::Selection => crate::viewport::selection_bounds(app).filter(|b| !b.is_empty()).map_or(app.cam.target, |b| b.center()),
+        _ => crate::prefs::model_point_under(app, &proj, at).unwrap_or(app.cam.target),
+    };
+    app.viewport.orbit_pivot = Some(p);
+    Some(p)
+}
+
+/// Whether the user picked a mouse mapping (on the Preferences page or by `ui.prefs`, or one
+/// other than the profile's own): its bindings then rule, else the profile's buttons.
+pub(crate) fn preset_chosen(app: &SolveApp) -> bool {
+    app.preferences.navigation_set.contains("nav")
+        || crate::profile::active(app).defaults.nav.as_deref().is_some_and(|nav| nav != app.preferences.nav)
+}
+
+/// The mouse bindings in force, most specific first: the picked mapping's, else the profile's.
+pub(crate) fn bindings(app: &SolveApp) -> Vec<crate::prefs::NavBinding> {
+    if preset_chosen(app) { crate::prefs::nav_preset(&app.preferences.nav).bindings.to_vec() } else { scheme(app).bindings() }
+}
+
 /// Supplies the scroll phases browsers omit, before the shared navigation sees input.
 #[derive(Default)]
 pub struct WebWheelGestures {
@@ -189,7 +308,7 @@ pub(crate) fn pinch_factor(input: &egui::InputState) -> f32 {
 /// Zoom anchor: the model point under the cursor, else the target's depth.
 /// Preferences › Navigation › Zoom to the cursor (off: toward the view's centre).
 pub(crate) fn zoom_anchor(app: &mut SolveApp, rect: egui::Rect, hover: Option<egui::Pos2>, surface: bool) -> Option<Vec3> {
-    hover.filter(|_| app.preferences.zoom_to_cursor).map(|p| {
+    hover.filter(|_| zoom_to_cursor(app)).map(|p| {
         let proj = projection(app, rect);
         // Toward the model's surface under the cursor, else the target's depth.
         if surface && let Some(q) = pick_cached(app, &proj, p).iter().find_map(|h| if let Hit::Face { point, .. } = h { Some(*point) } else { None })
@@ -348,7 +467,7 @@ pub(crate) fn camera_motion(app: &mut SolveApp, rect: Rect, mut params: serde_js
     let stored_fov = app.cam.fov;
     params["camera"] = json!(projection(app, rect).cam);
     params["viewport"] = json!([rect.width().max(1.0), rect.height().max(1.0)]);
-    params["free_orbit"] = json!(app.preferences.free_orbit);
+    params["free_orbit"] = json!(free_orbit(app));
     let _ = app.run("view.navigate", params);
     app.cam.fov = stored_fov;
 }
@@ -414,7 +533,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
 
     // ---- navigation ----
     let trackpad_pan = app.preferences.trackpad_pans();
-    if !app.preferences.smooth_wheel_zoom {
+    if !smooth_wheel(app) {
         app.viewport.wheel_zoom_raw_until_idle = true;
     } else if !ui.input(|i| i.is_scrolling()) {
         app.viewport.wheel_zoom_raw_until_idle = false;
@@ -447,7 +566,9 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     if inside && pinch != 1.0 {
         app.viewport.orbit_free = None;
         // Spread zooms in: the camera distance shrinks by the pinch factor.
-        let f = f64::from(pinch).powf(-crate::prefs::zoom_sign(app));
+        // The fingers' own direction: only the user's Reverse zoom direction turns it, never a
+        // profile's wheel direction.
+        let f = f64::from(pinch).powf(if app.preferences.zoom_reverse { 1.0 } else { -1.0 });
         let anchor = zoom_anchor(app, rect, hover, caps.orbit);
         if app.preferences.nav == crate::prefs::TOUCHPAD_NAV {
             let mut params = json!({"motion":"zoom", "factor":f.clamp(0.05,20.0)});
@@ -462,7 +583,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     }
     if inside && scroll != 0.0 {
         app.viewport.orbit_free = None;
-        let f = (-scroll as f64 * 0.0015 * crate::prefs::zoom_sign(app)).exp();
+        let f = (-scroll as f64 * 0.0015 * zoom_sign(app)).exp();
         let anchor = zoom_anchor(app, rect, hover, caps.orbit);
         if app.preferences.nav == crate::prefs::TOUCHPAD_NAV {
             let mut params = json!({"motion":"zoom", "factor":f.clamp(0.05,20.0)});
@@ -561,22 +682,10 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     if let Some((mode, delta)) = motion {
         if delta != egui::Vec2::ZERO {
             let mut params = json!({"motion":if mode == NavMode::Pan {"pan"} else {"orbit"},"delta":[delta.x,delta.y]});
-            if mode == NavMode::Orbit {
-                let pivot = match app.preferences.orbit_around {
-                    crate::prefs::OrbitAround::ViewCentre => None,
-                    crate::prefs::OrbitAround::Origin => Some(Vec3::ZERO),
-                    crate::prefs::OrbitAround::Cursor => Some(match app.viewport.orbit_pivot {
-                        Some(pivot) => pivot,
-                        None => {
-                            let pivot = crate::prefs::pivot_under(app, &projection(app, rect), hover.unwrap_or(rect.center()) - delta);
-                            app.viewport.orbit_pivot = Some(pivot);
-                            pivot
-                        }
-                    }),
-                };
-                if let Some(pivot) = pivot {
-                    params["pivot"] = json!(pivot);
-                }
+            if mode == NavMode::Orbit
+                && let Some(pivot) = pivot_point(app, rect, hover.unwrap_or(rect.center()) - delta)
+            {
+                params["pivot"] = json!(pivot);
             }
             camera_motion(app, rect, params);
         }
@@ -651,7 +760,8 @@ pub(crate) fn device(app: &mut SolveApp, rect: Rect, caps: NavCaps) {
     app.space_mouse.moved_at = Some(app.now);
     let turn = caps.orbit && app.session.active_sketch.is_none();
     let height = f64::from(rect.height().max(1.0));
-    device_camera(&mut app.cam, queued.motion, queued.seconds, height, turn, app.preferences.zoom_reverse, app.preferences.free_orbit);
+    let free = free_orbit(app);
+    device_camera(&mut app.cam, queued.motion, queued.seconds, height, turn, app.preferences.zoom_reverse, free);
 }
 
 /// `seconds` of 3D mouse `motion` on `cam`, in a view `height` points tall. A full deflection
@@ -704,7 +814,7 @@ pub(crate) fn snapped_axis_camera(cam: Camera) -> Camera {
 /// cross snap boundaries. A small angular margin avoids flicker at a boundary.
 pub(crate) fn orbit_drag(app: &mut SolveApp, rect: Rect, dx: f64, dy: f64, press: Option<Pos2>, snap: bool, around_cursor: bool) {
     // Free rotation must not enter the yaw/pitch snap: it discards roll at the poles.
-    if app.preferences.free_orbit {
+    if free_orbit(app) {
         app.viewport.orbit_free = None;
         if around_cursor {
             orbit(app, rect, dx, dy, press);
@@ -740,8 +850,8 @@ pub(crate) fn orbit_drag(app: &mut SolveApp, rect: Rect, dx: f64, dy: f64, press
     // The cursor and origin pivots stay still; the axis gizmo has no pivot (it orbits about the
     // view centre, see `axis_view`).
     let pivot = if around_cursor {
-        match app.preferences.orbit_around {
-            crate::prefs::OrbitAround::Origin => Some(Vec3::ZERO),
+        match pivot(app) {
+            Pivot::Origin => Some(Vec3::ZERO),
             _ => app.viewport.orbit_pivot,
         }
     } else {
@@ -787,21 +897,8 @@ pub(crate) fn middle_double_click(app: &mut SolveApp, ui: &egui::Ui, inside: boo
 /// the centre of the visible geometry instead, so the model never swings around a far-off point.
 /// The cursor pivot is chosen once, when the drag begins.
 pub fn orbit(app: &mut SolveApp, rect: egui::Rect, dx: f64, dy: f64, press: Option<Pos2>) {
-    let pivot = match app.preferences.orbit_around {
-        OrbitAround::ViewCentre => None,
-        OrbitAround::Origin => Some(Vec3::ZERO),
-        OrbitAround::Cursor => Some(match app.viewport.orbit_pivot {
-            Some(p) => p,
-            None => {
-                let proj = crate::viewport::projection(app, rect);
-                let at = press.unwrap_or(rect.center());
-                let p = pivot_under(app, &proj, at);
-                app.viewport.orbit_pivot = Some(p);
-                p
-            }
-        }),
-    };
-    if app.preferences.free_orbit {
+    let pivot = pivot_point(app, rect, press.unwrap_or(rect.center()));
+    if free_orbit(app) {
         app.viewport.orbit_from = None;
         match pivot {
             Some(p) => orbit_about(app, rect, dx, dy, p),
@@ -844,13 +941,24 @@ pub(crate) fn orbit_about(app: &mut SolveApp, _rect: egui::Rect, dx: f64, dy: f6
     app.cam.place(pivot, coords);
 }
 
+/// Turn the view about the world's up axis only (the view cube's compass ring), whatever the
+/// orbit style: a free orbit's screen-axis turn would tilt it.
+pub(crate) fn turn_about_up(app: &mut SolveApp, dx: f64) {
+    app.viewport.orbit_free = None;
+    app.cam.orbit(dx, 0.0);
+}
+
 fn orbit_camera(app: &mut SolveApp, dx: f64, dy: f64) {
-    if app.preferences.free_orbit {
+    if free_orbit(app) {
         app.cam.rotate_in_view(Vec3::new(-dy * 0.008, -dx * 0.008, 0.0));
     } else {
         app.cam.orbit(dx, dy);
     }
 }
+
+#[cfg(test)]
+#[path = "navigation_profile_tests.rs"]
+mod profile_tests;
 
 #[cfg(test)]
 mod tests {
@@ -1218,8 +1326,20 @@ mod tests {
     /// the wheel or moves the view camera itself would drift from the user's navigation settings,
     /// so outside this module the camera may only be moved through it, the view commands or the
     /// navigators. The 3D mouse in both apps hands its motion to [`super::device`].
+    ///
+    /// F-2 (R210) extends it to the profile's navigation scheme: the navigation preferences that a
+    /// profile gives defaults for are read only through this module's resolvers (`zoom_sign`,
+    /// `free_orbit`, `pivot`…), which put a preference the user set over the profile's value;
+    /// `prefs.rs` (their store) and the Navigation page (`prefs/navigation.rs`) may touch them.
     #[test]
     fn hand_rolled_camera_input_is_rejected() {
+        const SCHEME: [&str; 5] = [
+            "preferences.zoom_reverse",
+            "preferences.free_orbit",
+            "preferences.orbit_around",
+            "preferences.zoom_to_cursor",
+            "preferences.smooth_wheel_zoom",
+        ];
         const PATTERNS: [&str; 8] = [
             "smooth_scroll_delta",
             "raw_scroll_delta",
@@ -1252,8 +1372,10 @@ mod tests {
                 let text = std::fs::read_to_string(&path).unwrap().replace("\r\n", "\n");
                 // In-file unit tests set cameras up directly; only the code above them counts.
                 let code = text.split("\n#[cfg(test)]\nmod ").next().unwrap_or_default();
+                let scheme_allowed = name == "prefs.rs";
                 for (n, line) in code.lines().enumerate() {
-                    if !line.trim_start().starts_with("//") && PATTERNS.iter().any(|p| line.contains(p)) {
+                    let scheme = !scheme_allowed && SCHEME.iter().any(|p| line.contains(p));
+                    if !line.trim_start().starts_with("//") && (scheme || PATTERNS.iter().any(|p| line.contains(p))) {
                         offenders.push(format!("{}:{}: {}", path.display(), n + 1, line.trim()));
                     }
                 }

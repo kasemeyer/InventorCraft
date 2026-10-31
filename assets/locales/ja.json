@@ -1488,6 +1488,7 @@
   "prefs.mouse": "マウスとトラックパッド",
   "prefs.mouse_heading": "マウス",
   "prefs.mouse_mapping": "マウスの割り当て",
+  "prefs.nav_follows_profile": "ここで変更するまでは、インターフェイス プロファイル (Inventor または SolidCraft) の設定に従います。ここで変更するとプロファイルより優先され、[初期値に戻す] でプロファイルの設定に戻ります。",
   "prefs.navigation": "ナビゲーション",
   "prefs.navigation_note": "マウス、トラックパッド、3Dマウスによるビューの操作。",
   "prefs.not_on_gpu": "この GPU は非対応",
