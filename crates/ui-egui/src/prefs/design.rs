@@ -72,4 +72,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui_kit::Text::Hint("hole_moves"),
         );
     });
+    // Assembly constraints: the pop when one is made (R175).
+    ui_kit::settings_section(ui, "assembly", crate::i18n::tr_label("Assembly"), |ui| {
+        setting::constraint_audio(app, ui);
+    });
 }
