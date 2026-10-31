@@ -124,7 +124,9 @@ fn picks_map_at_any_zoom() {
     };
     h.frame_with(vec![Event::PointerMoved(at), wheel(3.0)]);
     h.frames(20);
-    let sign = if h.app.cam.distance < d0 { 3.0 } else { -3.0 };
+    // One notch a frame, so the zoom stops within a notch of 8 times whatever the profile's step
+    // (Inventor's wheel zooms out away from you, by 15 % a notch: F-2).
+    let sign = if h.app.cam.distance < d0 { 1.0 } else { -1.0 };
     for _ in 0..600 {
         if h.app.cam.distance <= d0 / 8.0 {
             break;

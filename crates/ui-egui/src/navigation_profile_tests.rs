@@ -159,3 +159,134 @@ const PINNED_SHEET: [[f64; 7]; 2] = [
     // middle drag: pan
     [11.818665500179156, 11.14479108462648, -5.820507601975651e-17, 0.0, std::f64::consts::FRAC_PI_2, 0.0, 28.695061034246557],
 ];
+
+// ---- F-2 item 2: the wheel ----
+
+/// A harness on `profile` (SolidCraft or Inventor) with an empty part in view, the camera at
+/// `start_camera`.
+fn on(profile: &str) -> Harness {
+    let mut h = Harness::new();
+    assert_eq!(h.call("ui.prefs", json!({"ui_profile": profile}))["ok"], json!(true));
+    h.app.home.open = false;
+    h.frames(3);
+    h.app.cam_anim = None;
+    h.app.cam = start_camera();
+    h.app.cam.fov = 0.0;
+    h.frames(2);
+    h
+}
+
+fn wheel(lines: f32) -> egui::Event {
+    egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Line,
+        delta: egui::vec2(0.0, lines),
+        modifiers: egui::Modifiers::NONE,
+        phase: egui::TouchPhase::Move,
+    }
+}
+
+/// The distance ratio one notch (`lines` = ±1) leaves after the view settles.
+fn notch(h: &mut Harness, lines: f32) -> f64 {
+    let rect = h.app.viewport.rect.unwrap();
+    let at = rect.center() + egui::vec2(120.0, -60.0);
+    h.frame_with(vec![egui::Event::PointerMoved(at)]);
+    let before = h.app.cam.distance;
+    h.frame_with(vec![egui::Event::PointerMoved(at), wheel(lines)]);
+    h.frames(60);
+    h.app.cam.distance / before
+}
+
+#[test]
+fn the_wheel_zooms_each_profiles_way_by_its_step() {
+    // SolidCraft: away zooms in by exp(-40 × 0.0015) a notch, as always.
+    let mut s = on("solidcraft");
+    let step = (-40.0_f64 * 0.0015).exp();
+    assert!((notch(&mut s, 1.0) - step).abs() < 1e-9, "SolidCraft forward");
+    assert!((notch(&mut s, -1.0) - 1.0 / step).abs() < 1e-9, "SolidCraft back");
+    // Inventor: away zooms out, 15 % a notch; toward you zooms in by 15 %.
+    let mut i = on("inventor");
+    assert!((notch(&mut i, 1.0) - 1.0 / 0.85).abs() < 1e-9, "Inventor forward: {}", notch(&mut on("inventor"), 1.0));
+    assert!((notch(&mut i, -1.0) - 0.85).abs() < 1e-9, "Inventor back");
+    // Three notches are three steps.
+    assert!((notch(&mut i, -3.0) - 0.85_f64.powi(3)).abs() < 1e-9);
+}
+
+#[test]
+fn inventors_wheel_has_no_smoothing_tail_and_solidcrafts_keeps_it() {
+    for (profile, smooth) in [("inventor", false), ("solidcraft", true)] {
+        let mut h = on(profile);
+        let rect = h.app.viewport.rect.unwrap();
+        let at = rect.center();
+        h.frame_with(vec![egui::Event::PointerMoved(at)]);
+        let before = h.app.cam.distance;
+        h.frame_with(vec![egui::Event::PointerMoved(at), wheel(1.0)]);
+        let first = h.app.cam.distance;
+        h.frames(60);
+        let last = h.app.cam.distance;
+        assert_ne!(first, before, "{profile}: the notch moves the view in its frame");
+        if smooth {
+            assert!((first - last).abs() > 1e-6, "{profile}: the notch is spread over frames");
+        } else {
+            assert_eq!(first, last, "{profile}: the whole notch at once, nothing after it");
+        }
+    }
+}
+
+#[test]
+fn the_wheel_zooms_about_the_cursor_under_both_profiles() {
+    for profile in ["solidcraft", "inventor"] {
+        let mut h = on(profile);
+        let rect = h.app.viewport.rect.unwrap();
+        let at = rect.center() + egui::vec2(200.0, 120.0);
+        // The point on the target's depth plane under the cursor stays under it.
+        let proj = crate::viewport::projection(&h.app, rect);
+        let (o, d) = proj.ray(at);
+        let n = h.app.cam.back();
+        let world = o + d * ((h.app.cam.target - o).dot(n) / d.dot(n));
+        h.frame_with(vec![egui::Event::PointerMoved(at)]);
+        for lines in [1.0, -2.0] {
+            h.frame_with(vec![egui::Event::PointerMoved(at), wheel(lines)]);
+            h.frames(60);
+            let back = crate::viewport::projection(&h.app, rect).to_screen(world).unwrap();
+            assert!(back.distance(at) < 0.5, "{profile} {lines}: {back:?} vs {at:?}");
+        }
+    }
+}
+
+#[test]
+fn a_zoom_drag_runs_each_profiles_way() {
+    // Inventor: Ctrl+middle drag up zooms out (the view gets farther), down zooms in.
+    let mut i = on("inventor");
+    let c = i.app.viewport.rect.unwrap().center();
+    let d0 = i.app.cam.distance;
+    drag(&mut i, c, egui::vec2(0.0, -100.0), "middle", json!({"ctrl": true}));
+    assert!((i.app.cam.distance / d0 - 1.0_f64.exp()).abs() < 1e-6, "Inventor up: {}", i.app.cam.distance / d0);
+    let d1 = i.app.cam.distance;
+    drag(&mut i, c, egui::vec2(0.0, 50.0), "middle", json!({"ctrl": true}));
+    assert!((i.app.cam.distance / d1 - (-0.5_f64).exp()).abs() < 1e-6, "Inventor down");
+    // SolidCraft (its SolidWorks mapping's Shift+middle zoom): up zooms in, as before.
+    let mut s = on("solidcraft");
+    s.call("ui.prefs", json!({"nav": "solidworks"}));
+    let d0 = s.app.cam.distance;
+    drag(&mut s, c, egui::vec2(0.0, -100.0), "middle", json!({"shift": true}));
+    assert!((s.app.cam.distance / d0 - (-1.0_f64).exp()).abs() < 1e-6, "SolidCraft up: {}", s.app.cam.distance / d0);
+}
+
+#[test]
+fn a_drawing_sheet_zooms_each_profiles_way() {
+    for (profile, out) in [("solidcraft", false), ("inventor", true)] {
+        let mut h = Harness::new();
+        assert_eq!(h.call("ui.prefs", json!({"ui_profile": profile}))["ok"], json!(true));
+        h.app.home.open = false;
+        h.app.run("drawing.new", json!({"properties": {"drawn_by": "TCI", "drawn_date": "2026-10-28"}})).unwrap();
+        h.frames(3);
+        let rect = crate::scenario::rect_of("sheet_canvas").expect("the sheet canvas is drawn");
+        h.frame_with(vec![egui::Event::PointerMoved(rect.center())]);
+        let before = h.app.cam.distance;
+        h.frame_with(vec![egui::Event::PointerMoved(rect.center()), wheel(1.0)]);
+        h.frames(60);
+        let ratio = h.app.cam.distance / before;
+        let want = if out { 1.0 / 0.85 } else { (-40.0_f64 * 0.0015).exp() };
+        assert!((ratio - want).abs() < 1e-9, "{profile}: a notch away on the sheet {ratio}");
+    }
+}

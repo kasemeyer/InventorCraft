@@ -69,6 +69,15 @@ pub(crate) fn zoom_sign(app: &SolveApp) -> f64 {
     if wheel_zooms_out(app) { -1.0 } else { 1.0 }
 }
 
+/// +1 when a zoom drag moving up zooms in (SolidCraft), -1 when it zooms out (the profile's
+/// `drag_zoom`, Inventor's).
+pub(crate) fn drag_zoom_sign(app: &SolveApp) -> f64 {
+    match scheme(app).drag_zoom {
+        crate::profile_navigation::DragZoom::UpZoomsIn => 1.0,
+        crate::profile_navigation::DragZoom::UpZoomsOut => -1.0,
+    }
+}
+
 /// Orbits turn about the screen's axes through the poles: the user's Free orbit, else the
 /// profile's orbit style.
 pub(crate) fn free_orbit(app: &SolveApp) -> bool {
@@ -583,7 +592,8 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     }
     if inside && scroll != 0.0 {
         app.viewport.orbit_free = None;
-        let f = (-scroll as f64 * 0.0015 * zoom_sign(app)).exp();
+        // The profile's step a notch (SolidCraft's 0.0015 a point; Inventor's 15 % a notch).
+        let f = (-f64::from(scroll) * scheme(app).wheel_rate() * zoom_sign(app)).exp();
         let anchor = zoom_anchor(app, rect, hover, caps.orbit);
         if app.preferences.nav == crate::prefs::TOUCHPAD_NAV {
             let mut params = json!({"motion":"zoom", "factor":f.clamp(0.05,20.0)});
@@ -712,7 +722,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
             }
             match mode {
                 Some(NavMode::Pan) => app.cam.pan(f64::from(delta.x), f64::from(delta.y), h),
-                Some(NavMode::Zoom) => app.cam.zoom_at((f64::from(delta.y) * 0.01).exp(), None),
+                Some(NavMode::Zoom) => app.cam.zoom_at((f64::from(delta.y) * 0.01 * drag_zoom_sign(app)).exp(), None),
                 _ => {}
             }
         }
