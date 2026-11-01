@@ -180,6 +180,13 @@ fn inputs(k: &Mod) -> Vec<SelInput> {
 }
 
 /// The dialog for a sketch modify command.
+/// A length default in the design's unit: `mm` for a millimetre design, `inch` for an inch one
+/// (owner 2026-11-01: the pattern panel's spacings defaulted to mm in an inch design).
+fn len(app: &SolveApp, mm: &str, inch: &str) -> String {
+    let inch_design = solidcraft_engine::doc::inch_units(&app.session.doc.units);
+    crate::dialogs::length_default(&app.session, if inch_design { inch } else { mm })
+}
+
 pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     let corner = |chamfer: bool, ctype: usize| Mod::Corner {
         chamfer,
@@ -191,14 +198,14 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     };
     let k = match id {
         "sketch.scale" => Mod::Scale { factor: "2".into() },
-        "sketch.offset" => Mod::Offset { distance: "2 mm".into(), distance2: "2 mm".into(), mode: 0, chain: true, flip: false },
+        "sketch.offset" => Mod::Offset { distance: len(app, "2", "0.1"), distance2: len(app, "2", "0.1"), mode: 0, chain: true, flip: false },
         "sketch.mirror" => Mod::Mirror,
-        "sketch.move" => Mod::Move { x: "0 mm".into(), y: "0 mm".into(), angle: "0 deg".into(), copy: false },
+        "sketch.move" => Mod::Move { x: len(app, "0", "0"), y: len(app, "0", "0"), angle: "0 deg".into(), copy: false },
         "sketch.pattern.rectangular" => Mod::PatternRect {
             count: "3".into(),
-            spacing: "20 mm".into(),
+            spacing: len(app, "20", "1"),
             count2: "1".into(),
-            spacing2: "20 mm".into(),
+            spacing2: len(app, "20", "1"),
             alignment: PatternAlignment::Right,
             alignment2: PatternAlignment::Right,
             reversed: false,
@@ -824,7 +831,16 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                 (false, []) => ("sketch.fillet", json!({"points": corners, "radius": radius})),
                 // Two lines name their corner even where other lines end at its point (#1824).
                 (true, [a, b]) => ("sketch.fillet", json!({"a": a, "b": b, "radius": radius})),
-                _ => return Err("select corner points, or the two lines of one corner".into()),
+                // Any number of corners in one pass (R220): lines pair up in pick order (an odd
+                // last line waits for its partner), and corner points join them.
+                _ => {
+                    let mut all: Vec<Value> = corners.iter().map(|p| json!({ "point": p })).collect();
+                    all.extend(lines.as_chunks::<2>().0.iter().map(|[a, b]| json!({ "a": a, "b": b })));
+                    if all.is_empty() {
+                        return Err("select the second line of the corner".into());
+                    }
+                    ("sketch.fillet", json!({"corners": all, "radius": radius}))
+                }
             }
         }
         Mod::Corner { ctype, size, distance2, angle, flip, .. } => {

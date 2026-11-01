@@ -1474,11 +1474,16 @@ fn cut_corner(
 fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.fillet";
     let r_expr = expr(p, "radius").ok_or_else(|| bad(cmd, "`radius` must be a number or an expression"))?;
-    // Several corners at once (`points`), each like a single `point`.
-    let corners: Vec<Value> = match p.get("points").and_then(Value::as_array) {
-        Some(a) if !a.is_empty() && a.len() <= 500 => a.iter().map(|q| json!({ "point": q })).collect(),
-        Some(_) => return Err(bad(cmd, "`points` must list 1…500 corners")),
-        None => vec![p.clone()],
+    // Several corners at once: `points` (each like a single `point`), or `corners` (each a
+    // corner's own `point`, or its two lines `a` and `b`) — Inventor rounds corner after corner
+    // with one radius (R220).
+    let corners: Vec<Value> = match (p.get("points").and_then(Value::as_array), p.get("corners").and_then(Value::as_array)) {
+        (Some(_), Some(_)) => return Err(bad(cmd, "give `points` or `corners`, not both")),
+        (Some(a), None) if !a.is_empty() && a.len() <= 500 => a.iter().map(|q| json!({ "point": q })).collect(),
+        (Some(_), None) => return Err(bad(cmd, "`points` must list 1…500 corners")),
+        (None, Some(a)) if !a.is_empty() && a.len() <= 500 && a.iter().all(Value::is_object) => a.clone(),
+        (None, Some(_)) => return Err(bad(cmd, "`corners` must list 1…500 corners, each `{\"point\": …}` or `{\"a\": …, \"b\": …}`")),
+        (None, None) => vec![p.clone()],
     };
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let r = doc.eval(&r_expr, solidcraft_doc::expr::Kind::Length).map_err(|e| bad(cmd, format!("radius: {e}")))?;
