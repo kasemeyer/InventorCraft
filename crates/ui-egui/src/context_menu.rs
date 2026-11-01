@@ -272,6 +272,8 @@ pub struct MenuState {
     pub over_geometry: bool,
     /// The plane under the cursor when the viewport menu opened: it offers a sketch on it.
     pub plane: Option<String>,
+    /// The exact occurrence under the cursor when a canvas context menu opened.
+    canvas_occurrence_path: Option<Vec<u64>>,
     /// The button that opened the menu, when it toggles it: a press there is not a press outside,
     /// so its click closes the menu instead of closing and reopening it (#1522).
     opener: Option<Rect>,
@@ -642,6 +644,11 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         let face = sel.iter().find_map(|s| if let Sel::Face { body, .. } = s { Some(body.clone()) } else { None }).unwrap_or_default();
         let (feature, sketch) = feature_and_sketch(app, picked_face_feature(app));
         let hidden = app.session.visibility.hidden_bodies.contains(&face);
+        let occurrence_actions = canvas_occurrence_actions(app);
+        if !occurrence_actions.is_empty() {
+            v.extend(occurrence_actions);
+            v.push(Item::sep());
+        }
         if app.preferences.nav == "solidworks" {
             v.push(cmd(app, "view.normal_to", "Normal to Selection").with(json!({"camera": app.cam})));
             v.push(Item::sep());
@@ -670,6 +677,11 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
     } else if has(|s| matches!(s, Sel::Edge { .. })) {
         let body = sel.iter().find_map(|s| if let Sel::Edge { body, .. } = s { Some(body.clone()) } else { None }).unwrap_or_default();
         let hidden = app.session.visibility.hidden_bodies.contains(&body);
+        let occurrence_actions = canvas_occurrence_actions(app);
+        if !occurrence_actions.is_empty() {
+            v.extend(occurrence_actions);
+            v.push(Item::sep());
+        }
         v.push(cmd(app, "solid.fillet", "Fillet"));
         v.push(cmd(app, "solid.chamfer", "Chamfer"));
         v.push(Item::sep());
@@ -768,7 +780,7 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
                 .map(|body| app.session.doc.model_body_component(body))
             && component != 0
         {
-            let path = app.session.doc.first_path(component);
+            let path = app.menu.canvas_occurrence_path.clone().unwrap_or_else(|| app.session.doc.first_path(component));
             v.push(Item::sep());
             v.push(
                 act("ui.activate", if app.session.active_component == component { "Finish Edit" } else { "Edit" }, "component")
@@ -797,6 +809,23 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
         }
     }
     v
+}
+
+/// The exact placed occurrence whose world-space body was picked in the canvas. A component
+/// can have many placements, so the first path is wrong for a right-click on a later copy.
+fn body_occurrence_path(app: &SolveApp, world_body: &str) -> Option<Vec<u64>> {
+    let state = app.session.model.state();
+    app.session
+        .doc
+        .body_frames(&state)
+        .into_iter()
+        .find_map(|(name, _, path, _)| (name == world_body && !path.is_empty()).then_some(path))
+}
+
+/// Edit and Open from the browser's occurrence menu, for a solid picked in the canvas.
+fn canvas_occurrence_actions(app: &SolveApp) -> Vec<Item> {
+    let Some(path) = app.menu.canvas_occurrence_path.as_deref() else { return Vec::new() };
+    occurrence_items(app, path).into_iter().filter(|item| matches!(item.id.as_str(), "ui.activate" | "ui.openComponent")).collect()
 }
 
 fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
@@ -2070,6 +2099,15 @@ fn context_target_selected(selection: &[Sel], target: &Sel) -> bool {
 /// multi-selection keeps the whole selection (#3733).
 pub fn open(app: &mut SolveApp, at: Pos2) {
     app.menu.over_geometry = app.viewport.hover.is_some();
+    let canvas_occurrence_path = app.viewport.hover.as_ref().and_then(|hit| {
+        let body = match hit {
+            crate::viewport::Hit::Face { body, .. }
+            | crate::viewport::Hit::Edge { body, .. }
+            | crate::viewport::Hit::Vertex { body, .. } => body,
+            _ => return None,
+        };
+        body_occurrence_path(app, body)
+    });
     // A right-click leaves a plane unselected, but the menu offers a sketch on it.
     app.menu.plane = app.viewport.hover.clone().and_then(|h| crate::viewport::candidate(app, &[h])).and_then(|(_, sel)| match sel {
         Sel::Plane { name } if crate::viewport::occurrence_origin_key(&name).is_none() => Some(name),
@@ -2098,6 +2136,7 @@ pub fn open(app: &mut SolveApp, at: Pos2) {
         let _ = app.run("select.set", json!({ "items": [sel] }));
     }
     open_for(app, at, Target::Viewport);
+    app.menu.canvas_occurrence_path = canvas_occurrence_path;
 }
 
 /// Open a menu for a target (the radial ring only for the viewport: the opt-in ring, or the
@@ -2117,6 +2156,7 @@ pub fn open_for(app: &mut SolveApp, at: Pos2, target: Target) {
             app.preferences.radial_context_menu
         };
     app.menu.target = target;
+    app.menu.canvas_occurrence_path = None;
     app.menu.flick = false;
     app.menu.opener = None;
     app.menu.shown = false;
