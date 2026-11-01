@@ -415,6 +415,8 @@ pub(crate) struct Row<'a> {
     /// top-level row's (an occurrence's own Origin folder and its XY…) must not shadow it, since
     /// a label lookup takes the row drawn last.
     pub(crate) handle_only: bool,
+    /// Hover text for the row (a feature's error or warning); the zone tips win.
+    pub(crate) tip: Option<&'a str>,
 }
 
 /// How a row relates to what the selection and the 3D view's pointer light.
@@ -584,6 +586,7 @@ pub(crate) fn draw_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
         3 => Some(if row.radio == Some(true) { crate::i18n::tr("ui.active_component") } else { crate::i18n::tr("ui.activate") }),
         _ => None,
     };
+    let tip = tip.or(row.tip);
     let resp = match tip {
         Some(t) => resp.on_hover_text(t),
         None if elided => resp.on_hover_text(label_display.to_string()),

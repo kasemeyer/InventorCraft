@@ -140,6 +140,21 @@ pub(crate) fn status(painter: &egui::Painter, r: egui::Rect, name: &str, col: Co
             painter.add(egui::Shape::convex_polygon(half, col, Stroke::NONE));
             painter.circle_stroke(c, radius, ring);
         }
+        // A feature that failed to compute (R212 item 3): a disc in the error colour with a cross.
+        "status_failed" => {
+            let t = Tokens::get();
+            painter.circle_filled(c, radius, t.error);
+            let k = radius * 0.5;
+            let cut = Stroke::new(1.4, t.panel);
+            painter.line_segment([c + vec2(-k, -k), c + vec2(k, k)], cut);
+            painter.line_segment([c + vec2(-k, k), c + vec2(k, -k)], cut);
+        }
+        // A feature that computed with a warning: a disc in the warning colour with a dot.
+        "status_warning" => {
+            let t = Tokens::get();
+            painter.circle_filled(c, radius, t.warning);
+            painter.circle_filled(c, radius * 0.3, t.panel);
+        }
         _ => {
             painter.circle_stroke(c, radius, ring);
         }
