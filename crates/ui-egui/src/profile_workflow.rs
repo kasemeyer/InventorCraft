@@ -19,6 +19,9 @@ pub struct Workflow {
     /// Opening an assembly updates its linked components from their files at once (Inventor
     /// brings an assembly up to date on open; off: Update Links by hand) — R212 item 1.
     pub update_links_on_open: bool,
+    /// Origin planes and axes are sized to the model's extents and zoom with it (Inventor);
+    /// off: a fixed fraction of the view, whatever the zoom (SolidCraft) — R217.
+    pub origin_planes_fit_model: bool,
     /// Finishing a sketch restores the view it was entered from.
     pub restore_view_after_sketch: bool,
     /// A second Escape with no tool out finishes the sketch.
@@ -76,6 +79,7 @@ impl Default for Workflow {
             marking_menu: None,
             look_at_on_sketch: false,
             update_links_on_open: false,
+            origin_planes_fit_model: false,
             restore_view_after_sketch: false,
             escape_twice_finishes_sketch: true,
             sketch_palette: true,

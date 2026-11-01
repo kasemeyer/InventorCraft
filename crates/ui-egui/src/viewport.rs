@@ -1239,6 +1239,23 @@ fn c4(c: Color32) -> [u8; 4] {
     c.to_srgba_unmultiplied()
 }
 
+/// World size of the origin widget: the model's largest extent (a little over, so the planes
+/// reach past the part and zoom with it) when the profile fits origin planes to the model and
+/// there is a model; else a fixed fraction of the view (R217).
+pub fn origin_extent(app: &SolveApp) -> f64 {
+    let view = origin_size(app.cam.half_height());
+    if !crate::profile::active(app).workflow.origin_planes_fit_model {
+        return view;
+    }
+    let bb = view_bounds(app);
+    if bb.is_empty() {
+        return view;
+    }
+    let d = bb.max - bb.min;
+    let extent = d.x.max(d.y).max(d.z) * 1.1;
+    if extent.is_finite() && extent > 1e-6 { extent } else { view }
+}
+
 /// Origin planes and axes currently shown, sized for the view: (name, normal, quad).
 pub fn origin_planes(app: &SolveApp) -> Vec<(&'static str, Vec3, [Vec3; 4])> {
     if !app.origin_visible() {
@@ -1247,7 +1264,7 @@ pub fn origin_planes(app: &SolveApp) -> Vec<(&'static str, Vec3, [Vec3; 4])> {
     // While the Origin is hidden, a dialog picking a plane brings the planes back: then every
     // plane; otherwise only those not hidden one by one.
     let creating = !app.origin_shown() && app.picking_plane();
-    origin_quads(origin_size(app.cam.half_height()))
+    origin_quads(origin_extent(app))
         .into_iter()
         .filter(|(n, _, _)| creating || !app.session.visibility.hidden_origin.iter().any(|h| h == n))
         .collect()
@@ -1282,7 +1299,7 @@ pub fn construction_axis_segments(app: &SolveApp) -> Vec<(String, Vec3, Vec3)> {
     if axes.is_empty() {
         return Vec::new();
     }
-    let h = origin_size(app.cam.half_height()) * AXIS_LEN;
+    let h = origin_extent(app) * AXIS_LEN;
     let bb = view_bounds(app);
     axes.into_iter()
         .map(|(_, name, o, d)| {
@@ -1315,7 +1332,7 @@ pub fn construction_points(app: &SolveApp) -> Vec<(String, Vec3)> {
 
 /// Construction planes drawn as squares around their origin: (name, normal, quad).
 pub fn construction_quads(app: &SolveApp) -> Vec<(String, Vec3, [Vec3; 4])> {
-    let h = origin_size(app.cam.half_height()) * 1.2;
+    let h = origin_extent(app) * 1.2;
     solidcraft_engine::view::construction_planes(&app.session)
         .into_iter()
         .filter(|(_, n, _)| app.session.construction_visible(n))
@@ -1763,7 +1780,7 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
     hits.extend(bestv.hits());
     hits.extend(beste.hits());
     // Origin axes.
-    let size = origin_size(app.cam.half_height());
+    let size = origin_extent(app);
     let mut besta = Near::new(all);
     for (name, dir) in origin_axes(app) {
         if let (Some(a), Some(b)) = (proj.to_screen(Vec3::ZERO), proj.to_screen(dir * (size * AXIS_LEN))) {
@@ -2553,7 +2570,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
         }
     }
     let hover = app.viewport.hover.as_ref();
-    let size = origin_size(app.cam.half_height());
+    let size = origin_extent(app);
     // Origin planes and construction planes.
     let plane_state = |name: &str| {
         let selected = sel.iter().any(|x| matches!(x, Sel::Plane { name: n } if n == name));

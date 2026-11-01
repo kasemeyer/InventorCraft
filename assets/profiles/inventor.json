@@ -6,6 +6,7 @@
   "workflow": {
     "look_at_on_sketch": true,
     "update_links_on_open": true,
+    "origin_planes_fit_model": true,
     "restore_view_after_sketch": true,
     "escape_twice_finishes_sketch": false,
     "sketch_palette": false,

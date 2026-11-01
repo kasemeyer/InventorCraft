@@ -758,3 +758,11 @@ fn inventor_updates_links_when_an_assembly_opens() {
     assert!(inventor().workflow.update_links_on_open);
     assert!(!crate::profile_workflow::Workflow::default().update_links_on_open);
 }
+
+/// Inventor sizes origin planes to the model and lets them zoom with it; SolidCraft keeps its
+/// fixed on-screen size (R217).
+#[test]
+fn inventor_fits_origin_planes_to_the_model() {
+    assert!(inventor().workflow.origin_planes_fit_model);
+    assert!(!crate::profile_workflow::Workflow::default().origin_planes_fit_model);
+}
