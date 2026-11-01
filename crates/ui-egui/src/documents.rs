@@ -188,6 +188,16 @@ pub fn switch(app: &mut SolveApp, i: usize) {
     if i == app.docs.active || i >= app.docs.slots.len() {
         return;
     }
+    // A saved linked source can be edited in its own tab while its assembly remains open.
+    // When returning to that assembly, reload the source snapshot before showing it. Compute
+    // All alone only recomputes the snapshot already stored in the assembly.
+    let refresh_linked_source = !app.session.is_dirty()
+        && crate::profile::active(app).workflow.update_links_on_open
+        && app.session.path.as_deref().is_some_and(|path| {
+            app.docs.slots.get(i).and_then(Option::as_ref).is_some_and(|slot| {
+                slot.session.doc.kind == DocumentKind::Assembly && crate::linked_source::is_source_of(&slot.session, path)
+            })
+        });
     let Some(incoming) = app.docs.slots.get_mut(i).and_then(Option::take) else { return };
     let out = swap_in(app, incoming);
     let a = app.docs.active;
@@ -195,6 +205,9 @@ pub fn switch(app: &mut SolveApp, i: usize) {
         *s = Some(out);
     }
     app.docs.active = i;
+    if refresh_linked_source {
+        app.update_links_on_open();
+    }
     // A drawing that becomes active shows its models as they are now (R68).
     crate::drawing_models::refresh_drawing(app);
 }

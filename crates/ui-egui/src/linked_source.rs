@@ -7,6 +7,22 @@ use serde_json::json;
 
 use crate::SolveApp;
 
+/// Whether `path` is the saved source file of a linked component in `session`.
+/// Relative link paths are resolved beside the assembly, just as Update Links resolves them.
+pub(crate) fn is_source_of(session: &solidcraft_engine::Session, path: &str) -> bool {
+    let target = Path::new(path);
+    let target = target.canonicalize().unwrap_or_else(|_| target.to_path_buf());
+    session.doc.links.values().any(|link| {
+        let source = PathBuf::from(&link.path);
+        let source = if source.is_absolute() {
+            source
+        } else {
+            session.path.as_deref().and_then(|p| Path::new(p).parent()).unwrap_or_else(|| Path::new(".")).join(source)
+        };
+        source.canonicalize().unwrap_or(source) == target
+    })
+}
+
 /// Open a linked component's source in its own design tab. Closing that tab switches back to the
 /// assembly tab, where Save writes any assembly changes as usual.
 pub(crate) fn open(app: &mut SolveApp, component: u64) {
@@ -205,6 +221,34 @@ mod tests {
         let occurrence = inserted["occurrence"].as_u64().unwrap();
         std::fs::rename(&source, &moved).unwrap();
         (app, component, occurrence, folder, moved)
+    }
+
+    #[test]
+    fn switching_back_to_assembly_refreshes_a_saved_linked_source() {
+        let folder = std::env::temp_dir().join(format!("solidcraft-linked-source-return-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let source = folder.join("pipe.tcipart");
+        let mut original = Session::default();
+        original.execute("document.new_part", &json!({})).unwrap();
+        original.execute("solid.box", &json!({"length":10,"width":10,"height":10})).unwrap();
+        original.execute("file.save", &json!({"path":source})).unwrap();
+
+        let mut h = crate::test_support::inventor(solidcraft_engine::doc::DocumentKind::Assembly);
+        h.app.run("component.insert_design", json!({"path":source})).unwrap();
+        h.app.run("component.insert_design", json!({"path":source})).unwrap();
+        assert_eq!(h.app.session.world_state().bodies.len(), 2);
+        h.app.session.mark_saved();
+
+        let mut edited = Session::default();
+        edited.execute("document.new_part", &json!({})).unwrap();
+        edited.execute("solid.box", &json!({"length":10,"width":10,"height":10})).unwrap();
+        edited.execute("solid.box", &json!({"length":5,"width":5,"height":5,"corner":[20,0,0]})).unwrap();
+        edited.execute("file.save", &json!({"path":source})).unwrap();
+        crate::documents::open_tab(&mut h.app, edited).unwrap();
+        crate::documents::switch(&mut h.app, 0);
+
+        assert_eq!(h.app.session.world_state().bodies.len(), 4, "both occurrences use the updated source");
+        let _ = std::fs::remove_dir_all(folder);
     }
 
     fn menu(app: &SolveApp, target: Target) -> Option<context_menu::Item> {
