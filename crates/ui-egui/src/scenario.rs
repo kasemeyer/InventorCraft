@@ -282,9 +282,14 @@ impl Harness {
             }
             self.frame();
         }
-        // A file opening, recovering or saving in the background: wait for it (as a person would).
+        // File operations and history rebuilds finish in later frames. In particular, Finish
+        // Sketch can queue the consuming features' rebuild after leaving the sketch environment.
         let began = std::time::Instant::now();
-        while (!self.app.file_load.idle() || self.app.saving.is_some() || crate::open_meshing::active(&self.app))
+        while (!self.app.file_load.idle()
+            || self.app.saving.is_some()
+            || crate::open_meshing::active(&self.app)
+            || self.app.deferred.is_some()
+            || !self.app.deferred_queue.is_empty())
             && began.elapsed() < std::time::Duration::from_secs(120)
         {
             self.frame();

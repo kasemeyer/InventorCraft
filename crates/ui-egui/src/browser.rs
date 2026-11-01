@@ -1442,10 +1442,10 @@ fn occurrence_rows(app: &mut SolveApp, ui: &mut egui::Ui, path: Vec<u64>, depth:
 /// that window's own × does (#4150).
 fn doc_settings(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
     let key = "docsettings";
-    let open = is_open(app, key, true);
+    let open = is_open(app, key, false);
     let r = draw_row(ui, ui.id().with(key), &Row { depth, fold: Some(open), icon: "settings", label: "Document Settings", ..Default::default() });
     if r.fold || r.clicked {
-        toggle(app, key, true);
+        toggle(app, key, false);
     }
     if !open {
         return;
@@ -1522,7 +1522,7 @@ fn origin_entries(app: &SolveApp) -> Vec<(&'static str, &'static str, &'static s
 
 fn origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &Actions) {
     let key = "origin";
-    let open = is_open(app, key, true);
+    let open = is_open(app, key, false);
     let lit = |thing: &Option<Thing>| thing.as_ref().map_or((false, false), |t| acts.lit.thing(t));
     let items = origin_entries(app);
     let r = draw_row(
@@ -1540,7 +1540,7 @@ fn origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &Actio
         },
     );
     if r.fold || r.clicked {
-        toggle(app, key, true);
+        toggle(app, key, false);
     }
     if r.eye {
         app.set_origin_shown(!app.origin_shown());
@@ -1602,7 +1602,7 @@ fn origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &Actio
 /// the Constrain panel, as a canvas pick would be).
 fn occurrence_origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, occurrence: u64, depth: usize) {
     let key = format!("oo:{occurrence}");
-    let open = is_open(app, &key, true);
+    let open = is_open(app, &key, false);
     // Its own handles only: the labels repeat the document's Origin folder above it.
     let handle = format!("occurrence_origin:{occurrence}");
     let r = draw_row(
@@ -1611,7 +1611,7 @@ fn occurrence_origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, occurrence: u64
         &Row { depth, fold: Some(open), icon: "origin", label: "Origin", handle: Some(&handle), handle_only: true, ..Default::default() },
     );
     if r.fold || r.clicked {
-        toggle(app, &key, true);
+        toggle(app, &key, false);
     }
     if !open {
         return;
@@ -1641,11 +1641,11 @@ pub const STANDARD_VIEWS: [(&str, &str); 4] = [("Top", "top"), ("Front", "front"
 /// one (animated).
 fn named_view_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut Actions) {
     let key = "namedviews";
-    let open = is_open(app, key, true);
+    let open = is_open(app, key, false);
     let label = folder_label(app, "named_views");
     let r = draw_row(ui, ui.id().with(key), &Row { depth, fold: Some(open), icon: "folder", label: &label, ..Default::default() });
     if r.fold || r.clicked {
-        toggle(app, key, true);
+        toggle(app, key, false);
     }
     if let Some(p) = r.secondary {
         acts.menu = Some((p, Target::NamedViews));

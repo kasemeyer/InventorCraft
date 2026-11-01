@@ -83,6 +83,26 @@ fn toolbar_finish_and_other_feature_edit_leave_the_sketch() {
     assert_eq!(app.session.active_sketch, None);
 }
 
+#[test]
+fn settling_after_finish_waits_for_the_consuming_features_rebuild() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.run("sketch.create", serde_json::json!({"plane":"XY"})).unwrap();
+    let sketch = h.app.session.active_sketch.unwrap();
+    h.app.run("sketch.rectangle.two_point", serde_json::json!({"p0":[0,0],"p1":[30,20]})).unwrap();
+    h.app.finish_sketch();
+    h.app.run("solid.extrude", serde_json::json!({"distance":10})).unwrap();
+    h.app.edit_sketch(sketch);
+    assert!(h.app.session.world_state().bodies.is_empty());
+    h.app.apply_off_thread = Some(std::time::Duration::ZERO);
+    h.app.finish_sketch();
+    assert!(h.app.deferred.is_some(), "the rebuild is explicitly asynchronous");
+    h.settle();
+    assert!(h.app.deferred.is_none());
+    assert_eq!(h.app.session.doc.marker, None);
+    assert_eq!(h.app.session.world_state().bodies.len(), 1);
+}
+
 /// Leaving a sketch any way leaves the camera exactly where it is; entering still faces the plane.
 mod exit_keeps_view {
     use crate::scenario::Harness;

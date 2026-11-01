@@ -137,7 +137,7 @@ fn row(app: &mut SolveApp, ui: &mut egui::Ui, ctx: &Ctx, index: usize, depth: us
     };
     let kids = ctx.children.get(&id);
     let fold_key = format!("history/{id}");
-    let open = kids.is_some() && is_open(app, &fold_key, true);
+    let open = kids.is_some() && is_open(app, &fold_key, false);
     let rolled = index >= ctx.marker;
     let (selected, mark) = match entry {
         Some(e) => lit_row(acts.lit.entry(folder, e)),
@@ -168,7 +168,7 @@ fn row(app: &mut SolveApp, ui: &mut egui::Ui, ctx: &Ctx, index: usize, depth: us
         crate::scenario::publish_handle(&format!("row:history:{id}"), rect.center());
     }
     if r.fold {
-        toggle(app, &fold_key, true);
+        toggle(app, &fold_key, false);
     }
     if r.eye
         && let Some(e) = entry
