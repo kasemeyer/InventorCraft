@@ -44,6 +44,8 @@ struct Edit {
     expr: String,
     /// Where it sits (None until the dimension has been drawn).
     at: Option<Pos2>,
+    /// User drag offset for the inline editor, relative to its dimension-based starting point.
+    box_offset: egui::Vec2,
     /// Frames left in which the box (re)takes the keyboard: the rest of the double-click
     /// that opened it must not close it.
     fresh: u8,
@@ -66,7 +68,7 @@ impl Edit {
     /// A box on parameter `param` opened with `value` (from [`box_value`]).
     fn new(param: String, value: (String, Option<(String, String)>), at: Option<Pos2>, wait: u8) -> Self {
         let (expr, seeded) = value;
-        Edit { param, expr, at, fresh: FRESH, wait, draft: None, live: None, selection: None, picked: None, seeded }
+        Edit { param, expr, at, box_offset: egui::Vec2::ZERO, fresh: FRESH, wait, draft: None, live: None, selection: None, picked: None, seeded }
     }
 
     /// The expression the box holds: what was typed, or the stored value at full precision
@@ -858,7 +860,13 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
         anchor.x = anchor.x.clamp(rect.left(), (rect.right() - popup_width - 6.0).max(rect.left()));
         anchor.y = anchor.y.clamp(rect.top(), (rect.bottom() - 80.0).max(rect.top()));
     }
-    Container::new(ctx, Surface::Canvas).area(egui::Id::new("sc_dim_edit_area")).fixed_pos(anchor).order(egui::Order::Foreground).show(ctx, |ui| {
+    let area = Container::new(ctx, Surface::Canvas)
+        .area(egui::Id::new("sc_dim_edit_area"))
+        .current_pos(anchor + e.box_offset)
+        .movable(true)
+        .constrain(true)
+        .order(egui::Order::Foreground)
+        .show(ctx, |ui| {
         Container::popup_frame(ui.style()).fill(Tokens::get().dialog_body).inner_margin(Tokens::get().space_4).show(ui, |ui| {
             crate::ui_kit::scope(ui, |ui| {
                 ui.set_max_width(popup_width);
@@ -905,6 +913,7 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
             });
         });
     });
+    e.box_offset = area.response.rect.min - anchor;
     e.fresh = e.fresh.saturating_sub(1);
     match done {
         Some(true) => {
