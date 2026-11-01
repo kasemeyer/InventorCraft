@@ -5,6 +5,7 @@
   "defaults": {"version": 2, "nav": "inventor", "navigator": "cube", "theme": "tci-dark", "history": "browser", "units": "in", "new_document": "part"},
   "workflow": {
     "look_at_on_sketch": true,
+    "update_links_on_open": true,
     "restore_view_after_sketch": true,
     "escape_twice_finishes_sketch": false,
     "sketch_palette": false,

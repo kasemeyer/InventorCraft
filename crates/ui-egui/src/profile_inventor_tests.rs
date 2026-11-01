@@ -750,3 +750,11 @@ fn validate_rejects_a_grid_command_that_is_not_small() {
     let problems = validate(&p);
     assert!(problems.iter().any(|m| m.ends_with("SKETCH/CONSTRAIN: grid sketch.dimension is not a small command")), "{problems:?}");
 }
+
+/// Inventor brings an opened assembly up to date with its linked parts; SolidCraft keeps Update
+/// Links by hand (R212 item 1).
+#[test]
+fn inventor_updates_links_when_an_assembly_opens() {
+    assert!(inventor().workflow.update_links_on_open);
+    assert!(!crate::profile_workflow::Workflow::default().update_links_on_open);
+}

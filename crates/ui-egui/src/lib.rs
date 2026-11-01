@@ -1542,8 +1542,29 @@ impl SolveApp {
         if let Ok(r) = self.run("doc.open", json!({ "path": path })) {
             // An opened drawing is brought up to date with its models (R68).
             drawing_models::refresh_drawing(self);
+            self.update_links_on_open();
             self.fit_view();
             stand_up::offer(self, path, &[], Some(&r));
+        }
+    }
+
+    /// An opened assembly is brought up to date with its linked components when the profile
+    /// says so (Inventor updates on open; SolidCraft keeps Update Links by hand) — R212.
+    pub fn update_links_on_open(&mut self) {
+        if !profile::active(self).workflow.update_links_on_open
+            || self.session.doc.kind != solidcraft_engine::doc::DocumentKind::Assembly
+            || self.session.doc.occurrences.is_empty()
+        {
+            return;
+        }
+        match self.run("component.update_links", json!({})) {
+            Ok(r) => {
+                let updated = r["updated"].as_array().map_or(0, Vec::len);
+                if updated > 0 {
+                    self.set_status(format!("{} linked component(s) updated from their files", updated), false);
+                }
+            }
+            Err(e) => self.set_status(format!("Update Links: {e}"), true),
         }
     }
 

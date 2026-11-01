@@ -16,6 +16,9 @@ pub struct Workflow {
     pub marking_menu: Option<BTreeMap<MenuContext, MenuLayout>>,
     /// Entering a sketch turns the view to look at its plane.
     pub look_at_on_sketch: bool,
+    /// Opening an assembly updates its linked components from their files at once (Inventor
+    /// brings an assembly up to date on open; off: Update Links by hand) — R212 item 1.
+    pub update_links_on_open: bool,
     /// Finishing a sketch restores the view it was entered from.
     pub restore_view_after_sketch: bool,
     /// A second Escape with no tool out finishes the sketch.
@@ -72,6 +75,7 @@ impl Default for Workflow {
         Workflow {
             marking_menu: None,
             look_at_on_sketch: false,
+            update_links_on_open: false,
             restore_view_after_sketch: false,
             escape_twice_finishes_sketch: true,
             sketch_palette: true,

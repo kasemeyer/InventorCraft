@@ -829,6 +829,9 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                 if (request.kind == Kind::Open || request.insert()) && !request.options.contains_key("up") {
                     crate::stand_up::offer(app, &request.path, &running.before, Some(&made.result));
                 }
+                if request.kind == Kind::Open {
+                    app.update_links_on_open();
+                }
                 crate::frame_watch::step(app, "stand-up offer");
                 let warnings = made.result.get("warnings").and_then(Value::as_array);
                 if let Kind::Recover { .. } = request.kind {
