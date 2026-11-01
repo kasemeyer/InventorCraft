@@ -2467,6 +2467,19 @@ pub struct DesignLink {
     pub feature: u64,
 }
 
+/// Recoverable source-backed history of a leaf part edited through an assembly occurrence.
+/// Maps run from source identities to assembly identities; the source baseline detects conflicts.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SourceEdit {
+    pub source: Box<Document>,
+    pub ids: std::collections::BTreeMap<u64, u64>,
+    pub names: std::collections::BTreeMap<String, String>,
+    pub bodies: std::collections::BTreeMap<String, String>,
+    pub parameters: std::collections::BTreeMap<String, String>,
+    pub baseline_features: Vec<Feature>,
+    pub baseline_params: Vec<Param>,
+}
+
 /// The document.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Document {
@@ -2527,6 +2540,9 @@ pub struct Document {
     /// Components linked to another design file (by component id).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub links: std::collections::BTreeMap<u64, DesignLink>,
+    /// Source edit drafts remain embedded for recovery and for selectively skipped saves.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub source_edits: std::collections::BTreeMap<u64, SourceEdit>,
     /// Configurations (rows of parameter values and suppressions).
     #[serde(default, skip_serializing_if = "crate::config::ConfigTable::is_empty")]
     pub configs: crate::config::ConfigTable,
@@ -2792,6 +2808,7 @@ impl Document {
             configs: Default::default(),
             parts: Default::default(),
             links: Default::default(),
+            source_edits: Default::default(),
             body_components: Default::default(),
             body_offsets: Default::default(),
             materials: Default::default(),

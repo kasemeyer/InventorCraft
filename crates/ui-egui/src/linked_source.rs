@@ -1,7 +1,10 @@
 //! Explicitly choose a linked component's source; all its instances share that source. Extract
 //! makes a component that is not linked the source of its own design file.
 
-use std::{path::{Path, PathBuf}, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use serde_json::json;
 
@@ -27,6 +30,13 @@ pub(crate) fn is_source_of(session: &solidcraft_engine::Session, path: &str) -> 
 /// assembly tab, where Save writes any assembly changes as usual.
 pub(crate) fn open(app: &mut SolveApp, component: u64) {
     if app.file_picker_busy() || app.file_load.busy() {
+        return;
+    }
+    if let Ok(status) = app.session.execute("component.source_status", &json!({}))
+        && status["sources"].as_array().into_iter().flatten().any(|r| r["component"] == component && r["dirty"] == true)
+    {
+        crate::source_save::request(app);
+        app.set_status("Save the edited part in the file list, then choose Open again.", false);
         return;
     }
     let Some(link) = app.session.doc.links.get(&component) else {
@@ -206,6 +216,106 @@ mod tests {
     use crate::context_menu::{self, Target};
     use solidcraft_engine::Session;
     use std::path::PathBuf;
+
+    #[test]
+    fn source_save_list_selects_files_and_save_all_finishes_the_round_trip() {
+        let mut h = crate::test_support::inventor(solidcraft_engine::doc::DocumentKind::Assembly);
+        let mut files = Vec::new();
+        let mut components = Vec::new();
+        for n in 0..2 {
+            let path = h.dir.join(format!("Source{n}.tcipart"));
+            let mut source = Session::default();
+            source.execute("document.new_part", &json!({})).unwrap();
+            source.execute("solid.box", &json!({"length":20,"width":20,"height":10})).unwrap();
+            source.execute("file.save", &json!({"path":path})).unwrap();
+            let made = h.app.run("component.insert_design", json!({"path":path})).unwrap();
+            let c = made["component"].as_u64().unwrap();
+            h.app.run("component.activate", json!({"component":c})).unwrap();
+            h.app.run("solid.box", json!({"length":3,"width":3,"height":3,"corner":[30,0,0]})).unwrap();
+            h.app.run("component.finish_edit", json!({})).unwrap();
+            files.push(path);
+            components.push(c);
+        }
+        h.app.run("file.save", json!({"path":h.dir.join("Assembly.tciasm")})).unwrap();
+        crate::toolbar::save(&mut h.app);
+        let mut panel = h.app.docs.source_save.take().unwrap();
+        assert_eq!(panel.rows.len(), 2);
+        panel.rows.iter_mut().find(|r| r.component == components[0]).unwrap().save = false;
+        crate::source_save::apply(&mut h.app, panel, false);
+        h.settle();
+        let count = |path: &std::path::Path| {
+            let (doc, _) =
+                solidcraft_engine::io::read_design_file(&path.to_string_lossy(), None::<fn(solidcraft_engine::io::DesignPreview)>).unwrap();
+            doc.features.len()
+        };
+        assert_eq!(count(&files[0]), 1);
+        assert_eq!(count(&files[1]), 2);
+        assert!(h.app.session.is_dirty());
+        crate::toolbar::save(&mut h.app);
+        let panel = h.app.docs.source_save.take().unwrap();
+        assert_eq!(panel.rows.len(), 1);
+        crate::source_save::apply(&mut h.app, panel, true);
+        h.settle();
+        assert!(!h.app.session.is_dirty());
+        open(&mut h.app, components[0]);
+        h.settle();
+        assert_eq!(h.app.session.doc.features.len(), 2);
+        assert_eq!(std::path::Path::new(h.app.session.path.as_deref().unwrap()).canonicalize().unwrap(), files[0].canonicalize().unwrap());
+    }
+
+    #[test]
+    fn source_save_cancel_and_missing_source_leave_edits_pending() {
+        let mut h = crate::test_support::inventor(solidcraft_engine::doc::DocumentKind::Assembly);
+        let path = h.dir.join("Part.tcipart");
+        let mut part = Session::default();
+        part.execute("document.new_part", &json!({})).unwrap();
+        part.execute("solid.box", &json!({"length":10,"width":10,"height":10})).unwrap();
+        part.execute("file.save", &json!({"path":path})).unwrap();
+        let c = h.app.run("component.insert_design", json!({"path":path})).unwrap()["component"].as_u64().unwrap();
+        h.app.run("component.activate", json!({"component":c})).unwrap();
+        h.app.run("solid.box", json!({"length":2,"width":2,"height":2,"corner":[20,0,0]})).unwrap();
+        h.app.run("component.finish_edit", json!({})).unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        crate::toolbar::save(&mut h.app);
+        h.frames(3);
+        h.step(&json!({"widget":"Cancel"})).unwrap();
+        assert!(h.app.docs.source_save.is_none());
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        assert!(h.app.session.is_dirty());
+        std::fs::remove_file(&path).unwrap();
+        crate::toolbar::save(&mut h.app);
+        let panel = h.app.docs.source_save.take().unwrap();
+        crate::source_save::apply(&mut h.app, panel, true);
+        assert!(h.app.docs.source_save.as_ref().is_some_and(|p| p.error.is_some()));
+        assert!(h.app.session.path.is_none());
+        assert!(h.app.session.is_dirty());
+    }
+
+    #[test]
+    fn assembly_save_includes_a_dirty_linked_part_open_in_another_tab() {
+        let mut h = crate::test_support::inventor(solidcraft_engine::doc::DocumentKind::Assembly);
+        let file = h.dir.join("OpenPart.tcipart");
+        let mut part = Session::default();
+        part.execute("document.new_part", &json!({})).unwrap();
+        part.execute("solid.box", &json!({"length":10,"width":10,"height":10})).unwrap();
+        part.execute("file.save", &json!({"path":file})).unwrap();
+        h.app.run("component.insert_design", json!({"path":file})).unwrap();
+        h.app.run("file.save", json!({"path":h.dir.join("Assembly.tciasm")})).unwrap();
+        crate::documents::open_tab(&mut h.app, part).unwrap();
+        h.app.run("solid.box", json!({"length":5,"width":5,"height":5,"corner":[20,0,0]})).unwrap();
+        crate::documents::switch(&mut h.app, 0);
+        crate::toolbar::save(&mut h.app);
+        let panel = h.app.docs.source_save.take().unwrap();
+        assert_eq!(panel.rows.len(), 1);
+        assert_eq!(panel.rows[0].tab, Some(1));
+        crate::source_save::apply(&mut h.app, panel, true);
+        h.settle();
+        assert_eq!(h.app.session.world_state().bodies.len(), 2);
+        assert!(!h.app.session.is_dirty());
+        crate::documents::switch(&mut h.app, 1);
+        assert!(!h.app.session.is_dirty());
+        assert_eq!(h.app.session.doc.features.len(), 2);
+    }
 
     fn fixture(name: &str) -> (SolveApp, u64, u64, PathBuf, PathBuf) {
         let folder = std::env::temp_dir().join(format!("solidcraft-relink-ui-{name}-{}", std::process::id()));

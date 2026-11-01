@@ -103,6 +103,14 @@ fn go_to(s: &mut Session, snap: Snapshot) -> Snapshot {
     // Undoing a hide (or a show) leaves the document alone: the model needs no evaluating.
     let display_only = same && s.visibility != snap.visibility;
     s.doc = snap.doc;
+    // Undo changes history, not which source revision was last written to disk.
+    if !was.doc.source_edits.is_empty() && !s.doc.source_edits.is_empty() {
+        for (component, baseline) in &was.doc.source_edits {
+            if s.doc.source_edits.contains_key(component) && s.doc.links.get(component) == was.doc.links.get(component) {
+                s.doc_mut().source_edits.insert(*component, baseline.clone());
+            }
+        }
+    }
     // The active drawing sheet is view state: undoing `drawing.sheet.add` clamps it (R7).
     if let Some(m) = s.doc.drawing.as_deref() {
         s.drawing_sheet = s.drawing_sheet.min(m.sheets.len().saturating_sub(1));

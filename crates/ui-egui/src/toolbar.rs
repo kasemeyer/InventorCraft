@@ -867,6 +867,13 @@ pub fn design_shown(app: &SolveApp) -> bool {
 }
 
 pub fn save(app: &mut SolveApp) {
+    if crate::source_save::request(app) {
+        return;
+    }
+    save_document(app);
+}
+
+pub(crate) fn save_document(app: &mut SolveApp) {
     if crate::browser::needs_capture(app, crate::browser::SAVE) {
         app.tree.capture_prompt = Some(crate::browser::SAVE.into());
         return;

@@ -37,7 +37,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("component.from_bodies", "Create Components from Bodies", from_bodies)
         .icon("component")
         .params("bodies: [names] → one new component per body, named after it"),
-    CommandSpec::new("component.activate", "Activate Component", activate).icon("activate").noundo().params("component: id or name (0 or \"root\" for the design); occurrence?, path?: exact placement used to author shared geometry"),
+    CommandSpec::new("component.activate", "Activate Component", activate).icon("activate").noundo().params("component: id or name (0 or \"root\" for the design); occurrence?, path?: exact placement used to author shared geometry; source_edit?: load the linked leaf part's editable history (default false)"),
     CommandSpec::new("component.finish_edit", "Return", finish_edit).icon("finish").noundo()
         .enabled(|s| if s.active_component == 0 { Err("no component is being edited".into()) } else if s.active_sketch.is_some() { Err("finish the sketch first".into()) } else { Ok(()) })
         .params("returns from the edited occurrence to its exact parent placement, or the design root"),
@@ -188,6 +188,9 @@ fn activate(s: &mut Session, p: &Value) -> Result<Value> {
     } else {
         None
     };
+    if p.get("source_edit").and_then(Value::as_bool).unwrap_or(false) && s.doc.links.contains_key(&id) {
+        super::component_source::begin(s, id)?;
+    }
     s.active_component = id;
     s.active_occurrence_path = path;
     s.revision += 1;
@@ -289,6 +292,7 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
         e => e.into(),
     })?;
     let gone = removed.components;
+    s.doc_mut().source_edits.retain(|c, _| !gone.contains(c));
     if gone.contains(&s.active_component) {
         s.active_component = 0;
     }

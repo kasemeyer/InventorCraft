@@ -479,7 +479,9 @@ fn inventor_commands() -> BTreeSet<&'static str> {
 /// `constraint.hide_all`; 192 - 4 = 188 (N + 6). The two standard-parts commands are no longer
 /// placed in the Component panel: Fastener has its dedicated ribbon entry, while the design
 /// library is not implemented yet (188 + 2 = 190).
-const INVENTOR_UNPLACED: usize = 188;
+// Source-edit lifecycle adds three JSON operations used by occurrence editing and the save
+// list; they do not introduce ribbon buttons with incomplete component parameters.
+const INVENTOR_UNPLACED: usize = 191;
 
 #[test]
 fn inventor_assembly_ribbon_follows_the_capture() {

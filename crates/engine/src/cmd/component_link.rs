@@ -143,7 +143,7 @@ fn linked_bodies(file: &Path, own: Option<&str>) -> Result<Linked> {
 }
 
 /// The solid bodies of `part`, the design saved as `shown`, as an Import feature.
-fn session_bodies(part: &Session, shown: &str) -> Result<Linked> {
+pub(super) fn session_bodies(part: &Session, shown: &str) -> Result<Linked> {
     let name = part.doc.name.clone();
     if let Some(e) = part.model.results.iter().find_map(|r| r.error.clone()) {
         return Err(EngineError::Other(format!("{shown}: the design has a feature that fails ({e}); fix it before linking it")));
@@ -273,6 +273,14 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             refresh = true;
             continue;
         };
+        if s.doc.source_edits.contains_key(&comp) {
+            if super::component_source::refresh(s, comp)? {
+                updated.push(cname);
+            } else {
+                unchanged.push(cname);
+            }
+            continue;
+        }
         let Some(FeatureKind::Import { step: old, .. }) = s.doc.feature(link.feature).filter(|f| f.component == comp).map(|f| &f.kind) else {
             return Err(bad(
                 cmd,
@@ -412,6 +420,7 @@ fn break_link(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.break_link";
     let comp = component_key(s, p, "component", cmd)?;
     let link = s.doc_mut().links.remove(&comp).ok_or_else(|| bad(cmd, "that component is not linked to a design"))?;
+    s.doc_mut().source_edits.remove(&comp);
     Ok(json!({"component": comp, "path": link.path}))
 }
 
@@ -433,6 +442,150 @@ fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn source_edit_saves_original_history_and_two_placements_reopen() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-source-edit-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("Block.tcipart");
+        let assembly = dir.join("Pair.tciasm");
+        let mut part = Session::default();
+        run(&mut part, "document.new_part", json!({}));
+        run(&mut part, "sketch.create", json!({"plane":"XY"}));
+        run(&mut part, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[30,20]}));
+        run(&mut part, "sketch.finish", json!({}));
+        run(&mut part, "solid.extrude", json!({"distance":10}));
+        run(&mut part, "file.save", json!({"path":source}));
+        let original = part.doc.features.clone();
+        let mut s = Session::default();
+        run(&mut s, "document.new_assembly", json!({}));
+        let inserted = run(&mut s, "component.insert_design", json!({"path":source}));
+        let c = inserted["component"].as_u64().unwrap();
+        let second = run(&mut s, "occurrence.copy", json!({"occurrence":inserted["occurrence"],"translate":[80,0,0]}));
+        run(&mut s, "component.activate", json!({"component":c,"occurrence":second["occurrence"],"path":[second["occurrence"]],"source_edit":true}));
+        assert_eq!(s.doc.features.iter().filter(|f| f.component == c).count(), original.len());
+        run(&mut s, "solid.box", json!({"length":5,"width":5,"height":5,"corner":[40,0,0],"body_name":"Lug"}));
+        run(&mut s, "solid.box", json!({"length":4,"width":4,"height":4,"corner":[50,0,0],"body_name":"Pad"}));
+        assert_eq!(s.world_state().bodies.len(), 6);
+        run(&mut s, "component.finish_edit", json!({}));
+        assert_eq!(run(&mut s, "component.source_status", json!({}))["sources"][0]["dirty"], true);
+        run(&mut s, "component.save_source", json!({"component":c}));
+        run(&mut s, "file.save", json!({"path":assembly}));
+        let mut reopened = Session::default();
+        run(&mut reopened, "doc.open", json!({"path":source}));
+        let mut prefix = reopened.doc.features[..original.len()].to_vec();
+        for (actual, old) in prefix.iter_mut().zip(&original) {
+            if old.body_names.is_empty() {
+                actual.body_names.clear();
+            }
+        }
+        assert_eq!(prefix, original, "original feature identities, parameters and complete sketch history survive");
+        assert_eq!(reopened.doc.features.len(), original.len() + 2);
+        assert_eq!(reopened.world_state().bodies.len(), 3);
+        run(&mut reopened, "doc.open", json!({"path":assembly}));
+        run(&mut reopened, "component.update_links", json!({}));
+        assert_eq!(reopened.world_state().bodies.len(), 6);
+        assert!(!reopened.is_dirty());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn source_edit_skipped_save_recovers_and_external_changes_are_not_overwritten() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-source-conflict-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("Part.tcipart");
+        save_box(&source, 10.);
+        let mut s = Session::default();
+        let c = run(&mut s, "component.insert_design", json!({"path":source}))["component"].as_u64().unwrap();
+        run(&mut s, "component.activate", json!({"component":c,"source_edit":true}));
+        run(&mut s, "solid.box", json!({"length":3,"width":3,"height":3,"corner":[30,0,0]}));
+        run(&mut s, "file.save", json!({"path":dir.join("Skipped.tciasm")}));
+        assert!(s.is_dirty(), "pending source remains dirty even after assembly-only save");
+        let mut recovered = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
+        recovered.path = s.path.clone();
+        assert!(recovered.is_dirty());
+        save_box(&source, 25.);
+        let bytes = std::fs::read(&source).unwrap();
+        assert!(recovered.execute("component.save_source", &json!({"component":c})).unwrap_err().to_string().contains("changed outside"));
+        assert_eq!(std::fs::read(&source).unwrap(), bytes);
+        assert!(recovered.is_dirty());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn source_edit_face_sketch_on_second_copy_saves_in_part_coordinates() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-source-face-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("Part.tcipart");
+        save_box(&source, 10.);
+        let mut s = Session::default();
+        let made = run(&mut s, "component.insert_design", json!({"path":source}));
+        let c = made["component"].as_u64().unwrap();
+        let second = run(&mut s, "occurrence.copy", json!({"occurrence":made["occurrence"],"translate":[80,0,0]}));
+        run(&mut s, "component.activate", json!({"component":c,"occurrence":second["occurrence"],"path":[second["occurrence"]],"source_edit":true}));
+        run(&mut s, "sketch.create", json!({"plane":{"face":[85,10,10],"path":[second["occurrence"]]}}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0":[-2,-2],"p1":[2,2]}));
+        let entity = s.model.state().sketch(s.active_sketch.unwrap()).unwrap().sketch.curves.last().unwrap().id.clone();
+        run(&mut s, "sketch.dimension", json!({"entities":[entity],"value":"4 mm"}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance":3,"operation":"join"}));
+        let expected = volume(&mut s) / 2.;
+        run(&mut s, "component.save_source", json!({"component":c}));
+        let mut p = Session::default();
+        run(&mut p, "doc.open", json!({"path":source}));
+        assert!((volume(&mut p) - expected).abs() < 1e-5);
+        assert!(p.model.results.iter().all(|r| r.error.is_none()));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn source_edit_constraints_survive_materialization_and_undo_after_save() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-source-undo-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("Part.tcipart");
+        save_box(&source, 10.);
+        let mut s = Session::default();
+        let made = run(&mut s, "component.insert_design", json!({"path":source}));
+        let c = made["component"].as_u64().unwrap();
+        let second = run(&mut s, "occurrence.copy", json!({"occurrence":made["occurrence"],"translate":[80,0,0]}));
+        run(
+            &mut s,
+            "constraint.create",
+            json!({"type":"mate","a":{"occurrence":made["occurrence"],"face":[5,10,10]},"b":{"occurrence":second["occurrence"],"face":[85,10,10]}}),
+        );
+        run(&mut s, "component.activate", json!({"component":c,"source_edit":true}));
+        for constraint in &s.doc.assembly.constraints {
+            for pick in &constraint.picks {
+                assert!(solidcraft_doc::constraints::resolve(&s.doc, &s.model.state(), pick).is_ok());
+            }
+        }
+        run(&mut s, "solid.box", json!({"length":2,"width":2,"height":2,"corner":[30,0,0]}));
+        run(&mut s, "component.save_source", json!({"component":c}));
+        run(&mut s, "edit.undo", json!({}));
+        assert!(s.is_dirty());
+        run(&mut s, "component.save_source", json!({"component":c}));
+        let mut p = Session::default();
+        run(&mut p, "doc.open", json!({"path":source}));
+        assert_eq!(p.doc.features.len(), 1);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn source_edit_refreshes_a_clean_part_after_external_save_with_relative_links() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-source-refresh-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("Part.tcipart");
+        save_box(&source, 10.);
+        let mut s = Session::default();
+        let c = run(&mut s, "component.insert_design", json!({"path":source}))["component"].as_u64().unwrap();
+        run(&mut s, "file.save", json!({"path":dir.join("Assembly.tciasm")}));
+        run(&mut s, "component.activate", json!({"component":c,"source_edit":true}));
+        save_box(&source, 25.);
+        run(&mut s, "component.update_links", json!({}));
+        assert!((volume(&mut s) - 5000.).abs() < 1e-5);
+        assert_eq!(run(&mut s, "component.source_status", json!({}))["sources"][0]["dirty"], false);
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     #[test]
     fn link_paths_are_kept_relative_to_the_design_and_follow_save_as() {
@@ -464,6 +617,9 @@ mod tests {
 
     fn save_box(path: &Path, height: f64) {
         let mut part = Session::default();
+        if path.extension().is_some_and(|e| e == "tcipart") {
+            run(&mut part, "document.new_part", json!({}));
+        }
         run(&mut part, "solid.box", json!({"length": 10, "width": 20, "height": height, "body_name": "Plate"}));
         run(&mut part, "file.save", json!({"path": path}));
     }

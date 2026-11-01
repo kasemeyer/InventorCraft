@@ -570,7 +570,9 @@ impl Session {
 
     /// The design has changes not in its file: in the document, or in what is hidden.
     pub fn is_dirty(&self) -> bool {
-        (!Arc::ptr_eq(&self.doc, &self.saved) && *self.doc != *self.saved) || self.visibility != self.saved_visibility
+        (!Arc::ptr_eq(&self.doc, &self.saved) && *self.doc != *self.saved)
+            || self.visibility != self.saved_visibility
+            || self.doc.source_edits.keys().any(|c| cmd::component_source::dirty(&self.doc, *c))
     }
     pub fn mark_saved(&mut self) {
         self.saved = self.doc.clone();

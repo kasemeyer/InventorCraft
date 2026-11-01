@@ -59,6 +59,7 @@ impl DocSlot {
 /// The open designs: one slot per tab; the active tab's slot is empty (its design is in the app).
 #[derive(Default)]
 pub struct Documents {
+    pub(crate) source_save: Option<crate::source_save::Panel>,
     slots: Vec<Option<DocSlot>>,
     pub active: usize,
     /// A tab waiting for the answer to "save changes?".
@@ -86,6 +87,58 @@ impl Documents {
     pub fn count(&self) -> usize {
         self.slots.len().max(1)
     }
+}
+
+pub(crate) fn source_tab_dirty(app: &SolveApp, path: &str) -> bool {
+    let key = |p: &str| std::path::Path::new(p).canonicalize().unwrap_or_else(|_| std::path::PathBuf::from(p));
+    let wanted = key(path);
+    app.docs
+        .slots
+        .iter()
+        .filter_map(Option::as_ref)
+        .any(|slot| slot.session.path.as_deref().is_some_and(|p| key(p) == wanted) && slot.session.is_dirty())
+}
+
+pub(crate) fn dirty_linked_tabs(app: &SolveApp) -> Vec<(usize, String)> {
+    app.docs
+        .slots
+        .iter()
+        .enumerate()
+        .filter_map(|(index, slot)| {
+            let session = &slot.as_ref()?.session;
+            let path = session.path.as_ref()?;
+            (session.is_dirty() && crate::linked_source::is_source_of(&app.session, path)).then(|| (index, path.clone()))
+        })
+        .collect()
+}
+
+pub(crate) fn save_source_tab(app: &mut SolveApp, index: usize, path: &str) -> Result<(), String> {
+    let slot = app.docs.slots.get_mut(index).and_then(Option::as_mut).ok_or("The source tab changed. Review the save list again.")?;
+    let key = |p: &str| std::path::Path::new(p).canonicalize().unwrap_or_else(|_| std::path::PathBuf::from(p));
+    if slot.session.path.as_deref().is_none_or(|p| key(p) != key(path)) {
+        return Err("The source tab changed. Review the save list again.".into());
+    }
+    slot.session.execute("file.save", &json!({})).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub(crate) fn refresh_source_tab(app: &mut SolveApp, path: &str) -> Result<(), String> {
+    let key = |p: &str| std::path::Path::new(p).canonicalize().unwrap_or_else(|_| std::path::PathBuf::from(p));
+    let wanted = key(path);
+    for slot in app.docs.slots.iter_mut().filter_map(Option::as_mut) {
+        if slot.session.path.as_deref().is_some_and(|p| key(p) == wanted) {
+            if slot.session.is_dirty() {
+                return Err("The source tab has unsaved changes; save it before editing the part in place.".into());
+            }
+            let (doc, cache) =
+                solidcraft_engine::io::read_design_file(path, None::<fn(solidcraft_engine::io::DesignPreview)>).map_err(|e| e.to_string())?;
+            let mut session = Session::opened(doc, cache.as_ref());
+            session.path = Some(path.to_string());
+            session.mark_saved();
+            slot.session = session;
+        }
+    }
+    Ok(())
 }
 
 fn take_view(app: &mut SolveApp) -> DocView {

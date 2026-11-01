@@ -49,6 +49,7 @@ pub use sketch_modify::{extend_arc_preview, extend_preview, trim_piece};
 pub use view_dxf::sketch::exportable as view_dxf_exportable;
 pub use view_navigation::standard_view;
 pub(crate) mod component_link;
+pub(crate) mod component_source;
 mod config;
 pub(crate) mod constraints;
 mod file;
@@ -291,6 +292,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(frame::COMMANDS.iter());
     v.extend(component::COMMANDS.iter());
     v.extend(component_link::COMMANDS.iter());
+    v.extend(component_source::COMMANDS.iter());
     v.extend(joints::COMMANDS.iter());
     v.extend(constraints::COMMANDS.iter());
     v.extend(clearance::COMMANDS.iter());
