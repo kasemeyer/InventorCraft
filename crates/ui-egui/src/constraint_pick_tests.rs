@@ -651,3 +651,19 @@ fn each_type_prompts_for_its_picks_and_insert_takes_rims_only() {
         assert_eq!(prompt(&h), "Pick the second circular edge");
     }
 }
+
+/// Owner 2026-10-31: the pop plays the moment the second pick previews a solve, and Apply adds
+/// none.
+#[test]
+fn the_pop_plays_on_the_second_pick_not_on_apply() {
+    let mut h = inventor(Assembly);
+    constraint_blocks(&mut h);
+    let before = crate::audio::requests();
+    alias(&mut h, "C");
+    picks(&mut h, A_TOP, B_TOP);
+    h.frames(3);
+    assert_eq!(crate::audio::requests(), before + 1, "one pop at the second pick");
+    enter(&mut h);
+    assert_eq!(h.app.session.doc.assembly.constraints.len(), 1, "made");
+    assert_eq!(crate::audio::requests(), before + 1, "Apply adds no pop");
+}

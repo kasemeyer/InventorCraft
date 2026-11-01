@@ -96,6 +96,10 @@ struct HoverKey {
 thread_local! {
     /// Previews run (the running count `constraint_previews`).
     static PREVIEWS: Cell<u64> = const { Cell::new(0) };
+    /// The picks (and document revision) the constraint pop last played for, so a new
+    /// constraint pops once, the moment its second pick previews a solve (R175, owner
+    /// 2026-10-31: "the moment the second face or edge or axis is selected").
+    static POPPED: RefCell<Option<(Option<GeoRef>, Option<GeoRef>, u64)>> = const { RefCell::new(None) };
     /// Hover lookups run (`constraint_hover_resolves`).
     static RESOLVES: Cell<u64> = const { Cell::new(0) };
 }
@@ -549,6 +553,23 @@ pub fn refresh_preview(app: &SolveApp, f: &mut ConstraintForm) {
     }
     let p = solidcraft_engine::constraints::preview(&app.session, &d);
     PREVIEWS.set(PREVIEWS.get() + 1);
+    // A new constraint pops as soon as its picks preview a solve; an edit, a refusal and the
+    // same picks again stay silent (R175).
+    if f.editing.is_none() && p.refused.is_none() {
+        let key = (d.a.clone(), d.b.clone(), app.session.revision);
+        let fresh = POPPED.with(|m| {
+            let mut m = m.borrow_mut();
+            if m.as_ref() == Some(&key) {
+                false
+            } else {
+                *m = Some(key);
+                true
+            }
+        });
+        if fresh {
+            crate::audio::constraint_made(app);
+        }
+    }
     f.preview = Some((d, p));
     f.preview_rev = app.session.revision;
 }
