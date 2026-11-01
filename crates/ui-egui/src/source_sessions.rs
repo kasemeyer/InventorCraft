@@ -47,6 +47,25 @@ struct Revision {
     label: String,
 }
 
+/// Recover older snapshot-local additions before Open/Save could overlook their file owner.
+pub(crate) fn prepare_local(session: &mut Session, component: Option<u64>) -> Result<(), String> {
+    let local: Vec<_> = session
+        .doc
+        .links
+        .iter()
+        .filter(|(c, link)| {
+            component.is_none_or(|wanted| wanted == **c)
+                && !session.doc.source_edits.contains_key(c)
+                && session.doc.features.iter().any(|f| f.component == **c && f.id != link.feature)
+        })
+        .map(|(c, _)| *c)
+        .collect();
+    for c in local {
+        session.execute("component.edit_source", &json!({"component":c})).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 pub(crate) fn forget_unused(app: &mut SolveApp) {
     let mut files = std::collections::BTreeSet::new();
     for index in 0..app.docs.count() {

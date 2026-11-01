@@ -70,12 +70,7 @@ pub(crate) fn begin(s: &mut Session, c: u64) -> Result<()> {
         return Ok(());
     }
     let link = s.doc.links.get(&c).cloned().ok_or_else(|| bad(CMD, "component is not linked"))?;
-    if s.doc.features.iter().any(|f| f.component == c && f.id != link.feature) {
-        return Err(bad(
-            CMD,
-            "this older assembly has local features on the linked part; keep it as a separate design before starting source-backed editing",
-        ));
-    }
+    let has_local = s.doc.features.iter().any(|f| f.component == c && f.id != link.feature);
     if s.active_sketch.is_some() || s.doc.marker.is_some_and(|m| m < s.doc.features.len()) {
         return Err(bad(CMD, "finish the sketch and move End of Part to the end first"));
     }
@@ -99,7 +94,71 @@ pub(crate) fn begin(s: &mut Session, c: u64) -> Result<()> {
         baseline_features: Vec::new(),
         baseline_params: Vec::new(),
     };
-    materialize(s, c, &source, edit, true)
+    if has_local { migrate_local(s, c, &source, edit) } else { materialize(s, c, &source, edit, true) }
+}
+
+/// Older versions appended component features after a linked snapshot. Replace only that
+/// snapshot, retaining the additions as pending source edits, after verifying both stages.
+fn migrate_local(s: &mut Session, c: u64, source: &Session, mut edit: SourceEdit) -> Result<()> {
+    let link = s.doc.links.get(&c).ok_or_else(|| bad(CMD, "missing source link"))?;
+    let at = s.doc.feature_index(link.feature).ok_or_else(|| bad(CMD, "missing linked snapshot"))?;
+    if s.doc.features.iter().take(at).any(|f| f.component == c) {
+        return Err(bad(CMD, "local history precedes its linked snapshot; keep the assembly draft and resolve its history first"));
+    }
+    let mut scratch = s.scratch();
+    scratch.path.clone_from(&s.path);
+    scratch.doc_mut().marker = None;
+    scratch.doc_mut().features.retain(|f| f.component != c || f.id == link.feature);
+    scratch.refresh();
+    if scratch.model.results.iter().any(|r| r.error.is_some()) {
+        return Err(bad(CMD, "other assembly features depend on the local additions; their source migration needs explicit reference repair"));
+    }
+    let before = scratch.world_state();
+    // Reserve names of retained local features as well as the assembly's other features.
+    let mut names: BTreeSet<_> = s.doc.features.iter().filter(|f| f.id != link.feature).map(|f| f.name.clone()).collect();
+    for feature in &source.doc.features {
+        edit.names.insert(feature.name.clone(), unique(&feature.name, &mut names));
+    }
+    materialize(&mut scratch, c, source, edit, true)?;
+    let after = scratch.world_state();
+    if !super::component_link::same_solids(&before.bodies.iter().collect::<Vec<_>>(), &after.bodies.iter().collect::<Vec<_>>())? {
+        return Err(bad(CMD, "the source file no longer matches the older linked snapshot; the assembly draft was kept unchanged"));
+    }
+    // Keep the original global ordering of local and unrelated features.
+    let projected: Vec<_> = scratch.doc.features.iter().filter(|f| f.component == c).cloned().collect();
+    let mut features = Vec::new();
+    for feature in &s.doc.features {
+        if feature.id == link.feature {
+            features.extend(projected.iter().cloned());
+        } else {
+            features.push(feature.clone());
+        }
+    }
+    scratch.doc_mut().features = features;
+    scratch.refresh();
+    if scratch.model.results.iter().any(|r| r.error.is_some()) {
+        return Err(bad(CMD, "local additions cannot be replayed against the source history; the assembly draft was kept unchanged"));
+    }
+    rebind_relationships(&mut scratch, s, c)?;
+    let before = s.world_state();
+    let after = scratch.world_state();
+    if !super::component_link::same_solids(&before.bodies.iter().collect::<Vec<_>>(), &after.bodies.iter().collect::<Vec<_>>())? {
+        return Err(bad(CMD, "source migration would change the assembly geometry; the draft was kept unchanged"));
+    }
+    // Validate reverse references and geometry before accepting; a successful assembly
+    // replay alone cannot prove that a standalone source resolves the same body names.
+    let (document, _) = draft(&scratch, c)?;
+    let part = Session::new(document);
+    let component_state = scratch.model.state();
+    let source_state = part.model.state();
+    if !super::component_link::same_solids(
+        &component_state.bodies.iter().filter(|b| scratch.doc.model_body_component(b) == c).collect::<Vec<_>>(),
+        &source_state.bodies.iter().collect::<Vec<_>>(),
+    )? {
+        return Err(bad(CMD, "local additions resolve differently outside the assembly; the draft was kept unchanged"));
+    }
+    s.accept_computed(scratch);
+    Ok(())
 }
 
 fn materialize(s: &mut Session, c: u64, source: &Session, mut edit: SourceEdit, clean: bool) -> Result<()> {
@@ -340,10 +399,18 @@ pub(crate) fn draft(s: &Session, c: u64) -> Result<(Document, SourceEdit)> {
     let mut edit = s.doc.source_edits.get(&c).cloned().ok_or_else(|| bad(CMD, "source history is not loaded"))?;
     let mut doc = (*edit.source).clone();
     let mut ids = inverse(&edit.ids);
-    let names = inverse(&edit.names);
+    let mut names = inverse(&edit.names);
     let bodies = inverse(&edit.bodies);
     let mut parameters = inverse(&edit.parameters);
     let features = own_features(&s.doc, c);
+    let mut used_names: BTreeSet<_> = names.values().cloned().collect();
+    for feature in &features {
+        if !names.contains_key(&feature.name) {
+            let name = unique(&feature.name, &mut used_names);
+            names.insert(feature.name.clone(), name.clone());
+            edit.names.insert(name, feature.name.clone());
+        }
+    }
     for id in ids.values() {
         doc.next_id = doc.next_id.max(id.checked_add(1).ok_or_else(|| bad(CMD, "source id limit"))?);
     }

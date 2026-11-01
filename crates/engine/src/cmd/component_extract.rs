@@ -52,7 +52,7 @@ fn same_shape(a: &ModelBody, a_offset: &solidcraft_doc::Mat, b: &ModelBody, b_of
 }
 
 /// Whether `a` and `b` are the same solids, whatever they are called.
-fn same_solids(a: &[&ModelBody], b: &[&ModelBody]) -> Result<bool> {
+pub(in crate::cmd) fn same_solids(a: &[&ModelBody], b: &[&ModelBody]) -> Result<bool> {
     Ok(unmatched(a, b)?.is_none())
 }
 

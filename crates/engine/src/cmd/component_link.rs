@@ -19,6 +19,7 @@ use crate::{EngineError, Result, Session};
 
 #[path = "component_extract.rs"]
 mod extract;
+pub(super) use extract::same_solids;
 
 #[cfg(test)]
 #[path = "component_relink_tests.rs"]
@@ -442,6 +443,73 @@ fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn source_edit_migrates_older_local_sketch_and_features_without_writing_on_edit() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-source-migrate-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("Source.tcipart");
+        let mut part = Session::default();
+        run(&mut part, "document.new_part", json!({}));
+        run(&mut part, "sketch.create", json!({"plane":"XY"}));
+        run(&mut part, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[20,20]}));
+        run(&mut part, "sketch.finish", json!({}));
+        run(&mut part, "solid.extrude", json!({"distance":10}));
+        run(&mut part, "file.save", json!({"path":file}));
+        let bytes = std::fs::read(&file).unwrap();
+        let mut s = Session::default();
+        run(&mut s, "document.new_assembly", json!({}));
+        let made = run(&mut s, "component.insert_design", json!({"path":file}));
+        let c = made["component"].as_u64().unwrap();
+        run(&mut s, "occurrence.copy", json!({"occurrence":made["occurrence"],"translate":[80,0,0]}));
+        run(&mut s, "component.activate", json!({"component":c}));
+        run(&mut s, "sketch.create", json!({"plane":"XY"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0":[30,0],"p1":[35,5]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance":3,"operation":"new"}));
+        run(&mut s, "component.finish_edit", json!({}));
+        let old = s.doc.features.iter().filter(|f| f.component == c).skip(1).map(|f| f.id).collect::<Vec<_>>();
+        run(&mut s, "component.activate", json!({"component":c,"source_edit":true}));
+        assert_eq!(s.world_state().bodies.len(), 4);
+        assert_eq!(s.doc.features.len(), 4);
+        assert!(old.iter().all(|id| s.doc.feature(*id).is_some()));
+        assert_eq!(std::fs::read(&file).unwrap(), bytes);
+        assert_eq!(run(&mut s, "component.source_status", json!({}))["sources"][0]["dirty"], true);
+        run(&mut s, "component.save_source", json!({"component":c}));
+        run(&mut part, "doc.open", json!({"path":file}));
+        assert_eq!(part.doc.features.len(), 4);
+        assert_eq!(part.world_state().bodies.len(), 2);
+        let names: std::collections::BTreeSet<_> = part.doc.features.iter().map(|f| &f.name).collect();
+        assert_eq!(names.len(), 4);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn source_edit_refuses_migration_when_source_changed_and_keeps_the_draft() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-source-migrate-conflict-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("Source.tcipart");
+        let mut part = Session::default();
+        run(&mut part, "document.new_part", json!({}));
+        run(&mut part, "solid.box", json!({"length":20,"width":20,"height":10}));
+        run(&mut part, "file.save", json!({"path":file}));
+        let mut s = Session::default();
+        run(&mut s, "document.new_assembly", json!({}));
+        let made = run(&mut s, "component.insert_design", json!({"path":file}));
+        let c = made["component"].as_u64().unwrap();
+        run(&mut s, "component.activate", json!({"component":c}));
+        run(&mut s, "solid.box", json!({"length":4,"width":4,"height":4,"corner":[30,0,0]}));
+        run(&mut part, "document.new_part", json!({}));
+        run(&mut part, "solid.box", json!({"length":40,"width":20,"height":10}));
+        run(&mut part, "file.save", json!({"path":file}));
+        let before = s.doc.clone();
+        let bytes = std::fs::read(&file).unwrap();
+        let error = s.execute("component.edit_source", &json!({"component":c})).unwrap_err().to_string();
+        assert!(error.contains("no longer matches"), "{error}");
+        assert_eq!(*s.doc, *before);
+        assert_eq!(std::fs::read(&file).unwrap(), bytes);
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     #[test]
     fn source_edit_saves_original_history_and_two_placements_reopen() {

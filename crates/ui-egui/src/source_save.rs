@@ -24,7 +24,10 @@ pub(crate) fn request(app: &mut SolveApp) -> bool {
     if app.file_picker_busy() {
         return false;
     }
-    if let Err(error) = crate::source_sessions::synchronize(app).and_then(|()| crate::source_sessions::validate_source_save(app)) {
+    if let Err(error) = crate::source_sessions::prepare_local(&mut app.session, None)
+        .and_then(|()| crate::source_sessions::synchronize(app))
+        .and_then(|()| crate::source_sessions::validate_source_save(app))
+    {
         app.set_status(error, true);
         return true;
     }

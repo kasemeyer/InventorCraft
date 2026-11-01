@@ -32,6 +32,10 @@ pub(crate) fn open(app: &mut SolveApp, component: u64) {
     if app.file_picker_busy() || app.file_load.busy() {
         return;
     }
+    if let Err(error) = crate::source_sessions::prepare_local(&mut app.session, Some(component)) {
+        app.set_status(error, true);
+        return;
+    }
     let Some(link) = app.session.doc.links.get(&component) else {
         app.set_status("This component has no linked source design", true);
         return;
@@ -224,6 +228,44 @@ mod tests {
     use crate::context_menu::{self, Target};
     use solidcraft_engine::Session;
     use std::path::PathBuf;
+
+    #[test]
+    fn older_local_features_are_recovered_by_open_and_save_without_editing_first() {
+        for open_first in [false, true] {
+            let mut h = crate::test_support::inventor(solidcraft_engine::doc::DocumentKind::Assembly);
+            let path = h.dir.join("Older.tcipart");
+            let mut part = Session::default();
+            part.execute("document.new_part", &json!({})).unwrap();
+            part.execute("solid.box", &json!({"length":20,"width":20,"height":10})).unwrap();
+            part.execute("file.save", &json!({"path":path})).unwrap();
+            let bytes = std::fs::read(&path).unwrap();
+            let made = h.app.run("component.insert_design", json!({"path":path})).unwrap();
+            let c = made["component"].as_u64().unwrap();
+            // Direct engine activation models the old snapshot-local edit behavior.
+            h.app.session.execute("component.activate", &json!({"component":c})).unwrap();
+            h.app.run("solid.box", json!({"length":4,"width":4,"height":4,"corner":[30,0,0]})).unwrap();
+            h.app.run("component.finish_edit", json!({})).unwrap();
+            h.app.run("file.save", json!({"path":h.dir.join("Older.tciasm")})).unwrap();
+            if open_first {
+                open(&mut h.app, c);
+                h.settle();
+                assert_eq!(h.app.docs.count(), 2, "{:?}", h.app.status);
+                assert_eq!(h.app.session.doc.features.len(), 2);
+                assert!(h.app.session.is_dirty());
+                assert_eq!(std::fs::read(&path).unwrap(), bytes);
+                crate::documents::switch(&mut h.app, 0);
+            }
+            crate::toolbar::save(&mut h.app);
+            let panel = h.app.docs.source_save.take().expect("old additions enter the save list");
+            assert_eq!(panel.rows.len(), 1);
+            assert_eq!(std::fs::read(&path).unwrap(), bytes);
+            crate::source_save::apply(&mut h.app, panel, true);
+            h.settle();
+            part.execute("doc.open", &json!({"path":path})).unwrap();
+            assert_eq!(part.world_state().bodies.len(), 2);
+            assert_eq!(part.doc.features.len(), 2);
+        }
+    }
 
     fn unsaved_source_fixture() -> (crate::scenario::Harness, u64, PathBuf) {
         let mut h = crate::test_support::inventor(solidcraft_engine::doc::DocumentKind::Assembly);
