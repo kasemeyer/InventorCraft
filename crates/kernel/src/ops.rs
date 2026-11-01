@@ -1676,6 +1676,31 @@ where
                 return Ok(r);
             }
         }
+        // The ordinary unshifted tries and the exact prism/slab routes have had their chance.
+        // A single micron-scale screw often resolves a seam or tangent wall at this point. Try
+        // the kernel once on that moved tool before spending the remaining tolerance/jitter
+        // matrix; accept it only under the same volume, mesh and retry guards as the full path.
+        if attempt == 1 && op == BoolOp::Cut {
+            let center = b.solid.vertex_iter().fold(Vec3::ZERO, |acc, v| acc + from_p3(v.point()))
+                * (1.0 / b.solid.vertex_iter().count().max(1) as f64);
+            let screw = &SCREWS[0];
+            let translation = Vec3::new(screw.0[0], screw.0[1], screw.0[2]) * (size * 2e-6);
+            let axis = Vec3::new(screw.1[0], screw.1[1], screw.1[2]);
+            if let Ok(nb) = transform(b, translation, center, axis, 2e-6)
+                && let Ok((solid, history)) = intersect(a, &nb, op, None, tol_m)
+                && !solid.boundaries().is_empty()
+                && let Ok(body) = guard("fast nudged boolean result", || recorded::truck_result(solid, history, size, &keep, &counts))
+            {
+                let body = nudged(body, &nb, &counts);
+                if check(&body).0 && crate::boolean_guard::check_retry(a, b, op, Some(&body)).is_ok() {
+                    let mut event = BooleanFallback::new(BooleanStrategy::ToolNudge);
+                    event.translation_mm = translation.len();
+                    event.rotation_rad = 2e-6;
+                    record(event);
+                    return Ok(Some(body));
+                }
+            }
+        }
         // An implausible empty result from the unshifted numerical tries must still give
         // the exact strategies above a chance (#1765), including seam-face recovery. If none
         // recovers it, keep the original candidate for the outer guard, before displaced retries.
