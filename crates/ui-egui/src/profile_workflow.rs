@@ -28,6 +28,8 @@ pub struct Workflow {
     pub escape_twice_finishes_sketch: bool,
     /// The floating sketch palette is drawn while sketching.
     pub sketch_palette: bool,
+    /// Feature and command panels open against the left edge of the viewport.
+    pub feature_panels_left: bool,
     /// New features open with the template's values in an inch document (1 in, not 10 mm).
     pub template_values: bool,
     /// Template precision written into a new inch or foot document's settings (Inventor: 3).
@@ -83,6 +85,7 @@ impl Default for Workflow {
             restore_view_after_sketch: false,
             escape_twice_finishes_sketch: true,
             sketch_palette: true,
+            feature_panels_left: false,
             template_values: false,
             inch_length_decimals: None,
             mm_length_decimals: None,

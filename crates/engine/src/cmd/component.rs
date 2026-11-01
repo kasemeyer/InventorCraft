@@ -30,6 +30,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "ASSEMBLE")
         .icon("component")
         .params("name?, parent?: component id or name (default: the active one); parent_path?: exact parent placement; activate?: bool (default true); grounded?: bool (default: true for the design's first part, false otherwise)"),
+    CommandSpec::new("component.create_in_place", "Create Part in Place", new_component)
+        .at("ASSEMBLE", "ASSEMBLE")
+        .icon("component")
+        .params("activate?: bool (default true); creates a new component in the active assembly"),
     CommandSpec::new("component.from_bodies", "Create Components from Bodies", from_bodies)
         .icon("component")
         .params("bodies: [names] → one new component per body, named after it"),

@@ -707,7 +707,7 @@
   "cmd.component_delete": "Delete Component",
   "cmd.component_extract": "Extract to File",
   "cmd.component_from_bodies": "Create Components from Bodies",
-  "cmd.component_insert_design": "Insert Design",
+  "cmd.component_insert_design": "Insert Part or Assembly",
   "cmd.component_links": "List Links",
   "cmd.component_list": "List Components",
   "cmd.component_metadata": "Part Properties",

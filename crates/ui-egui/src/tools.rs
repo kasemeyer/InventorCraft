@@ -78,6 +78,8 @@ pub struct Tool {
     pub hover: Option<(Vec2, Option<String>)>,
     /// Picked entity ids.
     pub picks: Vec<String>,
+    /// Explicit center-to-center or edge-gap measure chosen from the active Dimension menu.
+    pub dimension_type: Option<String>,
     /// Horizontal/Vertical point references, or the Dimension tool's midpoint snaps.
     pub point_picks: Vec<Value>,
     /// Inline dimension boxes for the shape being drawn, the point count they were made for,
@@ -128,6 +130,7 @@ impl Tool {
             pts: Vec::new(),
             hover: None,
             picks: Vec::new(),
+            dimension_type: None,
             point_picks: Vec::new(),
             dims: Vec::new(),
             dim_history: Vec::new(),

@@ -456,8 +456,8 @@ fn the_same_part_under_solidcraft() {
     h.step(&json!({"start": "solid.extrude"})).unwrap();
     h.frames(3);
     let Kind::Extrude { distance, .. } = panel(&h) else { panic!("Extrude opened {:?}", panel(&h)) };
-    assert_eq!(distance, "10 mm", "SolidCraft's Extrude keeps its mm default in an inch design");
-    type_field(&mut h, "Distance", "10 mm", "1 in");
+    assert_eq!(distance, "0.39370079 in", "Extrude defaults follow the inch design unit");
+    type_field(&mut h, "Distance", "0.39370079 in", "1 in");
     h.step(&json!({"widget": "OK"})).unwrap();
     h.settle();
     assert!(h.app.dialog.is_none(), "OK closes Extrude");
@@ -467,9 +467,9 @@ fn the_same_part_under_solidcraft() {
     h.step(&json!({"click": {"world": [(lo.x + hi.x) / 2.0, (lo.y + hi.y) / 2.0, hi.z]}})).unwrap();
     h.frames(3);
     let Kind::Hole { diameter, depth, .. } = panel(&h) else { panic!("Hole opened {:?}", panel(&h)) };
-    assert_eq!((diameter.as_str(), depth.as_str()), ("5 mm", "10 mm"), "SolidCraft's Hole keeps its mm defaults");
-    type_field(&mut h, "Diameter", "5 mm", "0.25 in");
-    type_field(&mut h, "Depth", "10 mm", "0.5 in");
+    assert_eq!((diameter.as_str(), depth.as_str()), ("0.19685039 in", "0.39370079 in"), "Hole defaults follow the inch design unit");
+    type_field(&mut h, "Diameter", "0.19685039 in", "0.25 in");
+    type_field(&mut h, "Depth", "0.39370079 in", "0.5 in");
     h.step(&json!({"widget": "OK"})).unwrap();
     h.settle();
     assert!(h.app.dialog.is_none(), "OK closes Hole");
@@ -487,8 +487,8 @@ fn the_same_part_under_solidcraft() {
         h.step(&json!({"start": "solid.fillet"})).unwrap();
         h.frames(3);
         let Kind::Fillet { radius, .. } = panel(&h) else { panic!("Fillet opened {:?}", panel(&h)) };
-        assert_eq!(radius, "2 mm", "SolidCraft's Fillet keeps its mm default");
-        type_field(&mut h, "Radius", "2 mm", "0.125 in");
+        assert_eq!(radius, "0.07874016 in", "Fillet defaults follow the inch design unit");
+        type_field(&mut h, "Radius", "0.07874016 in", "0.125 in");
         h.step(&json!({"widget": "OK"})).unwrap();
         h.settle();
         assert!(h.app.dialog.is_none(), "OK closes Fillet on {e:?}");

@@ -209,7 +209,57 @@ pub(crate) fn overflow(app: &SolveApp) -> Option<Vec<Item>> {
         "occurrence.ground" if paths.len() != 1 && ctx == MenuContext::AssemblyComponent => ground_all(app, item(app, id, ctx), &paths),
         _ => from_context(item(app, id, ctx), &listed),
     };
-    Some(l.overflow.iter().map(entry).collect())
+    let mut items: Vec<Item> = l.overflow.iter().map(entry).collect();
+    let round_pair = app.tool.as_ref().filter(|tool| tool.kind == crate::tools::Kind::Dimension && tool.picks.len() == 2).is_some_and(|tool| {
+        app.session.active_sketch.is_some_and(|id| {
+            let state = app.session.world_state();
+            state.sketch(id).is_some_and(|sketch| {
+                tool.picks.iter().all(|id| {
+                    sketch.sketch.curve_index(id).and_then(|i| sketch.sketch.curves.get(i)).is_some_and(|curve| {
+                        matches!(curve.kind, solidcraft_engine::sketch::CurveKind::Circle { .. } | solidcraft_engine::sketch::CurveKind::Arc { .. })
+                    })
+                })
+            })
+        })
+    });
+    if round_pair {
+        let tool = app.tool.as_ref().expect("the dimension tool was checked above");
+        let mut menu = act("ui.sketch.dimensionTypeMenu", crate::i18n::tr("ui.drawing.dimType"), "dimension");
+        let chosen = tool.dimension_type.as_deref().or_else(|| sketch_dimension_default_type(app));
+        for (kind, label) in [("center", "Center"), ("gap", "Gap")] {
+            let mut choice = act("ui.sketch.dimensionType", crate::i18n::tr_label(label), "dimension").with(serde_json::json!({"type": kind}));
+            choice.checked = Some(chosen == Some(kind));
+            menu.children.push(choice);
+        }
+        items.push(Item::sep());
+        items.push(menu);
+    }
+    Some(items)
+}
+
+/// With no explicit choice, match the engine's current measure for the picked round geometry.
+fn sketch_dimension_default_type(app: &SolveApp) -> Option<&'static str> {
+    let tool = app.tool.as_ref().filter(|tool| tool.kind == crate::tools::Kind::Dimension && tool.picks.len() == 2)?;
+    let id = app.session.active_sketch?;
+    let state = app.session.world_state();
+    let sketch = &state.sketch(id)?.sketch;
+    let rounds: Vec<usize> = tool
+        .picks
+        .iter()
+        .map(|pick| sketch.curve_index(pick).or_else(|| pick.strip_suffix(".center").and_then(|curve| sketch.curve_index(curve))))
+        .collect::<Option<_>>()?;
+    if rounds.iter().any(|i| {
+        !sketch.curves.get(*i).is_some_and(|curve| {
+            matches!(curve.kind, solidcraft_engine::sketch::CurveKind::Circle { .. } | solidcraft_engine::sketch::CurveKind::Arc { .. })
+        })
+    }) {
+        return None;
+    }
+    let (a, b) = (rounds[0], rounds[1]);
+    let (ca, cb) = (sketch.center(a)?, sketch.center(b)?);
+    let (ra, rb) = (sketch.radius(a)?, sketch.radius(b)?);
+    let d = ca.dist(cb);
+    Some(if d + ra.min(rb) <= ra.max(rb) + 1e-9 { "gap" } else { "center" })
 }
 
 /// The key the profile maps to a UI action (F5 for Previous View under Inventor).

@@ -2542,9 +2542,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     // Physical materials: the library's, then the design's own (material.create).
     let t = Tokens::get();
     let vp = crate::agent_chat::tool_space(app, crate::shell::content_rect(app, app.viewport.rect.unwrap_or_else(|| ctx.content_rect())));
-    // The Sketch Palette owns the right edge for as long as a sketch is being edited. A dialog
-    // started there docks at the left instead, so neither panel hides the other.
-    let side = if crate::sketch_palette::editing(app) && crate::sketch_palette::fits_beside_a_dialog(app, ctx) {
+    // Keep the panel beside the Browser in the Inventor workflow. The Sketch Palette owns the
+    // right edge while sketching, so its command panel docks at the left instead.
+    let side = if (crate::sketch_palette::editing(app) && crate::sketch_palette::fits_beside_a_dialog(app, ctx))
+        || crate::profile::active(app).workflow.feature_panels_left
+    {
         crate::frame::Side::Left
     } else {
         crate::frame::Side::Right
@@ -2778,12 +2780,35 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         && d.error.is_none()
         && let Some(sel) = d.inputs.first().and_then(|i| i.items.first()).cloned()
     {
-        match start_sketch(app, &sel) {
-            Ok(()) => {
-                cancel = true;
-                then_start = d.then_start.map(|id| (id, d.then_start_pinned));
+        let create_component = d.extra.remove("create_component_on_plane").and_then(|v| v.as_bool()).unwrap_or(false);
+        let created = if create_component {
+            match app.run("component.create", json!({"activate":true})) {
+                Ok(_) => true,
+                Err(error) => {
+                    d.refuse(app, error);
+                    d.extra.insert("create_component_on_plane".into(), json!(true));
+                    false
+                }
             }
-            Err(error) => d.refuse(app, error),
+        } else {
+            false
+        };
+        if create_component && !created {
+            // Keep the plane picker open; the failed component command has made no change.
+        } else {
+            match start_sketch(app, &sel) {
+                Ok(()) => {
+                    cancel = true;
+                    then_start = d.then_start.map(|id| (id, d.then_start_pinned));
+                }
+                Err(error) => {
+                    if created {
+                        let _ = app.run("edit.undo", json!({}));
+                        d.extra.insert("create_component_on_plane".into(), json!(true));
+                    }
+                    d.refuse(app, error)
+                }
+            }
         }
     }
     if ok && app.applying.is_none() {
@@ -3254,16 +3279,21 @@ pub(crate) fn imperial(units: &str) -> bool {
     matches!(units.trim(), "in" | "ft")
 }
 
-/// The profile asks for template values and the design is imperial.
+/// The profile supplies familiar inch-sized defaults when the design is imperial.
 fn inch_template(app: &SolveApp) -> bool {
     crate::profile::active(app).workflow.template_values && imperial(&app.session.doc.units)
 }
 
-/// A new panel's length: "{inch} in" when the profile asks for template values and the design is
-/// imperial, else "{mm} mm" (today's literal). Always carries its unit: a bare stored length is
-/// millimetres.
+/// A new panel's length in the design's unit. The Inventor profile supplies curated inch-sized
+/// defaults; other profiles keep the same physical millimetre default, expressed in inches/feet.
 pub(crate) fn template_length(app: &SolveApp, mm: &str, inch: &str) -> String {
-    if inch_template(app) { format!("{inch} in") } else { format!("{mm} mm") }
+    if inch_template(app) {
+        format!("{inch} in")
+    } else if imperial(&app.session.doc.units) {
+        mm.parse::<f64>().map(|v| app.session.doc.length_in_design_unit(v)).unwrap_or_else(|_| format!("{mm} mm"))
+    } else {
+        format!("{mm} mm")
+    }
 }
 
 /// A new pattern panel of the Type row's `ty` (0 rectangular, 1 circular, 2 path): its values and

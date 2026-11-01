@@ -1028,6 +1028,20 @@ impl SolveApp {
         if self.file_load.busy() || self.file_picker.is_some() {
             return;
         }
+        // Inventor's Assembly > Create starts a new in-place part by asking for its
+        // sketch plane. Defer creating the component until a valid plane/face is picked,
+        // so cancelling the picker does not leave an empty occurrence behind.
+        if id == "component.create_in_place" {
+            if self.session.doc.kind != solidcraft_engine::doc::DocumentKind::Assembly {
+                self.set_status("Create Part in Place is available in an assembly", true);
+                return;
+            }
+            self.start("sketch.create");
+            if let Some(dialog) = self.dialog.as_mut().filter(|d| matches!(d.kind, dialogs::Kind::Sketch)) {
+                dialog.extra.insert("create_component_on_plane".into(), json!(true));
+            }
+            return;
+        }
         // Front … Isometric (Ctrl+1…7 by default) turn the view as the view cube's faces do. The
         // flat pattern is a 2D page: it has no other side to turn to.
         if solidcraft_engine::standard_view(id).is_some() {

@@ -474,8 +474,10 @@ fn inventor_commands() -> BTreeSet<&'static str> {
 /// unplaced). Plan E-1 Task 5's three show commands (+3): 188 + 3 = 191 (N + 9). Plan E-1 Task 8's
 /// `constraint.drive` (+1): 191 + 1 = 192 (N + 10). Plan E-2 Task 1 places four on
 /// ASSEMBLE › RELATIONSHIPS (-4): `constraint.create`, `constraint.show`, `constraint.show_sick`,
-/// `constraint.hide_all`; 192 - 4 = 188 (N + 6).
-const INVENTOR_UNPLACED: usize = 188;
+/// `constraint.hide_all`; 192 - 4 = 188 (N + 6). The two standard-parts commands are no longer
+/// placed in the Component panel: Fastener has its dedicated ribbon entry, while the design
+/// library is not implemented yet (188 + 2 = 190).
+const INVENTOR_UNPLACED: usize = 190;
 
 #[test]
 fn inventor_assembly_ribbon_follows_the_capture() {
@@ -704,7 +706,7 @@ fn split_buttons_follow_the_capture() {
     );
     assert_eq!(
         dropdowns(Assembly, "ASSEMBLE", "COMPONENT"),
-        [("place", "component.insert_design", true, vec!["component.insert_design", "parts.insert", "file.insert_step"])]
+        [("place", "component.insert_design", true, vec!["component.insert_design", "file.insert_step"])]
     );
     // No other panel has a split button.
     let count: usize =

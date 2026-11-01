@@ -89,7 +89,7 @@ pub fn panel_width(buttons: &[f32]) -> f32 {
 pub const COLLAPSED_WIDTH: f32 = 72.0;
 
 /// The gap after each panel (its separator).
-const PANEL_GAP: f32 = 1.0;
+const PANEL_GAP: f32 = 5.0;
 pub const TAB_ROW_HEIGHT: f32 = 30.0;
 /// Distance from the ribbon card's edges to the first tab and the search field.
 const RIBBON_TAB_INSET: f32 = 4.0;
@@ -767,7 +767,7 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
                     FileAction::Command("file.insert_mesh").run(app);
                     close = true;
                 }
-                if item_if(ui, &format!("{}…", app.tr_label("Insert Design")), "", "component", shown) {
+                if item_if(ui, &format!("{}…", app.tr_label("Insert Part or Assembly")), "", "component", shown) {
                     FileAction::Command("component.insert_design").run(app);
                     close = true;
                 }

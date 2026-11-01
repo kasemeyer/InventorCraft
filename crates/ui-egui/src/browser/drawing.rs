@@ -23,15 +23,12 @@ pub(crate) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
     // The file's stem once saved, else the document's name.
     let saved = app.session.path.as_deref().and_then(|p| std::path::Path::new(p).file_stem()).map(|s| s.to_string_lossy().into_owned());
     let label = saved.clone().unwrap_or_else(|| app.session.doc.name.clone());
-    let open = is_open(app, ROOT, true);
+    let open = true;
     let r = draw_row(
         ui,
         ui.id().with(ROOT),
-        &Row { depth, fold: Some(open), icon: "ws_drawing", label: &label, name: saved.is_some(), ..Default::default() },
+        &Row { depth, icon: "ws_drawing", label: &label, name: saved.is_some(), ..Default::default() },
     );
-    if r.fold {
-        toggle(app, ROOT, true);
-    }
     if let Some(p) = r.secondary {
         crate::context_menu::open_for(app, p, Target::DrawingRoot);
     }
@@ -97,10 +94,10 @@ pub(crate) fn block_display(block: &str) -> String {
 
 /// A folding row with a folder icon, closed until opened; whether it is open.
 fn folder(app: &mut SolveApp, ui: &mut egui::Ui, key: &str, label: &str, depth: usize) -> bool {
-    let open = is_open(app, key, false);
+    let open = is_open(app, key, true);
     let r = draw_row(ui, ui.id().with(key), &Row { depth, fold: Some(open), icon: "folder", label, name: true, ..Default::default() });
     if r.fold {
-        toggle(app, key, false);
+        toggle(app, key, true);
     }
     open
 }

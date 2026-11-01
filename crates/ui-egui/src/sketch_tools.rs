@@ -650,6 +650,7 @@ pub fn tool_for(id: &str) -> Option<Tool> {
         pts: Vec::new(),
         hover: None,
         picks: Vec::new(),
+        dimension_type: None,
         point_picks: Vec::new(),
         dims: Vec::new(),
         dim_history: Vec::new(),

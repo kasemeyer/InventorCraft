@@ -134,6 +134,8 @@ struct DimensionDraft {
     /// A dimension that would over-constrain the sketch, placed as a driven (reference) one:
     /// it has no parameter and no value to edit (#320).
     driven: bool,
+    /// The explicit measure selected in the viewport's Dimension Type submenu.
+    dimension_type: Option<String>,
 }
 
 impl DimensionDraft {
@@ -147,6 +149,9 @@ impl DimensionDraft {
     fn params(&self, expr: &str) -> serde_json::Value {
         // The first dimension of a sketch scales it rather than distorting it (#1365).
         let mut params = json!({"entities": self.entities, "value": expr, "scale_sketch": true});
+        if let Some(kind) = &self.dimension_type {
+            params["type"] = json!(kind);
+        }
         if let Some(at) = self.at {
             params["text_at"] = json!([at.x, at.y]);
         }
@@ -188,7 +193,7 @@ pub fn cancel() {
 /// parameter or an undo entry. Only accepting the editor executes the command on the design.
 /// A driven dimension has no value to accept, so it is added at once.
 pub fn begin_dimension(app: &mut SolveApp, entities: Vec<String>, at: Vec2) -> Result<(), String> {
-    let (param, _, draft) = dimension_draft(app, entities, Some(at))?;
+    let (param, _, draft) = dimension_draft(app, entities, Some(at), None)?;
     if draft.driven {
         PLACEMENT.with(|preview| *preview.borrow_mut() = None);
         app.run("sketch.dimension", json!({"entities": draft.entities, "text_at": [at.x, at.y], "driven": true}))?;
@@ -209,7 +214,7 @@ pub fn begin_live(app: &mut SolveApp, entities: Vec<String>, pointer: Option<Pos
     // A midpoint pair chooses its orientation and text position before entering a value.
     // This also permits switching freely between driving and reference spans.
     let midpoint_pair = entities.len() == 2 && entities.iter().all(|id| id.starts_with("mid:"));
-    let (param, _, draft) = dimension_draft(app, entities, None)?;
+    let (param, _, draft) = dimension_draft(app, entities, None, None)?;
     if draft.driven || midpoint_pair {
         return Ok(false);
     }
@@ -239,6 +244,33 @@ pub fn pin(app: &SolveApp, at: Vec2) {
     });
 }
 
+/// Change the live sketch Dimension's measure from its right-click submenu. An untouched value
+/// follows the new measure; a value the user has already typed is reevaluated as entered.
+pub(crate) fn set_dimension_type(app: &SolveApp, kind: &str) {
+    EDIT.with(|edit| {
+        let mut edit = edit.borrow_mut();
+        let Some(e) = edit.as_mut().filter(|e| e.live.is_some()) else { return };
+        let Some(entities) = e.draft.as_ref().map(|draft| draft.entities.clone()) else { return };
+        let typed = e.live.is_some_and(|live| live.typed);
+        let expr = if typed { e.value() } else { String::new() };
+        let at = e.draft.as_ref().and_then(|draft| draft.at);
+        let Ok((param, _, mut draft)) = dimension_draft(app, entities, at, Some(kind)) else { return };
+        if typed {
+            if draft.evaluate(app, &expr).is_err() {
+                return;
+            }
+            e.expr = expr;
+            e.seeded = None;
+        } else {
+            (e.expr, e.seeded) = box_value(app, &draft.preview_doc, &param);
+            e.fresh = FRESH;
+        }
+        e.param = param;
+        draft.dimension_type = Some(kind.to_string());
+        e.draft = Some(draft);
+    });
+}
+
 /// Move a draft's text to `at`. Where the text goes can change what the dimension measures
 /// (two points or a slanted line: across from them the distance between them, above or below
 /// the horizontal one, beside them the vertical one), so a value nothing was typed into yet
@@ -248,7 +280,7 @@ fn move_text(app: &SolveApp, e: &mut Edit, at: Vec2) {
     let typed = e.live.is_none_or(|l| l.typed);
     let Some(entities) = e.draft.as_ref().map(|d| d.entities.clone()) else { return };
     if !typed
-        && let Ok((param, _, redone)) = dimension_draft(app, entities, Some(at))
+        && let Ok((param, _, redone)) = dimension_draft(app, entities, Some(at), e.draft.as_ref().and_then(|d| d.dimension_type.as_deref()))
         && !redone.driven
     {
         let (expr, seeded) = box_value(app, &redone.preview_doc, &param);
@@ -277,22 +309,38 @@ fn reevaluate(app: &SolveApp, draft: &mut DimensionDraft, expr: &str) {
     }
 }
 
-fn dimension_draft(app: &SolveApp, entities: Vec<String>, at: Option<Vec2>) -> Result<(String, String, DimensionDraft), String> {
+fn dimension_draft(
+    app: &SolveApp,
+    entities: Vec<String>,
+    at: Option<Vec2>,
+    dimension_type: Option<&str>,
+) -> Result<(String, String, DimensionDraft), String> {
     let sketch = app.session.active_sketch.ok_or("Edit a sketch to add a dimension")?;
     if entities.is_empty() || entities.len() > 2 || at.is_some_and(|at| !at.x.is_finite() || !at.y.is_finite()) {
         return Err("Pick one edge or two endpoints, then place the dimension".into());
     }
     // A dimension the sketch can't take (it would over-constrain it) becomes a driven one,
     // which only measures; when that fails too, the first refusal is the one to report.
-    draft_of(app, sketch, &entities, at, false).or_else(|error| draft_of(app, sketch, &entities, at, true).map_err(|_| error))
+    draft_of(app, sketch, &entities, at, dimension_type, false)
+        .or_else(|error| draft_of(app, sketch, &entities, at, dimension_type, true).map_err(|_| error))
 }
 
 /// The draft of one dimension: its parameter (for a driven one, its constraint id: its
 /// reference parameter has no editable expression), the parameter's expression, and the
 /// scratch session it was added in.
-fn draft_of(app: &SolveApp, sketch: u64, entities: &[String], at: Option<Vec2>, driven: bool) -> Result<(String, String, DimensionDraft), String> {
+fn draft_of(
+    app: &SolveApp,
+    sketch: u64,
+    entities: &[String],
+    at: Option<Vec2>,
+    dimension_type: Option<&str>,
+    driven: bool,
+) -> Result<(String, String, DimensionDraft), String> {
     let mut scratch = app.session.scratch();
     let mut params = json!({"entities": entities, "driven": driven});
+    if let Some(kind) = dimension_type {
+        params["type"] = json!(kind);
+    }
     if let Some(at) = at {
         params["text_at"] = json!([at.x, at.y]);
     }
@@ -321,6 +369,7 @@ fn draft_of(app: &SolveApp, sketch: u64, entities: &[String], at: Option<Vec2>, 
         preview_doc: scratch.doc.clone(),
         error: None,
         driven,
+        dimension_type: dimension_type.map(str::to_owned),
     };
     if !draft.preview.sketch(sketch).is_some_and(|solved| solved.report.ok()) {
         return Err("That dimension conflicts with the sketch constraints".into());
@@ -337,6 +386,7 @@ struct Placement {
     path: Option<Vec<u64>>,
     pending: std::collections::BTreeMap<u64, solidcraft_engine::doc::Mat>,
     entities: Vec<String>,
+    dimension_type: Option<String>,
     at: Vec2,
     draft: Option<(String, DimensionDraft)>,
 }
@@ -353,10 +403,12 @@ fn placement_preview(app: &SolveApp) -> Option<(String, DimensionDraft)> {
                 && p.path == app.session.active_occurrence_path
                 && p.pending == app.session.pending_moves
                 && p.entities == tool.picks
+                && p.dimension_type == tool.dimension_type
                 && p.at == at
         });
         if !current {
-            let draft = dimension_draft(app, tool.picks.clone(), Some(at)).ok().map(|(param, _, draft)| (param, draft));
+            let draft =
+                dimension_draft(app, tool.picks.clone(), Some(at), tool.dimension_type.as_deref()).ok().map(|(param, _, draft)| (param, draft));
             *preview = Some(Placement {
                 baseline: app.session.doc.clone(),
                 sketch: app.session.active_sketch,
@@ -364,6 +416,7 @@ fn placement_preview(app: &SolveApp) -> Option<(String, DimensionDraft)> {
                 path: app.session.active_occurrence_path.clone(),
                 pending: app.session.pending_moves.clone(),
                 entities: tool.picks.clone(),
+                dimension_type: tool.dimension_type.clone(),
                 at,
                 draft,
             });
@@ -908,6 +961,7 @@ fn clear_picks(app: &mut SolveApp) {
     if let Some(tool) = app.tool.as_mut().filter(|t| t.kind == crate::tools::Kind::Dimension) {
         tool.picks.clear();
         tool.point_picks.clear();
+        tool.dimension_type = None;
     }
 }
 

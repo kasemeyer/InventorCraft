@@ -1,11 +1,43 @@
 //! Explicitly choose a linked component's source; all its instances share that source. Extract
 //! makes a component that is not linked the source of its own design file.
 
-use std::sync::Arc;
+use std::{path::{Path, PathBuf}, sync::Arc};
 
 use serde_json::json;
 
 use crate::SolveApp;
+
+/// Open a linked component's source in its own design tab. Closing that tab switches back to the
+/// assembly tab, where Save writes any assembly changes as usual.
+pub(crate) fn open(app: &mut SolveApp, component: u64) {
+    if app.file_picker_busy() || app.file_load.busy() {
+        return;
+    }
+    let Some(link) = app.session.doc.links.get(&component) else {
+        app.set_status("This component has no linked source design", true);
+        return;
+    };
+    let source = PathBuf::from(&link.path);
+    let path = if source.is_absolute() {
+        source
+    } else {
+        app.session.path.as_deref().and_then(|p| Path::new(p).parent()).unwrap_or_else(|| Path::new(".")).join(source)
+    };
+    let path = path.canonicalize().unwrap_or(path);
+    if !path.is_file() {
+        app.set_status(format!("Linked source file not found: {}", path.display()), true);
+        return;
+    }
+    let same_file = |candidate: &str| {
+        let candidate = Path::new(candidate);
+        candidate.canonicalize().unwrap_or_else(|_| candidate.to_path_buf()) == path
+    };
+    if let Some(tab) = crate::documents::tab_paths(app).iter().position(|p| p.as_deref().is_some_and(same_file)) {
+        crate::documents::switch(app, tab);
+    } else {
+        app.open_path_async(&path.to_string_lossy());
+    }
+}
 
 pub(crate) fn start_selected(app: &mut SolveApp) {
     let mut components = app.tree.picked_components.clone();

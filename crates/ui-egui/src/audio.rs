@@ -2,7 +2,7 @@
 //! constraint is made (the Constrain panel's OK or Apply ran `constraint.create`), not on a
 //! refusal and not on an edit, behind the "Constraint audio notification" preference (on by
 //! default, as Inventor's Application Options). The sound is generated here, no asset: a ~60 ms
-//! decaying sine near 1 kHz with a sharp attack. The host plays it (`Services::play_samples`:
+//! decaying, low woodblock-like knock with a sharp attack. The host plays it (`Services::play_samples`:
 //! the desktop app with its `audio` feature); without one (the browser, tests, CI, a machine with
 //! no output device) nothing is heard. Each request is counted, so tests see it without a device.
 
@@ -13,10 +13,10 @@ use crate::SolveApp;
 /// Samples per second of the pop.
 pub const RATE: u32 = 44_100;
 /// How long the pop lasts, seconds.
-const LENGTH_S: f32 = 0.06;
+const LENGTH_S: f32 = 0.075;
 /// Its pitch, Hz, and how fast it dies away (1/s).
-const PITCH_HZ: f32 = 1_000.0;
-const DECAY: f32 = 70.0;
+const PITCH_HZ: f32 = 420.0;
+const DECAY: f32 = 62.0;
 /// The attack ramp, seconds.
 const ATTACK_S: f32 = 0.001;
 /// Its loudness (of full scale).
@@ -34,8 +34,9 @@ pub fn pop_samples(rate: u32) -> Vec<f32> {
         .map(|i| {
             let t = i as f32 / rate;
             let attack = (t / ATTACK_S).min(1.0);
-            // A second partial an octave and a fifth up gives it the wooden knock.
-            let tone = (std::f32::consts::TAU * PITCH_HZ * t).sin() + 0.35 * (std::f32::consts::TAU * PITCH_HZ * 2.9 * t).sin();
+            // A quiet, inharmonic upper partial gives the low fundamental a woody knock
+            // without the bright, high-pitched ping of the former 1 kHz tone.
+            let tone = (std::f32::consts::TAU * PITCH_HZ * t).sin() + 0.22 * (std::f32::consts::TAU * PITCH_HZ * 2.25 * t).sin();
             LEVEL * attack * (-DECAY * t).exp() * tone / 1.35
         })
         .collect()
@@ -65,7 +66,7 @@ mod tests {
     #[test]
     fn the_pop_is_a_short_decaying_click() {
         let s = pop_samples(RATE);
-        assert_eq!(s.len(), (0.06 * RATE as f32) as usize, "about 60 ms");
+        assert_eq!(s.len(), (LENGTH_S * RATE as f32) as usize, "about 75 ms");
         let peak = s.iter().copied().map(f32::abs).fold(0.0, f32::max);
         assert!(peak > 0.2 && peak <= 1.0, "audible and never clipped: {peak}");
         let at = s.iter().position(|v| v.abs() == peak).unwrap();

@@ -52,10 +52,10 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: 
     }
     let scope = if path.is_empty() { format!("c{component}") } else { occurrence_key(path) };
     let key = format!("{scope}/features");
-    let open = is_open(app, &key, false);
+    let open = is_open(app, &key, true);
     let r = draw_row(ui, ui.id().with(&key), &Row { depth, fold: Some(open), icon: "folder", label: "Features", ..Default::default() });
     if r.fold || r.clicked {
-        toggle(app, &key, false);
+        toggle(app, &key, true);
     }
     if !open {
         return;

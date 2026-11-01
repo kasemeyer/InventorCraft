@@ -758,6 +758,30 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
     ];
     if one {
         let b = bodies.first().cloned().unwrap_or_default();
+        if app.session.doc.kind == solidcraft_engine::doc::DocumentKind::Assembly
+            && let Some(component) = app
+                .session
+                .world_state()
+                .bodies
+                .iter()
+                .find(|body| body.name == b)
+                .map(|body| app.session.doc.model_body_component(body))
+            && component != 0
+        {
+            let path = app.session.doc.first_path(component);
+            v.push(Item::sep());
+            v.push(
+                act("ui.activate", if app.session.active_component == component { "Finish Edit" } else { "Edit" }, "component")
+                    .with(json!({
+                        "component": if app.session.active_component == component { 0 } else { component },
+                        "occurrence": path.last(),
+                        "path": path,
+                    })),
+            );
+            if app.session.doc.links.contains_key(&component) {
+                v.push(act("ui.openComponent", "Open", "folder").with(json!({"component": component})));
+            }
+        }
         if let Some(component) = crate::dialogs_part_size::component_for_bodies(app, bodies) {
             v.push(cmd(app, "parts.resize", "Change Part Size").with(json!({"component":component})));
         }
@@ -923,8 +947,15 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
     for item in &mut entries {
         match item.id.as_str() {
             "ui.activate" => {
-                item.params = Some(json!({"component": placement.component, "occurrence": placement.occurrence, "path": path}));
-                item.enabled = app.session.active_occurrence_path.as_deref() != Some(path);
+                if app.session.active_component == placement.component {
+                    item.label = "Finish Edit".into();
+                    item.params = Some(json!({"component": 0}));
+                    item.enabled = true;
+                } else {
+                    item.label = "Edit".into();
+                    item.params = Some(json!({"component": placement.component, "occurrence": placement.occurrence, "path": path}));
+                    item.enabled = app.session.active_occurrence_path.as_deref() != Some(path);
+                }
             }
             "occurrence.ground" => {
                 ground_label(app, item, placement.grounded);
@@ -1002,12 +1033,19 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let names = json!(bodies);
     let mut v = Vec::new();
     if doc.parts.contains_key(&id) {
-        v.push(cmd(app, "parts.resize", "Edit").with(json!({"component":id})));
+        v.push(cmd(app, "parts.resize", "Change Part Size").with(json!({"component":id})));
     }
     if id != 0 {
         let grounded = occ.is_some_and(|o| o.grounded);
         let oid = occ.map(|o| o.id).unwrap_or(0);
-        v.push(act("ui.activate", "Activate", "component").with(json!({ "component": id })).on(!active));
+        v.push(
+            act("ui.activate", if active { "Finish Edit" } else { "Edit" }, "component")
+                .with(json!({ "component": if active { 0 } else { id } }))
+                .on(true),
+        );
+        if doc.links.contains_key(&id) {
+            v.push(act("ui.openComponent", "Open", "folder").with(json!({"component": id})));
+        }
         let mut ground = cmd(app, "occurrence.ground", "Ground").with(json!({ "occurrence": oid, "grounded": !grounded }));
         ground_label(app, &mut ground, grounded);
         v.push(ground);
@@ -1298,6 +1336,14 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.drawing.moveDim" | "ui.drawing.dimType" | "ui.drawing.precision" | "ui.drawing.editDim" | "ui.drawing.hideExt" | "ui.drawing.showExt" => {
             crate::drawing_dim_tool::run_menu(app, &item.id, &p);
         }
+        "ui.sketch.dimensionType" => {
+            if let Some(kind) = p.get("type").and_then(Value::as_str).filter(|kind| matches!(*kind, "center" | "gap")) {
+                if let Some(tool) = app.tool.as_mut().filter(|tool| tool.kind == crate::tools::Kind::Dimension) {
+                    tool.dimension_type = Some(kind.to_string());
+                }
+                crate::dim_view::set_dimension_type(app, kind);
+            }
+        }
         // A note's list (Task 10).
         "ui.drawing.editNote" => {
             if let Some(handle) = id_of(&p, "handle") {
@@ -1550,6 +1596,11 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.activate" => {
             if id_of(&p, "component").is_some() {
                 let _ = app.run("component.activate", p);
+            }
+        }
+        "ui.openComponent" => {
+            if let Some(component) = id_of(&p, "component") {
+                crate::linked_source::open(app, component);
             }
         }
         "ui.moveOccurrence" => {

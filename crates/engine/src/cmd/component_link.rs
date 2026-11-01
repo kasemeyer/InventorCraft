@@ -26,7 +26,7 @@ mod extract;
 mod relink_tests;
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("component.insert_design", "Insert Design", insert_design).at("SOLID", "ASSEMBLE").icon("component").enabled(super::document_kind::needs_assembly).params(
+    CommandSpec::new("component.insert_design", "Insert Part or Assembly", insert_design).at("SOLID", "ASSEMBLE").icon("component").enabled(super::document_kind::needs_assembly).params(
         "path: a design (.tcipart, .tciasm, .tcidrw or .solidcraft) → a new component linked to it, holding its solid bodies as placed in that design; \
          name? (default: the design's name); parent?: component id or name (default: the active one); translate?: [x,y,z]; \
          reuse?: bool (default false): insert a free occurrence, reusing an existing link to the same file when available; \

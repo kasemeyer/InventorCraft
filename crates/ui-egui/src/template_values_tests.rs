@@ -95,13 +95,15 @@ fn a_mm_part_keeps_the_millimetre_defaults() {
 }
 
 #[test]
-fn solidcraft_inch_design_keeps_upstream_literals() {
+fn solidcraft_inch_design_shows_upstream_defaults_in_design_units() {
     let mut h = Harness::new();
     crate::prefs::apply_new_design_units(&mut h.app, "in");
     with_rectangle(&mut h, 0.0);
     assert_eq!(h.app.session.doc.units, "in");
-    assert_eq!(extrude_distance(&mut h), "10 mm");
-    assert_eq!(hole(&mut h).2.thread, "M5");
+    assert_eq!(extrude_distance(&mut h), "0.39370079 in");
+    let (diameter, depth, opts) = hole(&mut h);
+    assert_eq!((diameter.as_str(), depth.as_str()), ("0.19685039 in", "0.39370079 in"));
+    assert_eq!(opts.thread, "M5");
     apply_template_decimals(&mut h.app);
     assert_eq!(document_length_decimals(&h.app.session.doc), None);
     assert_eq!(shown_length_decimals(&h.app), h.app.preferences.length_decimals);
