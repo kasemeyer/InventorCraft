@@ -19,6 +19,12 @@ impl Menu {
         style.visuals.popup_shadow = frame.shadow;
         style.visuals.window_fill = frame.fill;
         style.visuals.window_stroke = frame.stroke;
+        // A submenu row reads like the rows around it: no filled box at rest, the menu's own
+        // hover (owner 2026-11-01: the Create list's family rows looked like black boxes).
+        style.visuals.widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
+        style.visuals.widgets.inactive.bg_stroke = egui::Stroke::NONE;
+        style.visuals.widgets.hovered.bg_stroke = egui::Stroke::NONE;
+        style.visuals.widgets.active.bg_stroke = egui::Stroke::NONE;
         let nested = egui::menu::is_in_menu(ui);
         let button = egui::Button::new(label.into());
         let response = ui.add(if nested { button.right_text(egui::menu::SubMenuButton::RIGHT_ARROW) } else { button });

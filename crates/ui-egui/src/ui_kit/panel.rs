@@ -309,8 +309,15 @@ impl<'a> Panel<'a> {
                         // Clear persisted offset, animation and momentum once per opening.
                         egui::scroll_area::State::default().store(ui.ctx(), ui.make_persistent_id(egui::IdSalt::new("feature_fields")));
                     }
-                    let scroll =
-                        egui::ScrollArea::vertical().id_salt("feature_fields").min_scrolled_height(0.0).max_height(fields_height).show(ui, |ui| {
+                    let scroll = egui::ScrollArea::vertical()
+                        .scroll_source(egui::containers::scroll_area::ScrollSource {
+                            drag: egui::containers::scroll_area::DragScroll::Never,
+                            ..Default::default()
+                        })
+                        .id_salt("feature_fields")
+                        .min_scrolled_height(0.0)
+                        .max_height(fields_height)
+                        .show(ui, |ui| {
                             if disabled {
                                 ui.disable();
                             }
@@ -376,6 +383,10 @@ impl<'a> Panel<'a> {
                     let scroll = ui
                         .scope_builder(egui::UiBuilder::new().max_rect(body_rect), |ui| {
                             egui::ScrollArea::vertical()
+                                .scroll_source(egui::containers::scroll_area::ScrollSource {
+                                    drag: egui::containers::scroll_area::DragScroll::Never,
+                                    ..Default::default()
+                                })
                                 .id_salt("sc_palette_options")
                                 .max_height(body_height)
                                 .min_scrolled_height(0.0)
@@ -389,6 +400,10 @@ impl<'a> Panel<'a> {
             };
             if short {
                 let scroll = egui::ScrollArea::vertical()
+                    .scroll_source(egui::containers::scroll_area::ScrollSource {
+                        drag: egui::containers::scroll_area::DragScroll::Never,
+                        ..Default::default()
+                    })
                     .id_salt("sc_palette_content")
                     .max_height(height)
                     .min_scrolled_height(0.0)
@@ -549,6 +564,10 @@ impl<'a> Window<'a> {
                     let height =
                         (dimension(ui.ctx().content_rect().height()) - t.form_header_height - t.form_footer_height - t.space_24 * 2.0).max(0.0);
                     egui::ScrollArea::vertical()
+                        .scroll_source(egui::containers::scroll_area::ScrollSource {
+                            drag: egui::containers::scroll_area::DragScroll::Never,
+                            ..Default::default()
+                        })
                         .id_salt("window_body")
                         .max_height(height)
                         .min_scrolled_height(0.0)
@@ -665,45 +684,51 @@ fn page_list_sized<S>(ui: &mut Ui, selected: &mut usize, pages: &[WindowPage<S>]
     ui.scope_builder(egui::UiBuilder::new().max_rect(nav.shrink2(vec2(t.space_8, t.space_6))), |ui| {
         ui.set_clip_rect(ui.clip_rect().intersect(nav));
         ui.spacing_mut().item_spacing.y = t.space_2;
-        egui::ScrollArea::vertical().id_salt("window_pages").show(ui, |ui| {
-            for (index, page) in pages.iter().enumerate() {
-                if let Some(group) = page.group {
-                    ui.add_space(t.space_8);
-                    let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), t.space_24), egui::Sense::hover());
-                    let rect = rect.shrink2(vec2(t.space_10, 0.0));
-                    paint_text(ui, rect, &crate::i18n::tr(group).to_uppercase(), crate::fonts::semibold(t.font_small), t.form_dim, true);
+        egui::ScrollArea::vertical()
+            .scroll_source(egui::containers::scroll_area::ScrollSource {
+                drag: egui::containers::scroll_area::DragScroll::Never,
+                ..Default::default()
+            })
+            .id_salt("window_pages")
+            .show(ui, |ui| {
+                for (index, page) in pages.iter().enumerate() {
+                    if let Some(group) = page.group {
+                        ui.add_space(t.space_8);
+                        let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), t.space_24), egui::Sense::hover());
+                        let rect = rect.shrink2(vec2(t.space_10, 0.0));
+                        paint_text(ui, rect, &crate::i18n::tr(group).to_uppercase(), crate::fonts::semibold(t.font_small), t.form_dim, true);
+                    }
+                    let label = crate::i18n::tr(page.label);
+                    let (rect, response) =
+                        ui.allocate_exact_size(vec2(dimension(ui.available_width()), t.control_height + t.space_4), egui::Sense::click());
+                    if response.clicked() {
+                        *selected = index;
+                    }
+                    let on = *selected == index;
+                    if on || response.hovered() || response.has_focus() {
+                        ui.painter().rect_filled(rect, t.control_radius, if on { t.selected_bg } else { t.hover });
+                    }
+                    let ink = if on { t.selected_ink } else { t.form_ink };
+                    let icon =
+                        egui::Rect::from_center_size(egui::pos2(rect.left() + t.space_10 + t.space_8, rect.center().y), vec2(t.space_16, t.space_16));
+                    crate::icons::paint_ink(ui.painter(), icon, page.icon, if on { ink } else { t.form_dim });
+                    let text_rect = egui::Rect::from_min_max(egui::pos2(icon.right() + t.space_8, rect.top()), rect.right_bottom());
+                    paint_text(
+                        ui,
+                        text_rect,
+                        label,
+                        if on { crate::fonts::semibold(t.font_label) } else { egui::FontId::proportional(t.font_label) },
+                        ink,
+                        false,
+                    );
+                    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, ui.is_enabled(), on, label));
+                    if response.hovered() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    }
+                    scenario::publish_target(page.handle, rect);
+                    response.on_hover_text(label);
                 }
-                let label = crate::i18n::tr(page.label);
-                let (rect, response) =
-                    ui.allocate_exact_size(vec2(dimension(ui.available_width()), t.control_height + t.space_4), egui::Sense::click());
-                if response.clicked() {
-                    *selected = index;
-                }
-                let on = *selected == index;
-                if on || response.hovered() || response.has_focus() {
-                    ui.painter().rect_filled(rect, t.control_radius, if on { t.selected_bg } else { t.hover });
-                }
-                let ink = if on { t.selected_ink } else { t.form_ink };
-                let icon =
-                    egui::Rect::from_center_size(egui::pos2(rect.left() + t.space_10 + t.space_8, rect.center().y), vec2(t.space_16, t.space_16));
-                crate::icons::paint_ink(ui.painter(), icon, page.icon, if on { ink } else { t.form_dim });
-                let text_rect = egui::Rect::from_min_max(egui::pos2(icon.right() + t.space_8, rect.top()), rect.right_bottom());
-                paint_text(
-                    ui,
-                    text_rect,
-                    label,
-                    if on { crate::fonts::semibold(t.font_label) } else { egui::FontId::proportional(t.font_label) },
-                    ink,
-                    false,
-                );
-                response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, ui.is_enabled(), on, label));
-                if response.hovered() {
-                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                }
-                scenario::publish_target(page.handle, rect);
-                response.on_hover_text(label);
-            }
-        });
+            });
     });
     let content = egui::Rect::from_min_max(egui::pos2(nav.right(), body.top()), body.max);
     let content = content.shrink2(vec2(padding.x.min(content.width() / 2.0), padding.y.min(content.height() / 2.0)));
