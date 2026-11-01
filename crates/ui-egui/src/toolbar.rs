@@ -1543,11 +1543,9 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     .unwrap_or(c);
                 let mut br = whole;
                 if family.is_some() || split.is_some() {
-                    if labels {
-                        br.max.y = whole.top() + 32.0;
-                    } else {
-                        br.max.x -= 14.0;
-                    }
+                    // The face owns the icon and its label. Keep the drop-down action in a
+                    // narrow side strip so clicking the pinned command text runs that command.
+                    br.max.x -= 14.0;
                 }
                 let info = crate::render_workspace::interactive_command_info(app, selected);
                 let resp = ribbon_hit(ui, &painter, br, c, panel, &mut drop, &mut menu);
@@ -1575,11 +1573,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     app.start_pinned(id);
                 }
                 if let Some(f) = family {
-                    let ar = if labels {
-                        Rect::from_min_max(pos2(whole.left(), whole.top() + 30.0), pos2(whole.right(), whole.top() + 48.0))
-                    } else {
-                        Rect::from_min_max(pos2(br.right(), whole.top()), whole.right_bottom())
-                    };
+                    let ar = Rect::from_min_max(pos2(br.right(), whole.top()), whole.right_bottom());
                     let arrow = ui.interact(ar, ui.id().with(("family", f.label)), Sense::click());
                     crate::scenario::publish_handle(&format!("family:{}", f.label), ar.center());
                     if arrow.hovered() {
@@ -1588,8 +1582,8 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     // The title sits on the same line as the other buttons' labels.
                     if labels {
                         let title_y = whole.top() + 39.0;
-                        let galley = ribbon_button_galley(&painter, app.tr_label(f.label), ar.width() - 16.0, t.text);
-                        painter.galley(pos2(ar.center().x - 4.0, title_y - galley.size().y / 2.0), galley, t.text);
+                        let galley = ribbon_button_galley(&painter, app.tr_label(f.label), br.width() - 8.0, t.text);
+                        painter.galley(pos2(br.center().x, title_y - galley.size().y / 2.0), galley, t.text);
                         dropdown_arrow(&painter, pos2(ar.right() - 6.0, title_y + 0.5), t.text_dim);
                     } else {
                         dropdown_arrow(&painter, ar.center(), t.text_dim);
@@ -1601,18 +1595,14 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                         sketch_menu_rows(app, ui, &variants, &mut menu, &mut toggle);
                     });
                 } else if let Some(d) = split {
-                    let ar = if labels {
-                        Rect::from_min_max(pos2(whole.left(), whole.top() + 30.0), pos2(whole.right(), whole.top() + 48.0))
-                    } else {
-                        Rect::from_min_max(pos2(br.right(), whole.top()), whole.right_bottom())
-                    };
+                    let ar = Rect::from_min_max(pos2(br.right(), whole.top()), whole.right_bottom());
                     // The title (the face's label) sits on the same line as the other buttons' labels.
                     if labels {
                         let title_y = whole.top() + 39.0;
                         let color = if info.enabled { t.text } else { t.text_dim };
                         let title = app.tr_label(crate::split_buttons::face_label(app, d));
-                        let galley = ribbon_button_galley(&painter, title, ar.width() - 16.0, color);
-                        painter.galley(pos2(ar.center().x - 4.0, title_y - galley.size().y / 2.0), galley, color);
+                        let galley = ribbon_button_galley(&painter, title, br.width() - 8.0, color);
+                        painter.galley(pos2(br.center().x, title_y - galley.size().y / 2.0), galley, color);
                     }
                     split_arrow(app, ui, &painter, ar, &tab, d, &mut menu, &mut toggle);
                 } else if labels {
