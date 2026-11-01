@@ -654,7 +654,10 @@ impl SolveApp {
             deferred: None,
             deferred_queue: Vec::new(),
             delete_check: None,
-            apply_off_thread: None,
+            // Keep the window responsive when a feature's final evaluation takes longer than a
+            // frame. Short operations still apply immediately; longer ones use the existing
+            // computing state and apply the worker's evaluated result on the next frame.
+            apply_off_thread: Some(std::time::Duration::from_millis(150)),
             #[cfg(test)]
             apply_gate: None,
             last_command: None,

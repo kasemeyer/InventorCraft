@@ -205,6 +205,23 @@ pub(crate) fn overflow(app: &SolveApp) -> Option<Vec<Item>> {
         [path] => crate::context_menu::items(app, &Target::Occurrence { path: path.clone() }),
         _ => Vec::new(),
     };
+    // Inventor keeps the same occurrence context list whether the component was picked in
+    // the browser or graphics window. The canvas ring is an extra shortcut layer; the list
+    // below it still exposes every occurrence action.
+    if ctx == MenuContext::AssemblyComponent && paths.len() == 1 {
+        let ring_ids: Vec<&str> = l.ring.iter().map(String::as_str).filter(|id| !id.is_empty()).collect();
+        let mut items: Vec<Item> = l
+            .overflow
+            .iter()
+            .filter(|id| id.as_str() == "ui.repeat")
+            .map(|id| item(app, id, ctx))
+            .collect();
+        if !items.is_empty() {
+            items.push(Item::sep());
+        }
+        items.extend(listed.into_iter().filter(|entry| !ring_ids.contains(&entry.id.as_str())));
+        return Some(items);
+    }
     let entry = |id: &String| match id.as_str() {
         "occurrence.ground" if paths.len() != 1 && ctx == MenuContext::AssemblyComponent => ground_all(app, item(app, id, ctx), &paths),
         _ => from_context(item(app, id, ctx), &listed),
@@ -314,6 +331,15 @@ fn selected_dimension(app: &SolveApp) -> Option<String> {
 /// One marking-menu entry for a layout id in a context. In a drawing, Done, Cancel, OK and
 /// Delete answer to the drawing's own tool, panel and selection (R72; a document-kind test).
 pub(crate) fn item(app: &SolveApp, id: &str, ctx: MenuContext) -> Item {
+    if ctx == MenuContext::AssemblyComponent
+        && matches!(id, "ui.openComponent" | "constraint.create" | "constraint.show" | "browser.visibility" | "ui.activate" | "ui.findBrowser")
+        && let [path] = selected_placements(app).as_slice()
+        && let Some(entry) = crate::context_menu::items(app, &crate::context_menu::Target::Occurrence { path: path.clone() })
+            .into_iter()
+            .find(|entry| entry.id == id)
+    {
+        return entry;
+    }
     if app.session.doc.kind == DocumentKind::Drawing
         && let Some(item) = drawing_item(app, id)
     {

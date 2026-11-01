@@ -134,9 +134,12 @@ fn linked_bodies(file: &Path, own: Option<&str>) -> Result<Linked> {
     if own.is_some_and(|o| absolute(Path::new(o)) == absolute(file)) {
         return Err(EngineError::Other(format!("{shown}: a design can't be linked into itself")));
     }
-    let bytes = solidcraft_io::vfs::read(&shown, solidcraft_io::MAX_DESIGN_BYTES).map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
-    let doc = solidcraft_io::read_design(&bytes).map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
-    session_bodies(&Session::new(doc), &shown)
+    // A linked design is saved with the evaluated geometry the viewport shows. Use it when it
+    // still matches the document, just as opening the design does; rebuilding the full history
+    // here made even an unchanged link pay for every boolean in its source part.
+    let (doc, saved) =
+        solidcraft_io::read_design_file(&shown, None::<fn(solidcraft_io::DesignPreview)>).map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
+    session_bodies(&Session::opened(doc, saved.as_ref()), &shown)
 }
 
 /// The solid bodies of `part`, the design saved as `shown`, as an Import feature.
@@ -261,11 +264,13 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let links: Vec<(u64, DesignLink)> = s.doc.links.iter().filter(|(c, _)| only.is_none_or(|o| o == **c)).map(|(c, l)| (*c, l.clone())).collect();
     let (mut updated, mut unchanged, mut warnings) = (Vec::new(), Vec::new(), Vec::new());
+    let mut refresh = false;
     for (comp, link) in links {
         let cname = s.doc.components.iter().find(|c| c.id == comp).map(|c| c.name.clone());
         let Some(cname) = cname else {
             // The component was deleted: the link goes with it.
             s.doc_mut().links.remove(&comp);
+            refresh = true;
             continue;
         };
         let Some(FeatureKind::Import { step: old, .. }) = s.doc.feature(link.feature).filter(|f| f.component == comp).map(|f| &f.kind) else {
@@ -305,9 +310,12 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             // A link made before the design's face names were kept gets them here.
             f.link_faces = faces;
         }
+        refresh = true;
         if changed { updated.push(cname) } else { unchanged.push(cname) }
     }
-    s.refresh();
+    if refresh {
+        s.refresh();
+    }
     if let Some(e) = s.doc.links.values().find_map(|l| s.model.result(l.feature).and_then(|r| r.error.clone())) {
         return Err(EngineError::Other(e));
     }
