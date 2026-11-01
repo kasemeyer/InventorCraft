@@ -125,8 +125,9 @@ fn row(app: &mut SolveApp, ui: &mut egui::Ui, ctx: &Ctx, index: usize, depth: us
     let sketch = matches!(feature.kind, FeatureKind::Sketch { .. });
     // A failed or warned feature is marked on its row, as the timeline marks it (R212 item 3).
     let status_tip = crate::timeline::feature_message(app, id);
-    let status_marker =
-        status_tip.as_ref().map(|_| if app.session.model.result(id).is_some_and(|r| r.error.is_some()) { "status_failed" } else { "status_warning" });
+    let status_marker = status_tip
+        .as_ref()
+        .map(|_| if app.session.model.result(id).is_some_and(|r| r.error.is_some() || r.driver_lost()) { "status_failed" } else { "status_warning" });
     let key = id.to_string();
     // A sketch or work plane keeps its folder row's look: its eye, its plane selection.
     let (folder, entry) = match (sketch, ctx.sketches.iter().find(|e| e.key == key), ctx.planes.iter().find(|e| e.key == key)) {

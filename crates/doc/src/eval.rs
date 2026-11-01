@@ -1062,6 +1062,34 @@ impl ModelState {
     }
 }
 
+impl FeatureResult {
+    /// The feature built on fallback geometry because a stored reference no longer exists.
+    pub fn driver_lost(&self) -> bool {
+        self.warning.as_deref().is_some_and(driver_lost_text)
+    }
+}
+
+#[cfg(test)]
+mod driver_lost_tests {
+    use super::driver_lost_text;
+
+    #[test]
+    fn a_fallback_note_means_the_driver_is_lost_and_a_plain_warning_does_not() {
+        assert!(driver_lost_text("face `F2:top` no longer exists; using the face at the picked point"));
+        assert!(driver_lost_text("edge `F2:top:l1` no longer exists; using the edge at the picked point"));
+        assert!(driver_lost_text("an edge reference without a name was found by its point"));
+        assert!(!driver_lost_text("the fillet radius was reduced to fit"));
+        assert!(!driver_lost_text("face `F2:top` was split; the piece nearest the pick was taken"));
+    }
+}
+
+/// A warning that says a stored face or edge name was gone and the feature fell back to the
+/// geometry at its pick point (R212 item 2). The feature built, but its reference is lost: it
+/// is reported sick, as Inventor reports a feature whose driver is lost, and keeps its result.
+pub fn driver_lost_text(warning: &str) -> bool {
+    warning.contains("no longer exists; using the") || warning.contains("reference without a name was found by its point")
+}
+
 /// Evaluation result of one feature.
 #[derive(Clone, Debug, Serialize)]
 pub struct FeatureResult {
