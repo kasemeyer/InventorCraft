@@ -1,4 +1,4 @@
-//! Editable leaf-part histories projected into their assembly definition, with explicit source
+//! Editable source histories projected into their assembly definition, with explicit source
 //! saves. Geometry remains in definition coordinates; occurrence transforms stay in the assembly.
 use super::CommandSpec;
 use crate::params::bad;
@@ -8,16 +8,33 @@ use solidcraft_doc::{Document, Feature, SourceEdit};
 use std::collections::{BTreeMap, BTreeSet};
 
 const CMD: &str = "component.edit_source";
+#[path = "component_source_graph.rs"]
+mod graph;
+
+pub(super) fn rebase_edits(doc: &Document, from: Option<&str>, to: &str, depth: usize) -> Result<BTreeMap<u64, SourceEdit>> {
+    if depth > 32 {
+        return Err(bad(CMD, "nested source baseline depth exceeded"));
+    }
+    let mut edits = doc.source_edits.clone();
+    for edit in edits.values_mut() {
+        if let Some(graph) = &mut edit.graph {
+            let edits = rebase_edits(&graph.baseline, from, to, depth + 1)?;
+            graph.baseline.links = super::component_link::rebased(&graph.baseline, from, to);
+            graph.baseline.source_edits = edits;
+        }
+    }
+    Ok(edits)
+}
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new(CMD, "Edit Linked Part", edit)
         .icon("component")
         .noundo()
-        .params("component: linked leaf-part id; open?: return its unsaved document and baseline; document?: synchronize a source document without writing files; saved?: source document matches its file; component:0 with document replaces a standalone source draft"),
+        .params("component: linked part or subassembly id; open?: return its unsaved document and baseline; document?: synchronize a source document without writing files; saved?: source document matches its file; component:0 with document replaces a standalone source draft"),
     CommandSpec::new("component.source_status", "Source Save Status", status).icon("save").noundo().params("→ sources: component, file, dirty"),
     CommandSpec::new("component.save_source", "Save Linked Part", save)
         .icon("save")
         .noundo()
-        .params("component: source-backed part id; refuses external file changes or failed features"),
+        .params("component: source-backed part or subassembly id; refuses external file changes or failed features"),
 ];
 
 fn component(p: &Value) -> Result<u64> {
@@ -59,6 +76,11 @@ fn own_params(doc: &Document, e: &SourceEdit) -> Vec<solidcraft_doc::Param> {
     doc.params.iter().filter(|p| e.parameters.values().any(|n| *n == p.name)).cloned().collect()
 }
 pub(crate) fn dirty(doc: &Document, c: u64) -> bool {
+    if let Some(edit) = doc.source_edits.get(&c)
+        && let Some(graph) = &edit.graph
+    {
+        return graph::scope(doc, c, edit).is_none_or(|now| now != *graph.baseline);
+    }
     doc.source_edits.get(&c).is_some_and(|e| {
         !doc.features.iter().filter(|f| f.component == c).eq(e.baseline_features.iter())
             || !doc.params.iter().filter(|p| e.parameters.values().any(|n| *n == p.name)).eq(e.baseline_params.iter())
@@ -75,8 +97,17 @@ pub(crate) fn begin(s: &mut Session, c: u64) -> Result<()> {
         return Err(bad(CMD, "finish the sketch and move End of Part to the end first"));
     }
     let path = file(s, c)?;
+    let canonical = |p: &std::path::Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    let target = canonical(&path);
+    if s.path.as_deref().is_some_and(|p| canonical(std::path::Path::new(p)) == target)
+        || s.doc.links.iter().any(|(parent, link)| {
+            *parent != c && s.doc.component_within(c, *parent) && canonical(&super::component_link::resolve(s.path.as_deref(), &link.path)) == target
+        })
+    {
+        return Err(bad(CMD, "cyclic source dependency: this file is already an ancestor of the selected component"));
+    }
     let source = read(&path)?;
-    if !source.doc.components.is_empty() || !source.doc.links.is_empty() || source.doc.drawing.is_some() || !source.doc.configs.columns.is_empty() {
+    if source.doc.drawing.is_some() || !source.doc.configs.columns.is_empty() {
         return Err(bad(CMD, "in-place source editing currently requires a leaf part without configurations; use Open for this source"));
     }
     if source.model.results.iter().any(|r| r.error.is_some()) {
@@ -93,7 +124,14 @@ pub(crate) fn begin(s: &mut Session, c: u64) -> Result<()> {
         parameters: BTreeMap::new(),
         baseline_features: Vec::new(),
         baseline_params: Vec::new(),
+        graph: None,
     };
+    if !source.doc.components.is_empty() || !source.doc.links.is_empty() {
+        if has_local {
+            return Err(bad(CMD, "older assembly-local additions on a linked subassembly require separate reference repair"));
+        }
+        return graph::begin(s, c, &source, edit);
+    }
     if has_local { migrate_local(s, c, &source, edit) } else { materialize(s, c, &source, edit, true) }
 }
 
@@ -196,7 +234,7 @@ fn materialize(s: &mut Session, c: u64, source: &Session, mut edit: SourceEdit, 
     }
     let mut body_names: BTreeSet<String> = assembly_bodies.bodies.iter().map(|b| b.name.clone()).collect();
     for (b, name) in source_bodies.bodies.iter().zip(current) {
-        edit.bodies.insert(b.name.clone(), name);
+        edit.bodies.entry(b.name.clone()).or_insert(name);
     }
     for r in &source.model.results {
         for b in &r.state.bodies {
@@ -288,6 +326,9 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn adopt(s: &mut Session, c: u64, doc: Document, saved: bool) -> Result<()> {
     begin(s, c)?;
+    if s.doc.source_edits.get(&c).is_some_and(|e| e.graph.is_some()) {
+        return graph::adopt(s, c, doc, saved);
+    }
     let mut state = s.scratch();
     state.path.clone_from(&s.path);
     if state.doc.marker.is_some_and(|m| m >= state.doc.features.len()) {
@@ -306,13 +347,11 @@ fn adopt(s: &mut Session, c: u64, doc: Document, saved: bool) -> Result<()> {
     let id = state.doc_mut().add_feature(sf.kind, Some("Source draft"))?;
     let index = state.doc.feature_index(id).ok_or_else(|| bad(CMD, "missing source draft"))?;
     let mut feature = state.doc_mut().features.remove(index);
+    feature.id = s.doc.links.get(&c).ok_or_else(|| bad(CMD, "missing source link"))?.feature;
     feature.component = c;
     feature.body_names = sf.body_names.into_iter().map(|n| edit.bodies.get(&n).cloned().unwrap_or(n)).collect();
     feature.link_faces = faces;
     state.doc_mut().features.insert(at.min(index), feature);
-    if let Some(link) = state.doc_mut().links.get_mut(&c) {
-        link.feature = id;
-    }
     if saved {
         edit.source = Box::new(doc);
     }
@@ -396,13 +435,28 @@ fn inverse<K: Ord + Clone, V: Ord + Clone>(map: &BTreeMap<K, V>) -> BTreeMap<V, 
 
 /// Reconstruct a source document with original identities, parameters, units and metadata.
 pub(crate) fn draft(s: &Session, c: u64) -> Result<(Document, SourceEdit)> {
+    if s.doc.source_edits.get(&c).is_some_and(|e| e.graph.is_some()) {
+        return graph::draft(s, c);
+    }
     let mut edit = s.doc.source_edits.get(&c).cloned().ok_or_else(|| bad(CMD, "source history is not loaded"))?;
     let mut doc = (*edit.source).clone();
     let mut ids = inverse(&edit.ids);
     let mut names = inverse(&edit.names);
-    let bodies = inverse(&edit.bodies);
+    let mut bodies = inverse(&edit.bodies);
     let mut parameters = inverse(&edit.parameters);
     let features = own_features(&s.doc, c);
+    let mut used_bodies: BTreeSet<_> = bodies.values().cloned().collect();
+    for f in &features {
+        if let Some(result) = s.model.result(f.id) {
+            for body in result.state.bodies.iter().filter(|b| s.doc.model_body_component(b) == c) {
+                if !bodies.contains_key(&body.name) {
+                    let local = unique(&body.name, &mut used_bodies);
+                    bodies.insert(body.name.clone(), local.clone());
+                    edit.bodies.insert(local, body.name.clone());
+                }
+            }
+        }
+    }
     let mut used_names: BTreeSet<_> = names.values().cloned().collect();
     for feature in &features {
         if !names.contains_key(&feature.name) {
@@ -459,6 +513,13 @@ pub(crate) fn draft(s: &Session, c: u64) -> Result<(Document, SourceEdit)> {
         if s.model.result(f.id).is_some_and(|r| r.error.is_some()) {
             return Err(bad(CMD, "part has failed features; fix them before saving"));
         }
+        if f.body_names.is_empty() {
+            f.body_names = s
+                .model
+                .result(f.id)
+                .map(|r| r.state.bodies.iter().filter(|b| b.feature == f.id).map(|b| b.name.clone()).collect())
+                .unwrap_or_default();
+        }
         f.id = *ids.get(&f.id).ok_or_else(|| bad(CMD, "missing draft identity"))?;
         f.component = 0;
         if let Some(name) = names.get(&f.name) {
@@ -492,8 +553,10 @@ pub(crate) fn draft(s: &Session, c: u64) -> Result<(Document, SourceEdit)> {
     Ok((doc, edit))
 }
 fn status(s: &mut Session, _: &Value) -> Result<Value> {
+    let mut components: Vec<_> = s.doc.source_edits.keys().copied().collect();
+    components.sort_by_key(|c| std::cmp::Reverse(s.doc.first_path(*c).len()));
     Ok(
-        json!({"sources":s.doc.source_edits.keys().map(|c|Ok(json!({"component":c,"file":file(s,*c)?.to_string_lossy(),"dirty":dirty(&s.doc,*c)}))).collect::<Result<Vec<_>>>()?}),
+        json!({"sources":components.into_iter().map(|c|Ok(json!({"component":c,"file":file(s,c)?.to_string_lossy(),"dirty":dirty(&s.doc,c)}))).collect::<Result<Vec<_>>>()?}),
     )
 }
 fn save(s: &mut Session, p: &Value) -> Result<Value> {
@@ -509,6 +572,12 @@ fn save(s: &mut Session, p: &Value) -> Result<Value> {
     edit.source = Box::new((*part.doc).clone());
     edit.baseline_features = own_features(&s.doc, c);
     edit.baseline_params = own_params(&s.doc, &edit);
+    if edit.graph.is_some() {
+        let baseline = graph::scope(&s.doc, c, &edit).ok_or_else(|| bad(CMD, "subassembly references leave its source"))?;
+        if let Some(graph) = &mut edit.graph {
+            *graph.baseline = baseline;
+        }
+    }
     s.doc_mut().source_edits.insert(c, edit);
     Ok(json!({"component":c,"file":path}))
 }
@@ -522,6 +591,10 @@ pub(crate) fn refresh(s: &mut Session, c: u64) -> Result<bool> {
     }
     if dirty(&s.doc, c) {
         return Err(bad(CMD, "source changed while this assembly has pending part edits; save or resolve those edits first"));
+    }
+    if edit.graph.is_some() {
+        graph::adopt(s, c, (*current.doc).clone(), true)?;
+        return Ok(true);
     }
     let link = s.doc.links.get(&c).cloned().ok_or_else(|| bad(CMD, "missing link"))?;
     let (_, sf, faces) = super::component_link::session_bodies(&current, &path.to_string_lossy())?;

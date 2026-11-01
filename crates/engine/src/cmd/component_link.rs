@@ -445,6 +445,160 @@ mod tests {
     use super::*;
 
     #[test]
+    fn source_edit_subassembly_cycle_is_refused_without_writing_the_source() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-source-graph-cycle-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("Sub.tciasm");
+        let mut source = Session::default();
+        run(&mut source, "document.new_assembly", json!({}));
+        run(&mut source, "component.create", json!({"name":"Block"}));
+        run(&mut source, "solid.box", json!({"length":20,"width":10,"height":5}));
+        run(&mut source, "component.finish_edit", json!({}));
+        run(&mut source, "file.save", json!({"path":file}));
+        let mut s = Session::default();
+        run(&mut s, "document.new_assembly", json!({}));
+        let sub = run(&mut s, "component.insert_design", json!({"path":file}));
+        run(&mut s, "component.activate", json!({"component":sub["component"],"source_edit":true}));
+        let cycle = run(&mut s, "component.insert_design", json!({"path":file,"parent":sub["component"]}));
+        let before = s.doc.clone();
+        let bytes = std::fs::read(&file).unwrap();
+        let error = s.execute("component.edit_source", &json!({"component":cycle["component"]})).unwrap_err().to_string();
+        assert!(error.contains("cyclic source dependency"), "{error}");
+        assert_eq!(*s.doc, *before);
+        let error = s.execute("component.save_source", &json!({"component":sub["component"]})).unwrap_err().to_string();
+        assert!(error.contains("cyclic source dependency"), "{error}");
+        assert_eq!(*s.doc, *before);
+        assert_eq!(std::fs::read(&file).unwrap(), bytes);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn source_edit_subassembly_external_face_constraints_are_refused_without_changing_the_draft() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-source-graph-boundary-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("Sub.tciasm");
+        let mut source = Session::default();
+        run(&mut source, "document.new_assembly", json!({}));
+        run(&mut source, "component.create", json!({"name":"Block"}));
+        run(&mut source, "solid.box", json!({"length":20,"width":10,"height":5}));
+        run(&mut source, "component.finish_edit", json!({}));
+        run(&mut source, "file.save", json!({"path":file}));
+        let mut s = Session::default();
+        run(&mut s, "document.new_assembly", json!({}));
+        let sub = run(&mut s, "component.insert_design", json!({"path":file}));
+        let other = run(&mut s, "component.create", json!({"name":"Other"}));
+        run(&mut s, "solid.box", json!({"length":20,"width":10,"height":5,"corner":[60,0,0]}));
+        run(&mut s, "component.finish_edit", json!({}));
+        run(
+            &mut s,
+            "constraint.create",
+            json!({"type":"mate","solution":"flush","a":{"occurrence":sub["occurrence"],"face":[10,5,5]},"b":{"occurrence":other["occurrence"],"face":[70,5,5]}}),
+        );
+        let before = s.doc.clone();
+        let bytes = std::fs::read(&file).unwrap();
+        let error = s.execute("component.edit_source", &json!({"component":sub["component"]})).unwrap_err().to_string();
+        assert!(error.contains("external face relationships"), "{error}");
+        assert_eq!(*s.doc, *before);
+        assert_eq!(std::fs::read(&file).unwrap(), bytes);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn source_edit_nested_subassembly_preserves_shared_children_and_saves_in_file_order() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-source-nested-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let leaf = dir.join("Leaf.tcipart");
+        let inner = dir.join("Inner.tciasm");
+        let outer = dir.join("Moved/Outer.tciasm");
+        std::fs::create_dir_all(dir.join("Moved")).unwrap();
+        let mut part = Session::default();
+        run(&mut part, "document.new_part", json!({}));
+        run(&mut part, "solid.box", json!({"length":20,"width":10,"height":5}));
+        run(&mut part, "file.save", json!({"path":leaf}));
+        let mut sub = Session::default();
+        run(&mut sub, "document.new_assembly", json!({}));
+        let first = run(&mut sub, "component.insert_design", json!({"path":leaf}));
+        let copy = run(&mut sub, "occurrence.copy", json!({"occurrence":first["occurrence"],"translate":[40,0,0]}));
+        let constraint = run(
+            &mut sub,
+            "constraint.create",
+            json!({"type":"mate","solution":"flush","name":"Internal Flush","a":{"occurrence":first["occurrence"],"face":[10,5,5]},"b":{"occurrence":copy["occurrence"],"face":[50,5,5]}}),
+        );
+        run(&mut sub, "file.save", json!({"path":inner}));
+        let mut s = Session::default();
+        run(&mut s, "document.new_assembly", json!({}));
+        let made = run(&mut s, "component.insert_design", json!({"path":inner}));
+        let c = made["component"].as_u64().unwrap();
+        let second = run(&mut s, "occurrence.copy", json!({"occurrence":made["occurrence"],"translate":[0,60,0]}));
+        let bytes = std::fs::read(&inner).unwrap();
+        run(&mut s, "component.activate", json!({"component":c,"occurrence":second["occurrence"],"path":[second["occurrence"]],"source_edit":true}));
+        assert_eq!(s.world_state().bodies.len(), 4);
+        assert_eq!(s.doc.components.len(), 2);
+        let child = s.doc.components.iter().find(|d| d.parent == c).unwrap().id;
+        let child_occ = s.doc.occurrences.iter().rfind(|o| o.parent == c && o.component == child).unwrap().id;
+        run(
+            &mut s,
+            "component.activate",
+            json!({"component":child,"occurrence":child_occ,"path":[second["occurrence"],child_occ],"source_edit":true}),
+        );
+        run(&mut s, "solid.box", json!({"length":3,"width":3,"height":3,"corner":[25,0,0]}));
+        assert_eq!(s.world_state().bodies.len(), 8);
+        run(&mut s, "component.finish_edit", json!({}));
+        assert_eq!(s.active_component, c);
+        assert_eq!(s.active_occurrence_path, Some(vec![second["occurrence"].as_u64().unwrap()]));
+        run(&mut s, "solid.box", json!({"length":2,"width":2,"height":2,"corner":[0,25,0]}));
+        run(&mut s, "component.finish_edit", json!({}));
+        assert_eq!(s.world_state().bodies.len(), 10);
+        assert_eq!(std::fs::read(&inner).unwrap(), bytes);
+        let status = run(&mut s, "component.source_status", json!({}));
+        assert_eq!(status["sources"][0]["component"], child);
+        assert_eq!(status["sources"][1]["component"], c);
+        // Selectively save the subassembly while leaving the leaf source pending.
+        run(&mut s, "component.save_source", json!({"component":c}));
+        run(&mut sub, "doc.open", json!({"path":inner}));
+        assert_eq!(sub.world_state().bodies.len(), 5);
+        assert_eq!(run(&mut sub, "component.source_status", json!({}))["sources"][0]["dirty"], true);
+        run(&mut part, "doc.open", json!({"path":leaf}));
+        assert_eq!(part.world_state().bodies.len(), 1);
+        run(&mut s, "component.save_source", json!({"component":child}));
+        run(&mut s, "component.save_source", json!({"component":c}));
+        run(&mut s, "file.save", json!({"path":dir.join("Outer.tciasm")}));
+        run(&mut s, "file.save", json!({"path":outer}));
+        // Undo changes the draft; the saved-source baseline remains the last written revision.
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(s.world_state().bodies.len(), 8);
+        run(&mut s, "component.save_source", json!({"component":c}));
+        run(&mut sub, "doc.open", json!({"path":inner}));
+        assert_eq!(sub.world_state().bodies.len(), 4);
+        run(&mut s, "edit.redo", json!({}));
+        assert_eq!(s.world_state().bodies.len(), 10);
+        run(&mut s, "component.save_source", json!({"component":c}));
+        run(&mut s, "file.save", json!({"path":outer}));
+        run(&mut sub, "doc.open", json!({"path":inner}));
+        assert_eq!(sub.world_state().bodies.len(), 5);
+        assert_eq!(sub.doc.components.len(), 1);
+        assert_eq!(sub.doc.occurrences.len(), 2);
+        assert_eq!(sub.doc.assembly.constraints[0].id, constraint["id"].as_u64().unwrap());
+        assert_eq!(sub.doc.assembly.constraints[0].name, "Internal Flush");
+        for pick in &sub.doc.assembly.constraints[0].picks {
+            assert!(solidcraft_doc::constraints::resolve(&sub.doc, &sub.model.state(), pick).is_ok());
+        }
+        run(&mut part, "doc.open", json!({"path":leaf}));
+        assert_eq!(part.world_state().bodies.len(), 2);
+        run(&mut s, "doc.open", json!({"path":outer}));
+        run(&mut s, "component.update_links", json!({}));
+        assert_eq!(s.world_state().bodies.len(), 10);
+        let state = run(&mut s, "component.source_status", json!({}));
+        assert!(state["sources"].as_array().unwrap().iter().all(|r| r["dirty"] == false), "{state}");
+        let mut fresh = Session::default();
+        run(&mut fresh, "document.new_assembly", json!({}));
+        let inserted = run(&mut fresh, "component.insert_design", json!({"path":inner}));
+        run(&mut fresh, "component.activate", json!({"component":inserted["component"],"source_edit":true}));
+        assert_eq!(fresh.world_state().bodies.len(), 5);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn source_edit_migrates_older_local_sketch_and_features_without_writing_on_edit() {
         let dir = std::env::temp_dir().join(format!("solidcraft-source-migrate-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();

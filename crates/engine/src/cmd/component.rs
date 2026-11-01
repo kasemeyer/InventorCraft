@@ -37,7 +37,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("component.from_bodies", "Create Components from Bodies", from_bodies)
         .icon("component")
         .params("bodies: [names] → one new component per body, named after it"),
-    CommandSpec::new("component.activate", "Activate Component", activate).icon("activate").noundo().params("component: id or name (0 or \"root\" for the design); occurrence?, path?: exact placement used to author shared geometry; source_edit?: load the linked leaf part's editable history (default false)"),
+    CommandSpec::new("component.activate", "Activate Component", activate).icon("activate").noundo().params("component: id or name (0 or \"root\" for the design); occurrence?, path?: exact placement used to author shared geometry; source_edit?: load the linked source's editable history (default false)"),
     CommandSpec::new("component.finish_edit", "Return", finish_edit).icon("finish").noundo()
         .enabled(|s| if s.active_component == 0 { Err("no component is being edited".into()) } else if s.active_sketch.is_some() { Err("finish the sketch first".into()) } else { Ok(()) })
         .params("returns from the edited occurrence to its exact parent placement, or the design root"),

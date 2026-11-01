@@ -409,7 +409,24 @@ fn write_file(s: &mut Session, path: &str, format: &str, compression: &str, prev
     };
     // Linked designs are kept relative to the folder the design is saved in.
     let links = super::component_link::rebased(&s.doc, s.path.as_deref(), path);
+    let edits = super::component_source::rebase_edits(&s.doc, s.path.as_deref(), path, 0)?;
+    // Undo/redo must keep the same source files after Save As changes their base folder.
+    let history = if links != s.doc.links || edits != s.doc.source_edits {
+        s.undo
+            .iter()
+            .chain(&s.redo)
+            .map(|snap| {
+                Ok((
+                    super::component_link::rebased(&snap.doc, s.path.as_deref(), path),
+                    super::component_source::rebase_edits(&snap.doc, s.path.as_deref(), path, 0)?,
+                ))
+            })
+            .collect::<Result<Vec<_>>>()?
+    } else {
+        Vec::new()
+    };
     let old_links = (links != s.doc.links).then(|| std::mem::replace(&mut s.doc_mut().links, links));
+    let old_edits = (edits != s.doc.source_edits).then(|| std::mem::replace(&mut s.doc_mut().source_edits, edits));
     // A drawing's model paths likewise (spec §4.6, the DesignLink rule).
     let from = s.path.clone();
     let rebased = s
@@ -421,14 +438,24 @@ fn write_file(s: &mut Session, path: &str, format: &str, compression: &str, prev
     let old_drawing = rebased.map(|m| s.doc_mut().drawing.replace(m));
     let r = write_bytes(s, path, format, compression, preview, cache);
     if r.is_err() {
+        if let Some(old) = old_edits {
+            s.doc_mut().source_edits = old;
+        }
         if let Some(old) = old_links {
             s.doc_mut().links = old;
         }
         if let Some(old) = old_drawing {
             s.doc_mut().drawing = old;
         }
-    } else if old_drawing.is_some() {
-        rebase_drawing_history(s, from.as_deref(), path);
+    } else {
+        for (snap, (links, edits)) in s.undo.iter_mut().chain(&mut s.redo).zip(history) {
+            let doc = std::sync::Arc::make_mut(&mut snap.doc);
+            doc.links = links;
+            doc.source_edits = edits;
+        }
+        if old_drawing.is_some() {
+            rebase_drawing_history(s, from.as_deref(), path);
+        }
     }
     r
 }

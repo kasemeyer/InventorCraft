@@ -1,4 +1,4 @@
-//! Reconcile unsaved leaf-part revisions across tabs and assembly projections. A common
+//! Reconcile unsaved source revisions across tabs and assembly projections. A common
 //! revision distinguishes a new edit from divergent drafts; synchronization never writes files.
 use crate::{SolveApp, documents};
 use serde_json::json;
@@ -88,11 +88,13 @@ pub(crate) fn synchronize(app: &mut SolveApp) -> Result<(), String> {
         }
     }
     app.docs.source_shared.retain(|path, _| groups.contains_key(path));
+    let mut groups: Vec<_> = groups.into_iter().collect();
+    groups.sort_by_key(|(_, owners)| {
+        std::cmp::Reverse(owners.iter().filter_map(|(i, c)| documents::session_at(app, *i).map(|s| s.doc.first_path(*c).len())).max().unwrap_or(0))
+    });
     for (file, owners) in groups {
         let source_tab = (0..app.docs.count()).find(|index| {
-            documents::session_at(app, *index).is_some_and(|s| {
-                s.path.as_deref().is_some_and(|p| key(p) == file) && s.doc.links.is_empty() && s.doc.components.is_empty() && s.doc.drawing.is_none()
-            })
+            documents::session_at(app, *index).is_some_and(|s| s.path.as_deref().is_some_and(|p| key(p) == file) && s.doc.drawing.is_none())
         });
         let materialized = owners.iter().any(|(index, c)| documents::session_at(app, *index).is_some_and(|s| s.doc.source_edits.contains_key(c)));
         let tab_dirty = source_tab.and_then(|i| documents::session_at(app, i)).is_some_and(Session::is_dirty);
@@ -111,7 +113,7 @@ pub(crate) fn synchronize(app: &mut SolveApp) -> Result<(), String> {
                 doc: (*s.doc).clone(),
                 baseline: s.saved_document().clone(),
                 dirty: s.is_dirty(),
-                label: format!("{} (part tab)", s.doc.name),
+                label: format!("{} (source tab)", s.doc.name),
             });
         }
         for (index, component) in owners {

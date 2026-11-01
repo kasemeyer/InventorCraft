@@ -230,6 +230,73 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
+    fn linked_subassembly_open_shares_nested_edits_and_save_all_writes_children_first() {
+        let mut h = crate::test_support::inventor(solidcraft_engine::doc::DocumentKind::Assembly);
+        let leaf = h.dir.join("Leaf.tcipart");
+        let inner = h.dir.join("Inner.tciasm");
+        let mut part = Session::default();
+        part.execute("document.new_part", &json!({})).unwrap();
+        part.execute("solid.box", &json!({"length":20,"width":10,"height":5})).unwrap();
+        part.execute("file.save", &json!({"path":leaf})).unwrap();
+        let mut sub = Session::default();
+        sub.execute("document.new_assembly", &json!({})).unwrap();
+        let first = sub.execute("component.insert_design", &json!({"path":leaf})).unwrap();
+        sub.execute("occurrence.copy", &json!({"occurrence":first["occurrence"],"translate":[40,0,0]})).unwrap();
+        sub.execute("file.save", &json!({"path":inner})).unwrap();
+        let made = h.app.run("component.insert_design", json!({"path":inner})).unwrap();
+        let c = made["component"].as_u64().unwrap();
+        let second = h.app.run("occurrence.copy", json!({"occurrence":made["occurrence"],"translate":[0,60,0]})).unwrap();
+        h.app.run("file.save", json!({"path":h.dir.join("Outer.tciasm")})).unwrap();
+        h.app.run("component.activate", json!({"component":c,"occurrence":second["occurrence"],"path":[second["occurrence"]]})).unwrap();
+        let child = h.app.session.doc.components.iter().find(|d| d.parent == c).unwrap().id;
+        let child_occ = h.app.session.doc.occurrences.iter().find(|o| o.parent == c).unwrap().id;
+        h.call("ui.resize", json!({"width":1600,"height":2600}));
+        h.app.run("browser.expand_all", json!({})).unwrap();
+        h.settle();
+        let first_path = format!("{}/{child_occ}", made["occurrence"].as_u64().unwrap());
+        let second_path = format!("{}/{child_occ}", second["occurrence"].as_u64().unwrap());
+        let first_handle = format!("fold:occurrence_origin:{first_path}");
+        let second_handle = format!("fold:occurrence_origin:{second_path}");
+        let first_pos = crate::scenario::handle_at(&first_handle).expect("first nested origin");
+        let second_pos = crate::scenario::handle_at(&second_handle).expect("second nested origin");
+        assert_ne!(first_pos, second_pos);
+        let first_open = crate::browser::is_open(&h.app, &format!("oo:{first_path}"), false);
+        let second_open = crate::browser::is_open(&h.app, &format!("oo:{second_path}"), false);
+        h.step(&json!({"click":{"handle":first_handle}})).unwrap();
+        h.frames(3);
+        assert_eq!(crate::browser::is_open(&h.app, &format!("oo:{first_path}"), false), !first_open);
+        assert_eq!(crate::browser::is_open(&h.app, &format!("oo:{second_path}"), false), second_open);
+        h.app.run("component.activate", json!({"component":child,"occurrence":child_occ,"path":[second["occurrence"],child_occ]})).unwrap();
+        h.app.run("solid.box", json!({"length":3,"width":3,"height":3,"corner":[25,0,0]})).unwrap();
+        h.app.run("component.finish_edit", json!({})).unwrap();
+        h.app.run("component.finish_edit", json!({})).unwrap();
+        let bytes = std::fs::read(&inner).unwrap();
+        open(&mut h.app, c);
+        h.settle();
+        assert_eq!(h.app.docs.count(), 2, "{:?}", h.app.status);
+        assert_eq!(h.app.session.world_state().bodies.len(), 4, "{:?}", h.app.status);
+        h.app.run("solid.box", json!({"length":2,"width":2,"height":2,"corner":[0,25,0]})).unwrap();
+        crate::documents::switch(&mut h.app, 0);
+        assert_eq!(h.app.session.world_state().bodies.len(), 10, "{:?}", h.app.status);
+        assert_eq!(std::fs::read(&inner).unwrap(), bytes);
+        crate::toolbar::save(&mut h.app);
+        let panel = h.app.docs.source_save.take().unwrap();
+        assert_eq!(panel.rows.len(), 2);
+        assert_eq!(panel.rows[0].component, child);
+        assert_eq!(panel.rows[1].component, c);
+        crate::source_save::apply(&mut h.app, panel, true);
+        h.settle();
+        assert!(h.app.docs.source_save.is_none(), "{:?}: {:?}", h.app.status, h.app.docs.source_save.as_ref().map(|p| &p.error));
+        assert!(!h.app.session.is_dirty(), "{:?}", h.app.status);
+        crate::documents::switch(&mut h.app, 1);
+        assert!(!h.app.session.is_dirty(), "{:?}", h.app.status);
+        sub.execute("doc.open", &json!({"path":inner})).unwrap();
+        assert_eq!(sub.world_state().bodies.len(), 5);
+        part.execute("doc.open", &json!({"path":leaf})).unwrap();
+        assert_eq!(part.world_state().bodies.len(), 2);
+    }
+
+    #[test]
     fn older_local_features_are_recovered_by_open_and_save_without_editing_first() {
         for open_first in [false, true] {
             let mut h = crate::test_support::inventor(solidcraft_engine::doc::DocumentKind::Assembly);

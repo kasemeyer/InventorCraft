@@ -2467,7 +2467,7 @@ pub struct DesignLink {
     pub feature: u64,
 }
 
-/// Recoverable source-backed history of a leaf part edited through an assembly occurrence.
+/// Recoverable source-backed history edited through an assembly occurrence.
 /// Maps run from source identities to assembly identities; the source baseline detects conflicts.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SourceEdit {
@@ -2478,6 +2478,18 @@ pub struct SourceEdit {
     pub parameters: std::collections::BTreeMap<String, String>,
     pub baseline_features: Vec<Feature>,
     pub baseline_params: Vec<Param>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub graph: Option<SourceGraph>,
+}
+
+/// Reversible identities and the last saved projection of an editable linked assembly.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SourceGraph {
+    pub components: std::collections::BTreeMap<u64, u64>,
+    pub occurrences: std::collections::BTreeMap<u64, u64>,
+    pub constraints: std::collections::BTreeMap<u64, u64>,
+    pub constraint_names: std::collections::BTreeMap<String, String>,
+    pub baseline: Box<Document>,
 }
 
 /// The document.
