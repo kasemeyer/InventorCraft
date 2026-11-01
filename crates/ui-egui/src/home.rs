@@ -1,6 +1,6 @@
-//! The start page: New Design, Open, the recent designs and the built-in samples, each with a
-//! picture of the design rendered from it. Shown on launch without a file and from the house
-//! button or the first document tab; selecting a design returns to its view.
+//! The start page: New Part, Assembly and Drawing, Open, recent designs and built-in samples.
+//! Shown on launch without a file and from the house button or the first document tab; selecting
+//! a design returns to its view.
 
 use std::collections::HashMap;
 
@@ -515,6 +515,7 @@ enum FileAction {
     Back,
     Section(Section),
     New(&'static str),
+    NewAssembly,
     NewDrawing,
     Open,
     Import,
@@ -743,24 +744,44 @@ fn start_content(app: &mut SolveApp, ui: &mut egui::Ui, action: &mut Option<File
     let shortcut = if cfg!(target_os = "macos") { "⌘O" } else { "Ctrl+O" };
     let open_hint = crate::i18n::format("home.open_hint", &[("shortcut", shortcut)]);
     let tiles = [
-        ("home:new_mm", "new", app.tr("home.new_mm"), app.tr("home.new_mm_hint"), true),
-        ("home:new_inches", "new", app.tr("home.new_inches"), app.tr("home.new_inches_hint"), false),
+        (
+            "home:new_assembly",
+            "component",
+            app.tr("cmd.document_new_assembly"),
+            app.tr("home.new_assembly_hint"),
+            true,
+        ),
+        (
+            "home:new_mm",
+            "body",
+            app.tr("cmd.document_new_part"),
+            app.tr("home.new_mm_hint"),
+            false,
+        ),
+        (
+            "home:new_inches",
+            "body",
+            app.tr("cmd.document_new_part"),
+            app.tr("home.new_inches_hint"),
+            false,
+        ),
         // Beside the other New tiles (R23: every profile); Open and Import follow.
         ("home:new_drawing", "ws_drawing", app.tr("home.new_drawing"), app.tr("home.new_drawing_hint"), false),
         ("home:open_tile", "open", app.tr("home.open"), open_hint.as_str(), false),
         ("home:import", "import", app.tr("home.import"), app.tr("home.import_hint"), false),
     ];
     FileView::section(ui, app.tr_label("New"), t.space_12, |ui| {
-        FileView::grid(ui, "home_new", FileView::tile_min_width(), tiles.len(), |ui, index, width| {
+        FileView::grid(ui, "home_new", 220.0, tiles.len(), |ui, index, width| {
             let Some((id, icon, title, hint, primary)) = tiles.get(index) else { return };
             let response = FileView::action_tile(ui, id, width, icon, title, hint, *primary);
             publish(id, &response);
             if response.clicked() {
                 *action = Some(match index {
-                    0 => FileAction::New("mm"),
-                    1 => FileAction::New("in"),
-                    2 => FileAction::NewDrawing,
-                    3 => FileAction::Open,
+                    0 => FileAction::NewAssembly,
+                    1 => FileAction::New("mm"),
+                    2 => FileAction::New("in"),
+                    3 => FileAction::NewDrawing,
+                    4 => FileAction::Open,
                     _ => FileAction::Import,
                 });
             }
@@ -964,6 +985,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, action: FileAction) {
                 crate::prefs::apply_new_design_units(app, units);
             }
         }
+        FileAction::NewAssembly => crate::documents::new_document(app, solidcraft_engine::doc::DocumentKind::Assembly, None),
         FileAction::NewDrawing => crate::documents::new_document(app, solidcraft_engine::doc::DocumentKind::Drawing, None),
         FileAction::Open => app.pick_open(|app, path| {
             if let Some(path) = path {

@@ -1250,6 +1250,7 @@
   "home.month_10": "Oct",
   "home.month_11": "Nov",
   "home.month_12": "Dec",
+  "home.new_assembly_hint": "Opens an assembly using your preferred units",
   "home.new_drawing": "New drawing",
   "home.new_drawing_hint": "A D-size sheet with a border and title block",
   "home.new_inches": "New design, inches",
