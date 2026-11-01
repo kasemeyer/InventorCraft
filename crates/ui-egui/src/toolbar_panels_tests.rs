@@ -76,3 +76,13 @@ fn q_and_m_are_not_solidcrafts_in_a_part() {
     assert_eq!(m.len(), 1);
     assert_eq!(m[0].command, "inspect.measure");
 }
+
+/// Under whole-panel overflow a large button grows to its longest word (R213 polish: "Dimension"
+/// is never "Dime…"), up to a cap; short words keep the usual width.
+#[test]
+fn a_whole_panel_large_button_widens_to_its_longest_word() {
+    use crate::toolbar::{BUTTON_MAX_WIDTH, BUTTON_WORD_MAX_WIDTH, whole_button_max};
+    assert_eq!(whole_button_max(50.0), BUTTON_MAX_WIDTH);
+    assert_eq!(whole_button_max(80.0), 90.0);
+    assert_eq!(whole_button_max(300.0), BUTTON_WORD_MAX_WIDTH);
+}

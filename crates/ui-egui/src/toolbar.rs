@@ -106,8 +106,11 @@ pub(crate) fn ribbon_height(labels: bool) -> f32 {
 }
 const BUTTON_GAP: f32 = 3.0;
 const BUTTON_MIN_WIDTH: f32 = 54.0;
-const BUTTON_MAX_WIDTH: f32 = 76.0;
+pub(crate) const BUTTON_MAX_WIDTH: f32 = 76.0;
 const BUTTON_LABEL_PADDING: f32 = 10.0;
+/// Under Inventor-style overflow (`fit_whole`) a large button widens to its longest word, up to
+/// this, so a one-word caption such as "Dimension" is never shortened to "Dime…".
+pub(crate) const BUTTON_WORD_MAX_WIDTH: f32 = 112.0;
 const SECTION_HEIGHT: f32 = 20.0;
 
 /// The widest a small-button column grows to fit its widest label, under whole-panel overflow.
@@ -997,6 +1000,21 @@ fn ribbon_button_width(painter: &egui::Painter, label: &str) -> f32 {
     (widest + BUTTON_LABEL_PADDING).clamp(BUTTON_MIN_WIDTH, BUTTON_MAX_WIDTH)
 }
 
+/// The widest a large button may grow under whole-panel overflow: the usual cap, or its longest
+/// word plus padding when that word would not fit, up to [`BUTTON_WORD_MAX_WIDTH`].
+pub(crate) fn whole_button_max(longest_word: f32) -> f32 {
+    BUTTON_MAX_WIDTH.max((longest_word + BUTTON_LABEL_PADDING).min(BUTTON_WORD_MAX_WIDTH))
+}
+
+/// [`ribbon_button_width`] as Inventor sizes a large button: wide enough for its longest word.
+fn ribbon_button_width_whole(painter: &egui::Painter, label: &str) -> f32 {
+    let longest = label.split_whitespace().map(|word| ribbon_label_width(painter, word)).fold(0.0_f32, f32::max);
+    let max = whole_button_max(longest);
+    let widest =
+        ribbon_label_lines(painter, label, max - BUTTON_LABEL_PADDING).iter().map(|line| ribbon_label_width(painter, line)).fold(0.0_f32, f32::max);
+    (widest + BUTTON_LABEL_PADDING).clamp(BUTTON_MIN_WIDTH, max)
+}
+
 fn ribbon_label_lines(painter: &egui::Painter, label: &str, width: f32) -> Vec<String> {
     let measure = |text: &str| ribbon_label_width(painter, text);
     let normalized = label.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -1348,7 +1366,9 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                         let label = family.map_or_else(|| face_label(app, &tab, panel, c), |f| f.label);
                         if labels {
                             // A split button's caret follows its label.
-                            let width = ribbon_button_width(&painter, app.tr_label(label)) + if split { SPLIT_ARROW_WIDTH } else { 0.0 };
+                            let text = app.tr_label(label);
+                            let width = if whole { ribbon_button_width_whole(&painter, text) } else { ribbon_button_width(&painter, text) }
+                                + if split { SPLIT_ARROW_WIDTH } else { 0.0 };
                             ButtonSize { width, min_width: if whole { width } else { BUTTON_MIN_WIDTH } }
                         } else {
                             let width = if family.is_some() || split { 50.0 } else { 40.0 };
