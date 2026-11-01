@@ -54,7 +54,8 @@ fn the_solidcraft_profile_keeps_the_upstream_ribbon() {
 #[test]
 fn inventor_part_document_shows_the_part_ribbon() {
     let h = inventor(Part);
-    assert_eq!(visible_tabs(&h.app), ["SHEET METAL", "MODEL", "SKETCH", "INSPECT", "TOOLS", "MANAGE", "VIEW", "ENVIRONMENTS"]);
+    // R209 (F-2): the part's Annotate tab after Sketch.
+    assert_eq!(visible_tabs(&h.app), ["SHEET METAL", "MODEL", "SKETCH", "ANNOTATE", "INSPECT", "TOOLS", "MANAGE", "VIEW", "ENVIRONMENTS"]);
     assert_eq!(h.app.ui.tab, "MODEL");
     assert_eq!(tab_label(&h.app, "MODEL"), "3D Model");
     assert_eq!(panel_label(&h.app, "MODEL", "WORK FEATURES"), "Work Features");
@@ -113,7 +114,8 @@ fn customised_buttons_are_kept_per_profile_and_kind() {
     assert_eq!(shown[..2], ["solid.extrude", "solid.revolve"]);
     assert!(!shown.contains(&"solid.box"));
 
-    tc::pin(&mut h.app, "MODEL", "solid.box").unwrap();
+    // Box is already on Inventor's face (Primitives, shown since R209): pin the next primitive.
+    tc::pin(&mut h.app, "MODEL", "solid.cylinder").unwrap();
     assert!(h.app.toolbar_custom.panels.keys().any(|k| k.starts_with("inventor.part/MODEL/")), "{:?}", h.app.toolbar_custom.panels);
     for (k, v) in &design {
         assert_eq!(h.app.toolbar_custom.panels.get(k), Some(v), "{k}");
@@ -280,8 +282,10 @@ fn hidden_panels_are_not_drawn() {
     h.call("ui.resize", json!({"width": 3200, "height": 1200}));
     h.frames(2);
     let lists = panel_lists(&h.app, "MODEL");
-    assert_eq!(panel_ids(&lists), ["SKETCH", "CREATE", "MODIFY", "WORK FEATURES", "PATTERN", "SURFACE", "CONVERT"]);
-    assert!(crate::scenario::rect_of("panel:MODEL:PRIMITIVES").is_none());
+    // R209 (F-2): Primitives is shown by default; Plastic Part stays hidden.
+    assert_eq!(panel_ids(&lists), ["SKETCH", "PRIMITIVES", "CREATE", "MODIFY", "WORK FEATURES", "PATTERN", "SURFACE", "CONVERT"]);
+    assert!(crate::scenario::rect_of("panel:MODEL:PRIMITIVES").is_some());
+    assert!(crate::scenario::rect_of("panel:MODEL:PLASTIC PART").is_none());
     assert!(crate::scenario::rect_of("panel:MODEL:CREATE").is_some());
 
     let mut h = Harness::new();

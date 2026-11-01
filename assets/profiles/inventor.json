@@ -271,7 +271,7 @@
   },
   "tabs": {
     "sheet_metal": {"id": "SHEET METAL", "label": "profile.inventor.tab.sheet_metal", "panels": ["sketch_start", "sheet_create", "sheet_modify", "work_features", "pattern", "sheet_setup", "flat_pattern", {"panel": "parameters", "hidden": true}, {"panel": "measure", "hidden": true}]},
-    "model_part": {"id": "MODEL", "label": "profile.inventor.tab.model", "panels": ["sketch_start", {"panel": "primitives", "hidden": true}, "create_part", "modify_part", "work_features", "pattern", "surface", {"panel": "parameters", "hidden": true}, {"panel": "plastic_part", "hidden": true}, {"panel": "measure", "hidden": true}, {"panel": "insert", "hidden": true}, "convert"]},
+    "model_part": {"id": "MODEL", "label": "profile.inventor.tab.model", "panels": ["sketch_start", "primitives", "create_part", "modify_part", "work_features", "pattern", "surface", {"panel": "parameters", "hidden": true}, {"panel": "plastic_part", "hidden": true}, {"panel": "measure", "hidden": true}, {"panel": "insert", "hidden": true}, "convert"]},
     "sketch": {"id": "SKETCH", "label": "profile.inventor.tab.sketch", "panels": ["sketch_start", "sketch_create", "sketch_modify", "sketch_pattern", "constrain", "sketch_insert", "format", {"panel": "parameters", "hidden": true}, "exit"]},
     "inspect_part": {"id": "INSPECT", "label": "profile.inventor.tab.inspect", "panels": ["inspect_measure", "analyze", {"panel": "parameters", "hidden": true}]},
     "tools": {"id": "TOOLS", "label": "profile.inventor.tab.tools", "panels": ["measure", "material_appearance", "options", "clipboard", "find"]},
@@ -287,13 +287,14 @@
     "env_assembly": {"id": "ENVIRONMENTS", "label": "profile.inventor.tab.environments", "panels": ["begin", "print_3d"]},
     "render": {"id": "RENDER", "shown": "render", "inherit": "solidcraft"},
     "place_views": {"id": "PLACE VIEWS", "label": "profile.inventor.tab.place_views", "panels": ["drawing_create", "drawing_sheets"]},
+    "annotate_part": {"id": "ANNOTATE", "label": "profile.inventor.tab.annotate", "panels": []},
     "annotate": {"id": "ANNOTATE", "label": "profile.inventor.tab.annotate", "panels": ["drawing_dimension", "feature_notes", "drawing_text", "drawing_symbols"]},
     "tools_drawing": {"id": "TOOLS", "label": "profile.inventor.tab.tools", "panels": [{"panel": "measure", "hidden": true}, "options", {"panel": "clipboard", "hidden": true}]},
     "manage_drawing": {"id": "MANAGE", "label": "profile.inventor.tab.manage", "panels": ["drawing_update", {"panel": "manage_parameters", "hidden": true}]},
     "view_drawing": {"id": "VIEW", "label": "profile.inventor.tab.view", "panels": ["windows"]}
   },
   "ribbons": {
-    "part": ["sheet_metal", "model_part", "sketch", "inspect_part", "tools", "manage_part", "view", "env_part", "render"],
+    "part": ["sheet_metal", "model_part", "sketch", "annotate_part", "inspect_part", "tools", "manage_part", "view", "env_part", "render"],
     "assembly": ["assemble", "design", "model_assembly", "sketch_assembly", "inspect_assembly", "tools", "manage_assembly", "view", "env_assembly", "render"],
     "drawing": ["place_views", "annotate", "tools_drawing", "manage_drawing", "view_drawing"]
   }

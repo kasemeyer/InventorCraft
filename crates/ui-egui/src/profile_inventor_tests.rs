@@ -185,6 +185,13 @@ const PART_FACES: &[(&str, &str, &[(&str, bool)])] = &[
     ("ENVIRONMENTS", "CONVERT", &[("sheet.convert", L)]),
 ];
 
+/// Updated by design (R209, F-2): the part's Annotate tab (3D annotation) stands after Sketch.
+/// Evidence: planning `docs/evidence/clean-room-catalogue-delta.md` row 1, "Observed tab labels,
+/// left to right for the main strip: Sheet Metal, Flat Pattern, 3D Model, Sketch, Annotate,
+/// Inspect, Tools, Manage, View, Environments" (screenshot `part/05-id_TabAdskMBD.png`); Flat
+/// Pattern is the flat pattern's own ribbon here, so Annotate is the fourth tab of this list and
+/// the fifth of Inventor's. No registry command annotates a part in 3D yet: the tab is named and
+/// empty.
 #[test]
 fn inventor_part_ribbon_follows_the_capture() {
     use Shown::*;
@@ -194,6 +201,7 @@ fn inventor_part_ribbon_follows_the_capture() {
             ("SHEET METAL", Always),
             ("MODEL", Always),
             ("SKETCH", Always),
+            ("ANNOTATE", Always),
             ("INSPECT", Always),
             ("TOOLS", Always),
             ("MANAGE", Always),
@@ -227,6 +235,7 @@ fn inventor_part_panels_follow_the_capture() {
         ),
         ("SKETCH", &["SKETCH", "CREATE", "MODIFY", "PATTERN", "CONSTRAIN", "INSERT", "FORMAT", "PARAMETERS", "FINISH SKETCH"]),
         ("SHEET METAL", &["SKETCH", "CREATE", "MODIFY", "WORK FEATURES", "PATTERN", "SETUP", "FLAT PATTERN", "PARAMETERS", "MEASURE"]),
+        ("ANNOTATE", &[]),
         ("INSPECT", &["MEASURE", "ANALYZE", "PARAMETERS"]),
         ("TOOLS", &["MEASURE", "MATERIAL AND APPEARANCE", "OPTIONS", "CLIPBOARD", "FIND"]),
         ("MANAGE", &["UPDATE", "PARAMETERS", "STYLES AND STANDARDS", "INSERT", "AUTHOR"]),
@@ -382,7 +391,8 @@ fn every_profile_label_is_in_the_english_catalog() {
 
 #[test]
 fn hidden_panels_follow_the_capture() {
-    assert_eq!(hidden(Part, "MODEL"), ["PRIMITIVES", "PARAMETERS", "PLASTIC PART", "MEASURE", "INSERT"]);
+    // R209 (F-2): Primitives is shown by default, between Sketch and Create.
+    assert_eq!(hidden(Part, "MODEL"), ["PARAMETERS", "PLASTIC PART", "MEASURE", "INSERT"]);
     assert_eq!(hidden(Part, "SKETCH"), ["PARAMETERS"]);
     assert_eq!(hidden(Part, "SHEET METAL"), ["PARAMETERS", "MEASURE"]);
     assert_eq!(hidden(Part, "INSPECT"), ["PARAMETERS"]);

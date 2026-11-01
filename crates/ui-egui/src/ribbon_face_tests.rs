@@ -166,17 +166,17 @@ fn fit_whole_collapses_rightmost_panels_first() {
 #[test]
 fn a_hidden_panel_can_be_shown_and_hidden_again() {
     let mut h = on_model(inventor(Part), 3200.0);
-    assert!(rect_of("panel:MODEL:PRIMITIVES").is_none());
-    crate::toolbar_custom::set_panel_shown(&mut h.app, "MODEL", "PRIMITIVES", true);
+    assert!(rect_of("panel:MODEL:PLASTIC PART").is_none());
+    crate::toolbar_custom::set_panel_shown(&mut h.app, "MODEL", "PLASTIC PART", true);
     h.frames(2);
-    assert!(rect_of("panel:MODEL:PRIMITIVES").is_some());
-    assert!(h.app.toolbar_custom.panel_shown["inventor.part/MODEL/PRIMITIVES"]);
+    assert!(rect_of("panel:MODEL:PLASTIC PART").is_some());
+    assert!(h.app.toolbar_custom.panel_shown["inventor.part/MODEL/PLASTIC PART"]);
     let mut loaded = crate::toolbar_custom::ToolbarCustom::default();
     loaded.load(&h.app.toolbar_custom.prefs());
     assert_eq!(loaded.panel_shown, h.app.toolbar_custom.panel_shown);
-    crate::toolbar_custom::set_panel_shown(&mut h.app, "MODEL", "PRIMITIVES", false);
+    crate::toolbar_custom::set_panel_shown(&mut h.app, "MODEL", "PLASTIC PART", false);
     h.frames(2);
-    assert!(rect_of("panel:MODEL:PRIMITIVES").is_none());
+    assert!(rect_of("panel:MODEL:PLASTIC PART").is_none());
     assert!(rect_of("panel:MODEL:PATTERN").is_some());
     crate::toolbar_custom::set_panel_shown(&mut h.app, "MODEL", "PATTERN", false);
     h.frames(2);
