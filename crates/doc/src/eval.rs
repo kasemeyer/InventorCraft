@@ -389,14 +389,14 @@ pub(crate) fn format_thread(d: f64, p: f64) -> String {
 
 /// The automatic ISO metric designation for a cylindrical face, using the same fit check as
 /// a thread feature without an explicit size. This query does not change the model.
-pub fn suggested_thread(st: &ModelState, p: Vec3) -> Result<String> {
-    thread_on(st, 0, p, None, None, false).map(|t| t.designation)
+pub fn suggested_thread(st: &ModelState, p: Vec3, inch: bool) -> Result<String> {
+    thread_on(st, 0, p, None, None, false, inch).map(|t| t.designation)
 }
 
 /// A cosmetic thread on the cylindrical face at `p`. A `turned` (modelled) thread also fits a
 /// shaft thicker than it, which it turns down to its major diameter first.
-fn thread_on(st: &ModelState, feature: u64, p: Vec3, designation: Option<&str>, length: Option<f64>, turned: bool) -> Result<ThreadInfo> {
-    thread_on_impl(st, feature, p, designation, length, false, turned)
+fn thread_on(st: &ModelState, feature: u64, p: Vec3, designation: Option<&str>, length: Option<f64>, turned: bool, inch: bool) -> Result<ThreadInfo> {
+    thread_on_impl(st, feature, p, designation, length, false, turned, inch)
 }
 
 // Tapped holes admit verified Unified and parallel pipe sizes; the separate Thread feature remains metric,
@@ -409,6 +409,7 @@ fn thread_on_impl(
     length: Option<f64>,
     tapped: bool,
     turned: bool,
+    inch: bool,
 ) -> Result<ThreadInfo> {
     let (body, cyl) = st
         .bodies
@@ -427,7 +428,15 @@ fn thread_on_impl(
                 .ok_or_else(|| DocError::Invalid(format!("unknown tapped thread `{name}` (ISO metric or a catalogued UNC/UNF, G or Rp size)")))?,
         )
     } else {
-        None
+        match designation {
+            // A Unified (UNC/UNF) or pipe size on the Thread feature too (R221).
+            Some(s) if parse_metric_thread(s).is_none() => Some(crate::parse_unified_thread(s).ok_or_else(|| {
+                DocError::Invalid(format!("unknown thread `{s}` (ISO metric like M8 or M8x1, or a catalogued UNC/UNF size like 1/4-20 UNC)"))
+            })?),
+            // An inch design sizes from the Unified table (R221).
+            None if inch => crate::thread_catalog::nearest_unified(dia, cyl.internal),
+            _ => None,
+        }
     };
     let (major, pitch) = match &tapped_size {
         Some(size) => (size.major_diameter, size.pitch),
@@ -438,8 +447,9 @@ fn thread_on_impl(
     };
     let name = tapped_size.as_ref().map(|s| s.designation.clone()).unwrap_or_else(|| format_thread(major, pitch));
     let fits = if let Some(size) = tapped_size.as_ref().filter(|s| s.family != crate::TappedThreadFamily::Metric) {
-        // Fit the recommended physical drill, without borrowing an ISO minor-diameter rule.
-        cyl.internal && (size.tap_drill - dia).abs() < 0.15 * major
+        // Fit the recommended physical drill, without borrowing an ISO minor-diameter rule; a
+        // shaft fits by its major diameter.
+        if cyl.internal { (size.tap_drill - dia).abs() < 0.15 * major } else { (major - dia).abs() < 0.15 * major || (turned && dia > major) }
     } else if cyl.internal {
         (major - pitch * 1.0825 - dia).abs() < 0.2 * major || (major - pitch - dia).abs() < 0.15 * major
     } else {
@@ -6714,7 +6724,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                     } else {
                         p + dir.any_perp() * r + dir * (r * 0.5)
                     };
-                    let t = thread_on_impl(st, f.id, wall, Some(d), None, true, false)?;
+                    let t = thread_on_impl(st, f.id, wall, Some(d), None, true, false, false)?;
                     st.threads.push(t);
                 }
             }
@@ -6725,7 +6735,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                 Some(e) => Some(val(vals, e, Kind::Length)?),
                 None => None,
             };
-            let t = thread_on(st, f.id, face.0, designation.as_deref(), l, *modeled)?;
+            let t = thread_on(st, f.id, face.0, designation.as_deref(), l, *modeled, crate::thread_catalog::inch_units(&doc.units))?;
             if !*modeled {
                 st.threads.push(t);
                 return Ok(());

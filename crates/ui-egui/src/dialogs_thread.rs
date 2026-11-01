@@ -510,7 +510,7 @@ mod contribution_tests {
         }
         app.run("solid.hole", json!({"position":[10,10,10],"thread":"M8"})).unwrap();
         let before = app.session.doc.to_json();
-        for designation in ["1/4-20 UNC", "G 1/4", "Rp 1/4"] {
+        for designation in ["G 1/4", "Rp 1/4"] {
             for modeled in [false, true] {
                 assert!(app.run("solid.thread", json!({"face":[13.375,10,5],"designation":designation,"modeled":modeled})).is_err());
                 assert_eq!(app.session.doc.to_json(), before);
@@ -526,7 +526,7 @@ mod contribution_tests {
         *designation = Some("1/4-20 UNC".into());
         *modeled = true;
         let reopened = Session::new(Document::from_json(&app.session.doc.to_json()).unwrap());
-        assert!(reopened.model.results.last().unwrap().error.as_ref().unwrap().contains("ISO metric"));
+        assert!(reopened.model.results.last().unwrap().error.as_ref().unwrap().contains("does not fit"));
     }
 
     #[test]

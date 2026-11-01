@@ -132,6 +132,37 @@ pub fn tapped_thread_sizes(family: TappedThreadFamily) -> Vec<TappedThread> {
 
 /// Explicit metric custom sizes remain supported. Unified sizes must be in the verified
 /// catalogue and include their UNC/UNF suffix. G/Rp use explicit process drills; modeled Thread stays metric-only.
+/// The Unified thread a cylinder of this diameter takes in an inch design: coarse (UNC) first,
+/// else fine (UNF); a shaft by its major diameter, a hole by its tap drill (R221).
+pub fn nearest_unified(diameter_mm: f64, internal: bool) -> Option<TappedThread> {
+    let pick = |family: TappedThreadFamily| {
+        UNIFIED
+            .iter()
+            .filter(|(_, f, ..)| *f == family)
+            .map(|&(name, f, major, tpi, drill)| {
+                let want = if internal { drill } else { major };
+                (
+                    TappedThread { family: f, designation: name.to_string(), major_diameter: major, pitch: 25.4 / f64::from(tpi), tap_drill: drill },
+                    (want - diameter_mm).abs(),
+                )
+            })
+            .filter(|(t, off)| *off <= 0.15 * t.major_diameter)
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(t, _)| t)
+    };
+    pick(TappedThreadFamily::Unc).or_else(|| pick(TappedThreadFamily::Unf))
+}
+
+/// A Unified (UNC/UNF) designation for the Thread feature; pipe sizes stay tapped-hole only.
+pub fn parse_unified_thread(text: &str) -> Option<TappedThread> {
+    parse_tapped_thread(text).filter(|t| matches!(t.family, TappedThreadFamily::Unc | TappedThreadFamily::Unf))
+}
+
+/// Whether a design's length unit is an inch unit (the thread table to size from).
+pub fn inch_units(units: &str) -> bool {
+    matches!(units.trim().to_ascii_lowercase().as_str(), "in" | "inch" | "ft" | "feet")
+}
+
 pub fn parse_tapped_thread(text: &str) -> Option<TappedThread> {
     if text.len() > 128 {
         return None;

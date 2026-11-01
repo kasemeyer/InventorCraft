@@ -1910,8 +1910,8 @@ const LARGEST_COARSE: f64 = 56.0;
 /// The refusal for automatic sizing on a cylinder too big for the coarse table (a Ø75 shaft):
 /// `None` when sizing finds a thread, or the cylinder is not past the table's end (the feature's
 /// own error then explains). It suggests sizes with a pitch to type, scaled to the diameter.
-fn beyond_coarse_range(st: &solidcraft_doc::ModelState, face: Vec3) -> Option<String> {
-    if solidcraft_doc::suggested_thread(st, face).is_ok() {
+fn beyond_coarse_range(st: &solidcraft_doc::ModelState, face: Vec3, inch: bool) -> Option<String> {
+    if solidcraft_doc::suggested_thread(st, face, inch).is_ok() {
         return None;
     }
     let cyl = st.bodies.iter().filter_map(|b| solidcraft_doc::kernel::cylinder_face_at(&b.body, face)).min_by(|a, b| {
@@ -2409,6 +2409,7 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
     let designation = str_(p, "designation").map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
     if let Some(t) = &designation
         && solidcraft_doc::parse_metric_thread(t).is_none()
+        && solidcraft_doc::parse_unified_thread(t).is_none()
     {
         return Err(bad(cmd, unknown_metric_thread(t, "M8 or M8x1")));
     }
@@ -2418,7 +2419,7 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let modeled = p.get("modeled").and_then(Value::as_bool).unwrap_or(false);
     if designation.is_none()
-        && let Some(msg) = beyond_coarse_range(&s.model.state(), face)
+        && let Some(msg) = beyond_coarse_range(&s.model.state(), face, solidcraft_doc::inch_units(&s.doc.units))
     {
         return Err(bad(cmd, msg));
     }
