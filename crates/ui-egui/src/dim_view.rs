@@ -168,9 +168,9 @@ impl DimensionDraft {
         }
         if let Some(kind) = solved.sketch.constraints.iter().find(|c| c.param.as_deref() == Some(param)).map(|c| &c.kind)
             && !kind.is_angle()
-            && kind.value().is_some_and(|value| !value.is_finite() || value <= 0.0)
+            && kind.value().is_some_and(|value| !value.is_finite() || value < 0.0)
         {
-            return Err("Enter a dimension greater than zero".into());
+            return Err("Enter a dimension of zero or greater".into());
         }
         Ok(scratch)
     }

@@ -1430,6 +1430,8 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             let button_widths = &plan.widths;
             let sketch_create = tab == "SKETCH" && *panel == "CREATE";
             let enabled_panel = !cmds.is_empty() || *panel == "SELECT";
+            let collapsed_items = menu_commands(&cmds, &shown);
+            let collapsed_single = (collapsed_items.len() == 1).then(|| collapsed_items[0]);
             // Per tab: panels of the same name on other tabs (MODIFY, CREATE…) list other commands,
             // and the drop-down's area remembers its size by this id (#874).
             let popup_id = ui.id().with(("panel_menu", &tab, panel));
@@ -1450,14 +1452,20 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 // drop-down, which lists every command of the panel.
                 let br = Rect::from_center_size(free.center(), vec2((width - 8.0).max(0.0), button_height));
                 crate::scenario::publish_handle(&format!("collapsed:{tab}:{panel}"), br.center());
-                if fresp.hovered() && enabled_panel {
+                let single_info = collapsed_single.map(|c| crate::render_workspace::interactive_command_info(app, c));
+                let collapsed_enabled = single_info.as_ref().map_or(enabled_panel, |info| info.enabled);
+                if fresp.hovered() && collapsed_enabled {
                     painter.rect_filled(br, t.radius_sm, t.hover);
                 }
                 // Under whole-panel overflow the button is Inventor's: the icon over the panel's
                 // name, as a large button draws its label.
                 let icon_centre = if whole && labels { pos2(br.center().x, br.top() + 16.0) } else { br.center() - vec2(0.0, 3.0) };
-                if let Some(c) = shown.first().or(cmds.first()) {
+                if let Some(c) = collapsed_single.or_else(|| shown.first().or(cmds.first()).copied()) {
                     icons::paint_icon(&painter, Rect::from_center_size(icon_centre, vec2(26.0, 26.0)), c.icon, f32::from(t.icon.a()) / 255.0);
+                    if collapsed_single.is_some() {
+                        crate::scenario::publish_handle(&format!("button:{}", c.id), br.center());
+                        crate::scenario::publish_handle(&format!("toolbar:{}", c.id), br.center());
+                    }
                 }
                 if whole && labels {
                     let name = crate::profile::panel_label(app, &tab, panel);
@@ -1465,11 +1473,21 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     painter.galley(pos2(br.center().x, br.top() + 32.0), galley, t.text);
                     fresp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled_panel, &name));
                 }
-                dropdown_arrow(&painter, pos2(br.center().x, br.bottom() - 3.0), t.text_dim);
-                let tip = collapsed_tip(app, &tab, panel, shown.len().max(cmds.len()));
-                if fresp.on_hover_text(tip).clicked() && enabled_panel {
-                    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("sc_panel_open"), popup_id));
-                    opened = true;
+                if collapsed_single.is_none() {
+                    dropdown_arrow(&painter, pos2(br.center().x, br.bottom() - 3.0), t.text_dim);
+                }
+                if let Some(c) = collapsed_single {
+                    let info = single_info.as_ref().expect("the singleton command info was computed");
+                    fresp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, info.enabled, app.tr_label(c.label)));
+                    if ribbon_tooltip(app, fresp, c, info.disabled_reason.as_deref()).clicked() && info.enabled {
+                        app.start_pinned(c.id);
+                    }
+                } else {
+                    let tip = collapsed_tip(app, &tab, panel, shown.len().max(cmds.len()));
+                    if fresp.on_hover_text(tip).clicked() && enabled_panel {
+                        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("sc_panel_open"), popup_id));
+                        opened = true;
+                    }
                 }
             }
             let mut button_x = bx;
