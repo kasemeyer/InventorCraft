@@ -686,7 +686,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     } else {
         None
     };
-    if let Some(mode) = held {
+    if let Some(mode) = held.filter(|_| !scheme(app).cursors) {
         ui.ctx().set_cursor_icon(match mode {
             NavMode::Pan if primary_down => egui::CursorIcon::Grabbing,
             NavMode::Pan => egui::CursorIcon::Grab,
@@ -767,6 +767,13 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         app.viewport.orbit_pivot = None;
         app.viewport.orbit_from = None;
     }
+    // The profile's navigation cursors (`cursors`): while a drag pans, zooms or orbits, a hold key
+    // is held or Space pans over the view, its glyph stands in for the pointer.
+    let shown = mode.or(held).or(space_pan.then_some(NavMode::Pan)).or(app.viewport.nav.filter(|_| inside)).filter(|m| allowed(*m));
+    app.viewport.nav_cursor = shown.filter(|_| scheme(app).cursors && (inside || dragging));
+    if let (Some(m), Some(at)) = (app.viewport.nav_cursor, ui.input(|i| i.pointer.latest_pos())) {
+        paint_cursor(ui.ctx(), m, at);
+    }
     // The pivot glyph (the profile's `pivot_glyph`) marks where an orbit under way turns: its
     // chosen point, or the view's centre.
     let orbiting = caps.orbit && (mode == Some(NavMode::Orbit) || motion.is_some_and(|(m, _)| m == NavMode::Orbit));
@@ -799,6 +806,29 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         app.fit_view();
     }
     CameraInput { hover, scroll, mods, middle, secondary_down, primary_down, primary_pressed, delta, inside, axes, pinch, pan, primary_nav, mode }
+}
+
+/// A navigation cursor glyph (`assets/icons/ui/design/svg/flat/cursor_*.svg`) centred on the
+/// pointer in place of the system's: the text token on a halo of the panel token, so it reads
+/// over any model colour in either theme.
+fn paint_cursor(ctx: &egui::Context, mode: NavMode, at: Pos2) {
+    if !at.is_finite() {
+        return;
+    }
+    ctx.set_cursor_icon(egui::CursorIcon::None);
+    let name = match mode {
+        NavMode::Pan => "cursor_pan",
+        NavMode::Zoom => "cursor_zoom",
+        NavMode::Orbit => "cursor_orbit",
+    };
+    let t = crate::theme::Tokens::get();
+    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("sc_nav_cursor")));
+    let r = Rect::from_center_size(at, vec2(t.space_24, t.space_24));
+    let h = t.space_2 * 0.75;
+    for d in [vec2(-h, 0.0), vec2(h, 0.0), vec2(0.0, -h), vec2(0.0, h), vec2(-h, -h), vec2(h, h), vec2(-h, h), vec2(h, -h)] {
+        crate::icons::paint_ink(&painter, r.translate(d), name, t.panel);
+    }
+    crate::icons::paint_ink(&painter, r, name, t.text);
 }
 
 /// The pivot glyph over the view while an orbit turns (`ViewportState::pivot_glyph`): a ring

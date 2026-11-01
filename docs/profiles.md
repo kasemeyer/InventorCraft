@@ -52,7 +52,10 @@ keys):
 | Shift+F5 | Next View (`ui.view_next`): forward through the views F5 stepped back from | everywhere |
 | F5, F6 | Previous View, Home View (`function_keys`, unchanged) | everywhere |
 
-While a hold key is held the pointer shows the navigation's cursor. A text field, or a dimension
+While a hold key is held, a drag pans, zooms or orbits, or Space pans, a profile with `cursors`
+shows that navigation's cursor in place of the pointer: original glyphs
+`assets/icons/ui/design/svg/flat/cursor_{pan,zoom,orbit}.svg` (monochrome navigation family, left
+Open on the icon review page for the owner), drawn in the text token on a panel-token halo. A text field, or a dimension
 being edited, keeps its keys. A held Space still pans in both profiles.
 
 ## Precedence over Preferences

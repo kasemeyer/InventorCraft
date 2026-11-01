@@ -562,3 +562,41 @@ fn navigation_keys_keep_to_their_scope() {
     h.frames(30);
     assert!((h.app.cam.distance - before.distance).abs() < 1e-9, "Home fits the sheet");
 }
+
+// ---- F-2 item 5: navigation cursors ----
+
+#[test]
+fn inventor_shows_its_pan_zoom_and_orbit_cursors_and_solidcraft_none() {
+    use crate::viewport::NavMode;
+    for id in ["cursor_pan", "cursor_zoom", "cursor_orbit"] {
+        assert!(crate::icon_svg::master_ids().contains(&id), "{id} is an icon master");
+    }
+    let mut h = boxed("inventor");
+    let c = h.app.viewport.rect.unwrap().center();
+    let (mid, none) = (egui::PointerButton::Middle, egui::Modifiers::NONE);
+    // Middle drag: the pan cursor while it lasts.
+    h.frame_with(press(mid, c, none));
+    h.frame_with(vec![egui::Event::PointerMoved(c + egui::vec2(20.0, 0.0))]);
+    assert_eq!(h.app.viewport.nav_cursor, Some(NavMode::Pan));
+    h.frame_with(release(mid, c + egui::vec2(20.0, 0.0), none));
+    h.frames(2);
+    assert_eq!(h.app.viewport.nav_cursor, None);
+    // Shift+middle: the orbit cursor.
+    orbit_held(&mut h, c, egui::vec2(30.0, 0.0));
+    assert_eq!(h.app.viewport.nav_cursor, Some(NavMode::Orbit));
+    let_go(&mut h, c + egui::vec2(30.0, 0.0));
+    // F3 held over the view, before any drag: the zoom cursor; released, none.
+    h.frame_with(vec![egui::Event::PointerMoved(c)]);
+    h.call("ui.key", json!({"key": "F3", "pressed": true}));
+    h.frames(2);
+    assert_eq!(h.app.viewport.nav_cursor, Some(NavMode::Zoom));
+    h.call("ui.key", json!({"key": "F3", "pressed": false}));
+    h.frames(2);
+    assert_eq!(h.app.viewport.nav_cursor, None);
+    // SolidCraft keeps the system's cursors.
+    let mut s = boxed("solidcraft");
+    s.frame_with(press(mid, c, none));
+    s.frame_with(vec![egui::Event::PointerMoved(c + egui::vec2(20.0, 0.0))]);
+    assert_eq!(s.app.viewport.nav_cursor, None);
+    s.frame_with(release(mid, c + egui::vec2(20.0, 0.0), none));
+}

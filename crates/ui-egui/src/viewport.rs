@@ -135,6 +135,9 @@ pub struct ViewportState {
     /// Where the pivot glyph marks the centre of the orbit under way (the profile's
     /// `pivot_glyph`), set by `navigation::handle` while an orbit drags.
     pub pivot_glyph: Option<Vec3>,
+    /// The navigation whose cursor glyph replaces the pointer this frame (the profile's
+    /// `cursors`), set by `navigation::handle`.
+    pub nav_cursor: Option<NavMode>,
     /// The orbit drag under way, summed from where it began (see [`crate::navigation::orbit`]).
     pub orbit_from: Option<crate::navigation::OrbitFrom>,
     /// Continuous orbit: the view turns about the vertical until the next click or key.
