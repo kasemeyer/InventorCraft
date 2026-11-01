@@ -185,6 +185,8 @@ const ORIGIN: [&str; 7] = ["O", "X", "Y", "Z", "XY", "XZ", "YZ"];
 enum Shown {
     Sketch(u64),
     Body(String),
+    /// A placed component's origin plane or axis, as `occurrence:<id>:<item>` (R216).
+    OccurrenceOrigin(String),
     /// Origin items and construction geometry, by name.
     Origin(String),
     /// An assembly joint's glyph, by joint id.
@@ -196,6 +198,12 @@ fn is_construction(k: &FeatureKind) -> bool {
 }
 
 fn shown_item(s: &Session, key: &str) -> Option<Shown> {
+    if let Some(rest) = key.strip_prefix("occurrence:") {
+        let (id, item) = rest.split_once(':')?;
+        let id: u64 = id.parse().ok()?;
+        let item = ORIGIN.iter().find(|o| o.eq_ignore_ascii_case(item))?;
+        return s.doc.occurrences.iter().any(|o| o.id == id).then(|| Shown::OccurrenceOrigin(format!("occurrence:{id}:{item}")));
+    }
     if let Some(f) = s.doc.find_feature(key) {
         if matches!(f.kind, FeatureKind::Sketch { .. }) {
             return Some(Shown::Sketch(f.id));
@@ -402,6 +410,13 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
                     v.hidden_origin.retain(|x| x != n);
                 } else if !v.hidden_origin.contains(n) {
                     v.hidden_origin.push(n.clone());
+                }
+            }
+            Shown::OccurrenceOrigin(k) => {
+                if !visible {
+                    v.shown_occurrence_origin.retain(|x| x != k);
+                } else if !v.shown_occurrence_origin.contains(k) {
+                    v.shown_occurrence_origin.push(k.clone());
                 }
             }
             Shown::Joint(id) => {

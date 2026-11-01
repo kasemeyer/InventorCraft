@@ -1616,12 +1616,17 @@ fn occurrence_origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, occurrence: u64
     }
     for (k, label, icon, _) in origin_entries(app) {
         let handle = format!("occurrence_origin:{occurrence}:{k}");
+        // Shown in the view at the component's pose (R216): the eye toggles it.
+        let item = format!("occurrence:{occurrence}:{k}");
+        let shown = app.session.visibility.shown_occurrence_origin.contains(&item);
         let r = draw_row(
             ui,
             ui.id().with((&key, k)),
-            &Row { depth: depth + 1, icon, label, handle: Some(&handle), handle_only: true, ..Default::default() },
+            &Row { depth: depth + 1, eye: Some(shown), icon, label, dim: !shown, handle: Some(&handle), handle_only: true, ..Default::default() },
         );
-        if r.clicked {
+        if r.eye {
+            let _ = app.run("browser.visibility", json!({ "items": [item], "visible": !shown }));
+        } else if r.clicked {
             crate::dialogs_constraint::pick_origin(app, occurrence, k);
         }
     }

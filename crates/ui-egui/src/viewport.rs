@@ -1280,6 +1280,62 @@ pub fn origin_plane_target(app: &SolveApp, proj: &Proj, name: &str) -> Option<Ve
     Some(std::iter::once(mid).chain(q.iter().map(|c| (mid + *c) / 2.0)).find(picked).unwrap_or(mid))
 }
 
+/// `occurrence:<id>:<item>` → (occurrence id, item), the key of a placed component's shown
+/// origin plane or axis (R216).
+pub fn occurrence_origin_key(key: &str) -> Option<(u64, &str)> {
+    let (id, item) = key.strip_prefix("occurrence:")?.split_once(':')?;
+    Some((id.parse().ok()?, item))
+}
+
+fn mat_point(m: &solidcraft_engine::doc::Mat, p: Vec3) -> Vec3 {
+    Vec3::new(
+        m[0][0] * p.x + m[1][0] * p.y + m[2][0] * p.z + m[3][0],
+        m[0][1] * p.x + m[1][1] * p.y + m[2][1] * p.z + m[3][1],
+        m[0][2] * p.x + m[1][2] * p.y + m[2][2] * p.z + m[3][2],
+    )
+}
+
+fn mat_dir(m: &solidcraft_engine::doc::Mat, d: Vec3) -> Vec3 {
+    Vec3::new(
+        m[0][0] * d.x + m[1][0] * d.y + m[2][0] * d.z,
+        m[0][1] * d.x + m[1][1] * d.y + m[2][1] * d.z,
+        m[0][2] * d.x + m[1][2] * d.y + m[2][2] * d.z,
+    )
+}
+
+/// Placed components' origin planes shown, at their poses: (key, normal, quad) (R216).
+pub fn occurrence_origin_planes(app: &SolveApp) -> Vec<(String, Vec3, [Vec3; 4])> {
+    let size = origin_extent(app);
+    let mut out = Vec::new();
+    for key in &app.session.visibility.shown_occurrence_origin {
+        let Some((id, item)) = occurrence_origin_key(key) else { continue };
+        let m = solidcraft_engine::doc::joints::occurrence_world(&app.session.doc, id);
+        for (name, n, q) in origin_quads(size) {
+            if name == item {
+                out.push((key.clone(), mat_dir(&m, n), q.map(|p| mat_point(&m, p))));
+            }
+        }
+    }
+    out
+}
+
+/// Placed components' origin axes shown, at their poses: (key, origin, direction) (R216).
+pub fn occurrence_origin_axes(app: &SolveApp) -> Vec<(String, Vec3, Vec3)> {
+    let mut out = Vec::new();
+    for key in &app.session.visibility.shown_occurrence_origin {
+        let Some((id, item)) = occurrence_origin_key(key) else { continue };
+        let dir = match item {
+            "X" => Vec3::X,
+            "Y" => Vec3::Y,
+            "Z" => Vec3::Z,
+            _ => continue,
+        };
+        let m = solidcraft_engine::doc::joints::occurrence_world(&app.session.doc, id);
+        out.push((key.clone(), mat_point(&m, Vec3::ZERO), mat_dir(&m, dir)));
+    }
+    out
+}
+
 pub fn origin_axes(app: &SolveApp) -> Vec<(&'static str, Vec3)> {
     if !app.origin_visible() {
         return Vec::new();
@@ -1584,6 +1640,9 @@ impl<T: PartialOrd + Copy> Near<T> {
             None => self.v.push((d, h)),
         }
     }
+    fn is_empty(&self) -> bool {
+        self.v.is_empty()
+    }
     fn sorted(mut self) -> Vec<(T, Hit)> {
         self.v.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
         self.v
@@ -1790,6 +1849,14 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
             }
         }
     }
+    for (name, o, dir) in occurrence_origin_axes(app) {
+        if let (Some(a), Some(b)) = (proj.to_screen(o), proj.to_screen(o + dir * (size * AXIS_LEN))) {
+            let dd = seg_dist(pos, a, b);
+            if dd < 5.0 && besta.wants(dd) {
+                besta.offer(dd, Hit::Axis { name });
+            }
+        }
+    }
     // Construction axes, picked like the origin axes.
     for (name, a, b) in construction_axis_segments(app) {
         if let (Some(a), Some(b)) = (proj.to_screen(a), proj.to_screen(b)) {
@@ -1834,15 +1901,25 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
     for (t, _, h) in bestp.into_iter().chain(profiles_all) {
         surf.push((t - slack, h));
     }
+    let face_hit = (all && !faces.is_empty()) || bestf.is_some();
     if all {
         surf.extend(faces.sorted());
     } else if let Some(f) = bestf {
         surf.push(f);
     }
-    // Planes give way to a face or profile at the same depth (a floor on the XZ plane).
-    for (name, _, q) in origin_planes(app) {
-        if let Some(t) = ray_quad(o, d, &q) {
-            surf.push((t + slack, Hit::Plane { name: name.into(), point: o + d * t }));
+    // Planes give way to a face or profile at the same depth (a floor on the XZ plane), and to
+    // any body face under the cursor unless a plane is being picked: origin planes sized to the
+    // model (R217) would otherwise cover the part they frame.
+    if !face_hit || app.picking_plane() {
+        for (name, _, q) in origin_planes(app) {
+            if let Some(t) = ray_quad(o, d, &q) {
+                surf.push((t + slack, Hit::Plane { name: name.into(), point: o + d * t }));
+            }
+        }
+        for (name, _, q) in occurrence_origin_planes(app) {
+            if let Some(t) = ray_quad(o, d, &q) {
+                surf.push((t + slack, Hit::Plane { name, point: o + d * t }));
+            }
         }
     }
     for (name, _, q) in construction_quads(app) {
@@ -2579,6 +2656,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
     };
     let mut planes: Vec<(String, [Vec3; 4], Color32)> = origin_planes(app).into_iter().map(|(n, _, q)| (n.to_string(), q, t.origin_plane)).collect();
     planes.extend(construction_quads(app).into_iter().map(|(n, _, q)| (n, q, t.construction_plane)));
+    planes.extend(occurrence_origin_planes(app).into_iter().map(|(n, _, q)| (n, q, t.origin_plane)));
     let through = app.picking_plane() || app.preferences.reference_geometry_through_bodies;
     for (name, q, base) in &planes {
         let (selected, hovered) = plane_state(name);
@@ -2606,6 +2684,43 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
         while a < size * AXIS_LEN {
             reference_line(&mut sc, (dir * a).to_f32(), (dir * (a + dash)).to_f32(), c4(col), w * 0.75, through);
             a += dash * 2.0;
+        }
+    }
+    // Placed components' own axes shown, at their poses (R216).
+    for (name, o, dir) in occurrence_origin_axes(app) {
+        let col = match name.rsplit(':').next() {
+            Some("X") => t.axis_x,
+            Some("Y") => t.axis_y,
+            _ => t.axis_z,
+        };
+        let on = sel.iter().any(|x| matches!(x, Sel::Axis { name: n } if *n == name)) || matches!(hover, Some(Hit::Axis { name: n }) if *n == name);
+        let w = if on { 4.0 } else { 2.0 };
+        reference_line(&mut sc, o.to_f32(), (o + dir * size).to_f32(), c4(col), w, through);
+    }
+    // Cosmetic threads (Modeled off): rings at the pitch along the threaded length, the way
+    // Inventor paints a thread image on the face (R222, owner 2026-11-01).
+    for th in &app.session.model.state().threads {
+        if !(th.pitch > 1e-6) || !th.axis.len().is_finite() {
+            continue;
+        }
+        let r = if th.internal { th.major_diameter * 0.5 - th.pitch * 0.5 } else { th.major_diameter * 0.5 };
+        if !(r > 1e-6) {
+            continue;
+        }
+        let (lo, hi) = (th.start.min(th.end), th.start.max(th.end));
+        let rings = (((hi - lo) / th.pitch).floor() as usize).min(400);
+        let u = th.axis.any_perp();
+        let v = th.axis.cross(u);
+        let col = c4(t.text_dim);
+        for k in 0..=rings {
+            let c = th.axis_point + th.axis * (lo + k as f64 * th.pitch);
+            let mut prev = c + u * r;
+            for i in 1..=36 {
+                let a = std::f64::consts::TAU * (i as f64 / 36.0);
+                let q = c + u * (r * a.cos()) + v * (r * a.sin());
+                reference_line(&mut sc, prev.to_f32(), q.to_f32(), col, 1.0, false);
+                prev = q;
+            }
         }
     }
     // Construction axes (dashed, the length of the origin axes either side) and points (a

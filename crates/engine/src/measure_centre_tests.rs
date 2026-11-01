@@ -487,3 +487,57 @@ fn a_circle_and_a_point_measure_from_the_centre() {
     let r = run(&mut s, "sketch.dimension", json!({"entities": [c, pid], "value": 9}));
     assert!(close(&r["measured"], 9.0, 1e-9) && r["type"] == "LinearDimension", "{r}");
 }
+
+// --- R216: a placed component's origin planes shown in the assembly ----------------------------
+
+#[test]
+fn a_placed_components_origin_plane_can_be_shown_and_hidden() {
+    let mut s = Session::default();
+    run(&mut s, "document.new_assembly", json!({}));
+    run(&mut s, "component.create", json!({"name": "Pipe"}));
+    let id = s.doc.occurrences.first().map(|o| o.id).expect("an occurrence");
+    let key = format!("occurrence:{id}:XY");
+    run(&mut s, "browser.visibility", json!({"items": [key], "visible": true}));
+    assert_eq!(s.visibility.shown_occurrence_origin, vec![key.clone()]);
+    run(&mut s, "browser.visibility", json!({"items": [key], "visible": true}));
+    assert_eq!(s.visibility.shown_occurrence_origin.len(), 1, "no duplicate");
+    run(&mut s, "browser.visibility", json!({"items": [key], "visible": false}));
+    assert!(s.visibility.shown_occurrence_origin.is_empty());
+    let r = s.execute("browser.visibility", &json!({"items": ["occurrence:999:XY"], "visible": true}));
+    assert!(r.is_err(), "an unknown occurrence is refused");
+}
+
+// --- R220: several sketch corners rounded in one pass -------------------------------------------
+
+#[test]
+fn several_corners_round_in_one_pass() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let r = run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 20]}));
+    let l: Vec<String> = r["curves"].as_array().unwrap().iter().map(|c| c.as_str().unwrap().to_string()).collect();
+    assert_eq!(l.len(), 4, "{r}");
+    // Two corners by their line pairs, in one call: two arcs, one radius dimension.
+    let r = run(&mut s, "sketch.fillet", json!({"corners": [{"a": l[0], "b": l[1]}, {"a": l[2], "b": l[3]}], "radius": 3}));
+    assert_eq!(r["curves"].as_array().map_or(0, Vec::len), 2, "{r}");
+    let bad = s.execute("sketch.fillet", &json!({"corners": [], "radius": 3}));
+    assert!(bad.is_err(), "an empty corner list is refused");
+}
+
+// --- R221: inch designs thread in UNC/UNF -------------------------------------------------------
+
+#[test]
+fn an_inch_design_suggests_a_unified_thread_and_takes_one() {
+    let mut s = Session::default();
+    run(&mut s, "document.units", json!({"units": "in"}));
+    run(&mut s, "solid.cylinder", json!({"diameter": "25.4 mm", "height": "50 mm", "name": "Shaft", "body_name": "Shaft"}));
+    let wall = Vec3::new(12.7, 0.0, 25.0);
+    let inch = solidcraft_doc::inch_units(&s.doc.units);
+    assert!(inch, "units {:?}", s.doc.units);
+    let suggested = solidcraft_doc::suggested_thread(&s.world_state(), wall, true).unwrap();
+    assert!(suggested.contains("UNC"), "{suggested}");
+    assert!(suggested.starts_with("1-"), "a 1 in shaft is 1-8 UNC, got {suggested}");
+    let r = run(&mut s, "solid.thread", json!({"face": [12.7, 0, 25], "designation": "1-8 UNC"}));
+    assert!(r.get("feature").is_some(), "{r}");
+    let metric = solidcraft_doc::suggested_thread(&s.world_state(), wall, false).unwrap();
+    assert!(metric.starts_with('M'), "{metric}");
+}

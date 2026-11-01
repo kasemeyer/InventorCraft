@@ -2587,6 +2587,10 @@ pub struct Visibility {
     pub hidden_occurrences: Vec<Vec<u64>>,
     /// Origin items (O, X, Y, Z, XY, XZ, YZ) and construction geometry, by name.
     pub hidden_origin: Vec<String>,
+    /// A placed component's origin planes and axes shown, as `occurrence:<id>:<XY|XZ|YZ|X|Y|Z>`:
+    /// Inventor shows a part's own origin inside an assembly to constrain against (R216).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub shown_occurrence_origin: Vec<String>,
     /// Sketches by feature id.
     pub hidden_sketches: Vec<u64>,
     /// Finished sketches shown although a feature uses them.

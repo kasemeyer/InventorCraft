@@ -2021,7 +2021,7 @@ pub fn open(app: &mut SolveApp, at: Pos2) {
     app.menu.over_geometry = app.viewport.hover.is_some();
     // A right-click leaves a plane unselected, but the menu offers a sketch on it.
     app.menu.plane = app.viewport.hover.clone().and_then(|h| crate::viewport::candidate(app, &[h])).and_then(|(_, sel)| match sel {
-        Sel::Plane { name } => Some(name),
+        Sel::Plane { name } if crate::viewport::occurrence_origin_key(&name).is_none() => Some(name),
         _ => None,
     });
     crate::select_other::close(app);

@@ -430,7 +430,11 @@ fn resolve_sel(s: &Session, sel: &Sel) -> Option<(GeoRef, Prim)> {
         Sel::Edge { body, point, .. } => on(body, PickWhat::Edge, *point)?,
         Sel::Vertex { body, point } if !body.is_empty() => on(body, PickWhat::Vertex, *point)?,
         Sel::Vertex { .. } => GeoRef { occurrence: 0, geo: Geo::Origin { item: OriginItem::Center } },
-        Sel::Plane { name } | Sel::Axis { name } => GeoRef { occurrence: 0, geo: Geo::Origin { item: origin_item(name)? } },
+        Sel::Plane { name } | Sel::Axis { name } => match crate::viewport::occurrence_origin_key(name) {
+            // A placed component's shown origin plane or axis, picked in the view (R216).
+            Some((occurrence, item)) => GeoRef { occurrence, geo: Geo::Origin { item: origin_item(item)? } },
+            None => GeoRef { occurrence: 0, geo: Geo::Origin { item: origin_item(name)? } },
+        },
         _ => return None,
     };
     let prim = resolve_world(&s.doc, &s.model.state(), &g).ok()?;
