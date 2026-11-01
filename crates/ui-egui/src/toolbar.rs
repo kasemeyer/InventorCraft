@@ -513,7 +513,9 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         let tabs_rect = Rect::from_min_max(pos2(tabs_start.min(tabs_end), r.top()), pos2(tabs_end, r.bottom()));
         let mut tabs_ui = ui.new_child(egui::UiBuilder::new().max_rect(tabs_rect));
         tabs_ui.set_clip_rect(tabs_rect.intersect(ui.clip_rect()));
-        crate::documents::tabs(app, &mut tabs_ui, r, tabs_start, tabs_end);
+        if !crate::profile::active(app).workflow.document_tabs_bottom {
+            crate::documents::tabs(app, &mut tabs_ui, r, tabs_start, tabs_end);
+        }
         if !app.native_file_menu {
             let response = ui.interact(report, ui.id().with("sc_report_button"), Sense::click());
             response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), report_text));
@@ -1388,7 +1390,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
         // The Sketch exit group follows the last sketch panel, and is always kept room for so it
         // stays reachable at every width; when panels go into the » menu it moves to the far right.
         let finish_plan = sizes.last().and_then(|size| {
-            if tab == "SKETCH" {
+            if tab == "SKETCH" || lists.last().is_some_and(|(panel, ..)| *panel == "RETURN") {
                 Some(Plan::full(size))
             } else if tab == "RENDER" {
                 // Personal pins remain uncapped: extra Image actions use the same
@@ -1420,7 +1422,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             let collapsed = plan.fit == Fit::Collapsed;
             let trimmed = plan.shown < plan.widths.len();
-            let finish = tab == "SKETCH" && *panel == "FINISH SKETCH";
+            let finish = (tab == "SKETCH" && *panel == "FINISH SKETCH") || *panel == "RETURN";
             let pinned = finish || (tab == "RENDER" && *panel == "IMAGE");
             let width = if pinned { finish_width } else { plan.width() };
             if pinned && finish_right {
@@ -1476,8 +1478,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 if collapsed_single.is_none() {
                     dropdown_arrow(&painter, pos2(br.center().x, br.bottom() - 3.0), t.text_dim);
                 }
-                if let Some(c) = collapsed_single {
-                    let info = single_info.as_ref().expect("the singleton command info was computed");
+                if let (Some(c), Some(info)) = (collapsed_single, single_info.as_ref()) {
                     fresp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, info.enabled, app.tr_label(c.label)));
                     if ribbon_tooltip(app, fresp, c, info.disabled_reason.as_deref()).clicked() && info.enabled {
                         app.start_pinned(c.id);
@@ -1708,7 +1709,8 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             if panel_open || hot {
                 painter.rect_filled(lr, t.radius_sm, if panel_open { accent.soft } else { t.hover });
             }
-            let label = if finish { app.tr("ui.ribbon_exit").to_string() } else { crate::profile::panel_label(app, &tab, panel) };
+            let label =
+                if finish && *panel != "RETURN" { app.tr("ui.ribbon_exit").to_string() } else { crate::profile::panel_label(app, &tab, panel) };
             let font = if panel_open || hot {
                 crate::fonts::semibold(crate::theme::Tokens::get().font_caption)
             } else {

@@ -259,6 +259,7 @@ pub enum Shown {
     #[default]
     Always,
     Sketch,
+    Component,
     Render,
 }
 
@@ -1017,7 +1018,22 @@ pub fn active(app: &SolveApp) -> &'static Profile {
 
 /// The active profile's ribbon for the active document's kind.
 pub fn ribbon(app: &SolveApp) -> &'static Ribbon {
-    active(app).ribbon(app.session.doc.kind)
+    active(app).ribbon(editing_kind(app))
+}
+
+/// Editing a part does not turn its containing assembly into a Part document. Keep this
+/// environment decision separate from file kind, Save As, browser root and document identity.
+pub(crate) fn editing_kind(app: &SolveApp) -> DocumentKind {
+    let session = &app.session;
+    if !active(app).workflow.component_edit_environment || session.doc.kind != DocumentKind::Assembly || session.active_component == 0 {
+        return session.doc.kind;
+    }
+    let component = session.active_component;
+    let subassembly = session.doc.occurrences.iter().any(|o| o.parent == component)
+        || session.doc.links.get(&component).is_some_and(|link| {
+            std::path::Path::new(&link.path).extension().and_then(|ext| ext.to_str()).is_some_and(|ext| ext.eq_ignore_ascii_case("tciasm"))
+        });
+    if subassembly { DocumentKind::Assembly } else { DocumentKind::Part }
 }
 
 /// Turn a profile on and apply its defaults (nav preset, navigator, theme, history dock).
@@ -1092,11 +1108,7 @@ pub fn first_run(app: &mut SolveApp) {
 /// `"<profile id>.<kind>"` ("inventor.part") otherwise.
 pub fn custom_scope(app: &SolveApp) -> String {
     let profile = active(app);
-    if profile.id == SOLIDCRAFT {
-        crate::toolbar_custom::WORKSPACE.to_string()
-    } else {
-        format!("{}.{}", profile.id, kind_name(app.session.doc.kind))
-    }
+    if profile.id == SOLIDCRAFT { crate::toolbar_custom::WORKSPACE.to_string() } else { format!("{}.{}", profile.id, kind_name(editing_kind(app))) }
 }
 
 /// The catalog id the active ribbon labels a tab (`panel: None`) or a panel with, if any.

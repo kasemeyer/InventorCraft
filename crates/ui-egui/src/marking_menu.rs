@@ -71,7 +71,7 @@ pub(crate) fn context(app: &SolveApp) -> MenuContext {
             MenuContext::Sketch
         };
     }
-    if app.session.doc.kind == DocumentKind::Assembly {
+    if crate::profile::editing_kind(app) == DocumentKind::Assembly {
         return if sel.is_empty() { MenuContext::AssemblyEmpty } else { MenuContext::AssemblyComponent };
     }
     if has(|s| matches!(s, Sel::Face { .. })) {
@@ -210,12 +210,7 @@ pub(crate) fn overflow(app: &SolveApp) -> Option<Vec<Item>> {
     // below it still exposes every occurrence action.
     if ctx == MenuContext::AssemblyComponent && paths.len() == 1 {
         let ring_ids: Vec<&str> = l.ring.iter().map(String::as_str).filter(|id| !id.is_empty()).collect();
-        let mut items: Vec<Item> = l
-            .overflow
-            .iter()
-            .filter(|id| id.as_str() == "ui.repeat")
-            .map(|id| item(app, id, ctx))
-            .collect();
+        let mut items: Vec<Item> = l.overflow.iter().filter(|id| id.as_str() == "ui.repeat").map(|id| item(app, id, ctx)).collect();
         if !items.is_empty() {
             items.push(Item::sep());
         }
@@ -239,8 +234,7 @@ pub(crate) fn overflow(app: &SolveApp) -> Option<Vec<Item>> {
             })
         })
     });
-    if round_pair {
-        let tool = app.tool.as_ref().expect("the dimension tool was checked above");
+    if round_pair && let Some(tool) = app.tool.as_ref() {
         let mut menu = act("ui.sketch.dimensionTypeMenu", crate::i18n::tr("ui.drawing.dimType"), "dimension");
         let chosen = tool.dimension_type.as_deref().or_else(|| sketch_dimension_default_type(app));
         for (kind, label) in [("center", "Center"), ("gap", "Gap")] {
@@ -336,7 +330,7 @@ pub(crate) fn item(app: &SolveApp, id: &str, ctx: MenuContext) -> Item {
         && let [path] = selected_placements(app).as_slice()
         && let Some(entry) = crate::context_menu::items(app, &crate::context_menu::Target::Occurrence { path: path.clone() })
             .into_iter()
-            .find(|entry| entry.id == id)
+            .find(|entry| entry.id == id || (id == "ui.activate" && entry.id == "component.finish_edit"))
     {
         return entry;
     }
@@ -349,6 +343,8 @@ pub(crate) fn item(app: &SolveApp, id: &str, ctx: MenuContext) -> Item {
     let bodies = || crate::context_menu::touched_bodies(app);
     match id {
         "" | "-" => Item::sep(),
+        "ui.openComponent" => act("ui.openComponent", "Open", "folder").on(false),
+        "ui.activate" => act("ui.activate", "Edit", "component").on(false),
         "ui.repeat" => match &app.last_command {
             Some((_, label)) => act("ui.repeat", &format!("Repeat {label}"), "redo"),
             None => act("ui.repeat", "Repeat", "redo").on(false),

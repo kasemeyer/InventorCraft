@@ -59,8 +59,40 @@ fn inventor_part_document_shows_the_part_ribbon() {
     assert_eq!(h.app.ui.tab, "MODEL");
     assert_eq!(tab_label(&h.app, "MODEL"), "3D Model");
     assert_eq!(panel_label(&h.app, "MODEL", "WORK FEATURES"), "Work Features");
-    let shown: Vec<&str> = ribbon(&h.app).tab("MODEL").unwrap().panels.iter().filter(|p| !p.hidden).map(|p| p.id.as_str()).collect();
+    let shown: Vec<&str> =
+        ribbon(&h.app).tab("MODEL").unwrap().panels.iter().filter(|p| !p.hidden && p.shown == Shown::Always).map(|p| p.id.as_str()).collect();
     assert_eq!(panel_ids(&panel_lists(&h.app, "MODEL")), shown);
+}
+
+#[test]
+fn editing_a_part_uses_its_ribbon_without_changing_the_assembly_document() {
+    let mut h = inventor(Assembly);
+    let created = h.app.run("component.create", json!({"name":"Block"})).unwrap();
+    h.app.run("solid.box", json!({"length":30,"width":20,"height":10})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.ui.tab, "MODEL", "Edit enters the part environment");
+    assert_eq!(custom_scope(&h.app), "inventor.part");
+    assert_eq!(crate::alias_keys::context(&h.app), crate::alias_keys::Context::Part);
+    assert_eq!(h.app.session.doc.kind, Assembly);
+    assert_eq!(h.app.docs.count(), 1, "Edit stays in the assembly tab");
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.frame();
+    assert_eq!(h.app.ui.tab, "SKETCH");
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.frame();
+    assert_eq!(h.app.ui.tab, "MODEL");
+    assert_eq!(h.app.session.active_component, created["component"].as_u64().unwrap());
+    h.app.run("component.activate", json!({"component":0})).unwrap();
+    h.frame();
+    assert_eq!(h.app.ui.tab, "ASSEMBLE");
+    assert_eq!(custom_scope(&h.app), "inventor.assembly");
+
+    crate::profile::choose(&mut h.app, "solidcraft").unwrap();
+    let tabs = visible_tabs(&h.app);
+    h.app.run("component.activate", json!({"component":created["component"]})).unwrap();
+    h.frame();
+    assert_eq!(visible_tabs(&h.app), tabs, "SolidCraft keeps its shared ribbon");
+    assert_eq!(custom_scope(&h.app), "DESIGN");
 }
 
 #[test]

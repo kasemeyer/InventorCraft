@@ -194,9 +194,11 @@ pub fn switch(app: &mut SolveApp, i: usize) {
     let refresh_linked_source = !app.session.is_dirty()
         && crate::profile::active(app).workflow.update_links_on_open
         && app.session.path.as_deref().is_some_and(|path| {
-            app.docs.slots.get(i).and_then(Option::as_ref).is_some_and(|slot| {
-                slot.session.doc.kind == DocumentKind::Assembly && crate::linked_source::is_source_of(&slot.session, path)
-            })
+            app.docs
+                .slots
+                .get(i)
+                .and_then(Option::as_ref)
+                .is_some_and(|slot| slot.session.doc.kind == DocumentKind::Assembly && crate::linked_source::is_source_of(&slot.session, path))
         });
     let Some(incoming) = app.docs.slots.get_mut(i).and_then(Option::take) else { return };
     let out = swap_in(app, incoming);
@@ -639,8 +641,24 @@ struct TabDrag {
     grab: f32,
 }
 
-/// The document tabs in the application bar, from `x0` to `x1`: click to switch, × to close,
-/// drag to reorder, + for a new design.
+/// Reuse the document strip below the canvas under profiles that request bottom tabs.
+pub(crate) fn bottom_tabs(app: &mut SolveApp, ui: &mut egui::Ui) {
+    if !crate::profile::active(app).workflow.document_tabs_bottom {
+        return;
+    }
+    let t = Tokens::get();
+    let response = Container::new(ui.ctx(), Surface::ApplicationBar)
+        .edge("sc_document_tabs", ui_kit::Edge::Bottom)
+        .exact_size(32.0)
+        .frame(Container::new(ui.ctx(), Surface::ApplicationBar).edge_frame(t.app_bar))
+        .show(ui, |ui| {
+            let r = ui.max_rect();
+            tabs(app, ui, r, r.left() + t.space_4, r.right() - t.space_4);
+        });
+    crate::scenario::publish_rect("document_tabs", response.response.rect);
+}
+
+/// Document tabs from `x0` to `x1`: click to switch, × to close, drag to reorder, + for a new design.
 pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     let t = Tokens::get();
     let info = tabs_info(app);
@@ -668,7 +686,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     let widths: Vec<f32> = (first..first + shown).map(|i| if fit_all { natural.get(i).copied().unwrap_or(w) } else { w }).collect();
     let width = |i: usize| i.checked_sub(first).and_then(|k| widths.get(k)).copied().unwrap_or(w);
     let strip_end = x0 + widths.iter().sum::<f32>();
-    let title_bar = app.custom_titlebar || app.integrated_titlebar;
+    let title_bar = !crate::profile::active(app).workflow.document_tabs_bottom && (app.custom_titlebar || app.integrated_titlebar);
     // A tab being dragged to a new place follows the pointer and the others make room for it;
     // Escape puts it back.
     let drag_id = egui::Id::new("sc_doc_tab_drag");
@@ -723,7 +741,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         if resp.drag_stopped() && drag.is_some_and(|d| d.from == i) {
             // Released over the bar (not dropped somewhere down the window): the tab lands there.
             if let Some((from, to)) = to
-                && pointer.is_some_and(|p| p.y < r.bottom() + r.height())
+                && pointer.is_some_and(|p| p.y >= r.top() - r.height() && p.y < r.bottom() + r.height())
             {
                 dropped = Some((from, to));
             }
@@ -1064,6 +1082,28 @@ mod new_drawing_tests;
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn inventor_document_tabs_stay_below_the_canvas_and_above_status() {
+        let mut h = crate::test_support::inventor(solidcraft_engine::doc::DocumentKind::Part);
+        h.app.home.open = false;
+        h.frames(3);
+        let tabs = crate::scenario::rect_of("document_tabs").expect("bottom strip");
+        let tab = crate::scenario::rect_of("tab:design:0").expect("document tab");
+        let status = crate::scenario::rect_of("status_bar").expect("status bar");
+        let viewport = h.app.viewport.rect.expect("canvas");
+        assert!(tabs.contains_rect(tab));
+        assert!(tabs.top() >= viewport.bottom() - 1.0);
+        assert!(tabs.bottom() <= status.top() + 1.0);
+        h.app.home.open = true;
+        h.frames(2);
+        assert!(crate::scenario::handle_at("tab:design:0").is_some(), "open documents remain reachable from Home");
+        h.step(&json!({"click":{"handle":"tab:design:0"}})).unwrap();
+        h.frames(2);
+        assert!(!h.app.home.open, "selecting a bottom tab leaves Home");
+        let mut upstream = crate::scenario::Harness::new();
+        upstream.frames(2);
+        assert!(crate::scenario::rect_of("document_tabs").is_none());
+    }
     use super::*;
     use crate::Services;
     use egui::Color32;

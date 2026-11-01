@@ -10,6 +10,11 @@ use solidcraft_engine::find_command;
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Workflow {
+    /// Choose ribbon, aliases and canvas menus from the component being edited, while the
+    /// containing assembly remains the document. Off: the document determines the environment.
+    pub component_edit_environment: bool,
+    /// Document tabs sit below the canvas, above the status bar, rather than in the title bar.
+    pub document_tabs_bottom: bool,
     /// Right-click in the graphics window opens these marking menus, in every state (inside a
     /// tool or panel too). Browser rows always keep their list menus.
     /// None: upstream's list menu with its opt-in ring.
@@ -78,6 +83,8 @@ impl Default for Workflow {
     /// Upstream behaviour.
     fn default() -> Self {
         Workflow {
+            component_edit_environment: false,
+            document_tabs_bottom: false,
             marking_menu: None,
             look_at_on_sketch: false,
             update_links_on_open: false,
@@ -194,6 +201,8 @@ pub struct MenuLayout {
 /// Marking-menu items that are UI actions rather than registry commands (`context_menu::run_item`
 /// runs them).
 pub const MARKING_ACTIONS: &[&str] = &[
+    "ui.activate",
+    "ui.openComponent",
     "ui.repeat",
     "ui.done",
     "ui.ok",

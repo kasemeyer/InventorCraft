@@ -2030,8 +2030,14 @@ impl SolveApp {
         if agent_chat::shown(self) {
             agent_chat::settings::dialog(self, ui.ctx());
         }
-        if self.home.open {
-            home::show(self, ui);
+        let tabs_on_home = self.home.open;
+        if tabs_on_home {
+            // Open documents remain reachable from Home after their strip moves out of the
+            // application bar. Selecting a bottom tab returns to that document as usual.
+            documents::bottom_tabs(self, ui);
+            if self.home.open {
+                home::show(self, ui);
+            }
             if self.home.open {
                 // Agent detection runs in the background and is only received by `agent_chat::poll`
                 // Polling here is required for the detection to complete on Home
@@ -2055,6 +2061,9 @@ impl SolveApp {
         // Before the layouts split: the bar takes the window's bottom strip in either layout.
         if crate::profile::active(self).workflow.status_bar {
             status_bar::show(self, ui);
+        }
+        if !tabs_on_home {
+            documents::bottom_tabs(self, ui);
         }
         if !floating && show_timeline && !left_timeline {
             timeline::timeline(self, ui);

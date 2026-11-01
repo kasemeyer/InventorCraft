@@ -97,6 +97,7 @@ const PART_FACES: &[(&str, &str, &[(&str, bool)])] = &[
     ("MODEL", "MEASURE", &[("inspect.measure", L)]),
     ("MODEL", "INSERT", &[("file.insert_step", S)]),
     ("MODEL", "CONVERT", &[("sheet.convert", L)]),
+    ("MODEL", "RETURN", &[("component.finish_edit", L)]),
     ("SKETCH", "SKETCH", &[("sketch.create", L)]),
     (
         "SKETCH",
@@ -134,7 +135,6 @@ const PART_FACES: &[(&str, &str, &[(&str, bool)])] = &[
         "SKETCH",
         "CONSTRAIN",
         &[
-            ("sketch.dimension", L),
             ("sketch.auto_constrain", S),
             ("sketch.auto_constrain_from_datum", S),
             ("sketch.constrainer", S),
@@ -155,7 +155,8 @@ const PART_FACES: &[(&str, &str, &[(&str, bool)])] = &[
         ],
     ),
     ("SKETCH", "INSERT", &[("canvas.insert", S), ("sketch.insert_dxf", S)]),
-    ("SKETCH", "FORMAT", &[("sketch.construction", S), ("sketch.centerline", S)]),
+    ("SKETCH", "DIMENSION", &[("sketch.dimension", L)]),
+    ("SKETCH", "FORMAT", &[("sketch.construction", S)]),
     ("SKETCH", "FINISH SKETCH", &[("sketch.finish", L)]),
     ("SHEET METAL", "CREATE", &[("sheet.flange", L), ("sheet.hem", S), ("sheet.fold", S)]),
     ("SHEET METAL", "MODIFY", &[("sheet.perforate", L), ("sheet.unfold", S), ("sheet.refold", S), ("solid.hole", S)]),
@@ -231,9 +232,10 @@ fn inventor_part_panels_follow_the_capture() {
                 "MEASURE",
                 "INSERT",
                 "CONVERT",
+                "RETURN",
             ],
         ),
-        ("SKETCH", &["SKETCH", "CREATE", "MODIFY", "PATTERN", "CONSTRAIN", "INSERT", "FORMAT", "PARAMETERS", "FINISH SKETCH"]),
+        ("SKETCH", &["SKETCH", "CREATE", "MODIFY", "PATTERN", "DIMENSION", "CONSTRAIN", "INSERT", "FORMAT", "PARAMETERS", "FINISH SKETCH"]),
         ("SHEET METAL", &["SKETCH", "CREATE", "MODIFY", "WORK FEATURES", "PATTERN", "SETUP", "FLAT PATTERN", "PARAMETERS", "MEASURE"]),
         ("ANNOTATE", &[]),
         ("INSPECT", &["MEASURE", "ANALYZE", "PARAMETERS"]),
@@ -422,7 +424,7 @@ fn clipboard_buttons_use_the_edit_clipboard() {
 
 /// `(tab, panel, face)` of the Assembly ribbon; `S` marks a small button.
 const ASSEMBLY_FACES: &[(&str, &str, &[(&str, bool)])] = &[
-    ("ASSEMBLE", "COMPONENT", &[("component.insert_design", L), ("component.create", L)]),
+    ("ASSEMBLE", "COMPONENT", &[("component.insert_design", L), ("component.create_in_place", L)]),
     ("ASSEMBLE", "POSITION", &[("solid.move", L)]),
     // Updated by design (R70, Plan E-2 Task 1): CAP §E's Relationships panel.
     (
@@ -477,7 +479,7 @@ fn inventor_commands() -> BTreeSet<&'static str> {
 /// `constraint.hide_all`; 192 - 4 = 188 (N + 6). The two standard-parts commands are no longer
 /// placed in the Component panel: Fastener has its dedicated ribbon entry, while the design
 /// library is not implemented yet (188 + 2 = 190).
-const INVENTOR_UNPLACED: usize = 190;
+const INVENTOR_UNPLACED: usize = 188;
 
 #[test]
 fn inventor_assembly_ribbon_follows_the_capture() {
@@ -504,10 +506,10 @@ fn inventor_assembly_ribbon_follows_the_capture() {
 #[test]
 fn inventor_assembly_panels_follow_the_capture() {
     let want: &[(&str, &[&str])] = &[
-        ("ASSEMBLE", &["COMPONENT", "POSITION", "RELATIONSHIPS", "MANAGE", "WORK FEATURES", "MEASURE"]),
+        ("ASSEMBLE", &["COMPONENT", "POSITION", "RELATIONSHIPS", "MANAGE", "WORK FEATURES", "MEASURE", "RETURN"]),
         ("DESIGN", &["FASTEN", "FRAME", "MEASURE"]),
         ("MODEL", &["SKETCH", "MODIFY ASSEMBLY", "WORK FEATURES", "PATTERN", "PARAMETERS", "MEASURE"]),
-        ("SKETCH", &["SKETCH", "CREATE", "MODIFY", "PATTERN", "CONSTRAIN", "INSERT", "FORMAT", "MEASURE", "FINISH SKETCH"]),
+        ("SKETCH", &["SKETCH", "CREATE", "MODIFY", "PATTERN", "DIMENSION", "CONSTRAIN", "INSERT", "FORMAT", "MEASURE", "FINISH SKETCH"]),
         ("INSPECT", &["INTERFERENCE", "ANALYZE", "MEASURE"]),
         ("TOOLS", &["MEASURE", "MATERIAL AND APPEARANCE", "OPTIONS", "CLIPBOARD", "FIND"]),
         ("MANAGE", &["UPDATE", "MANAGE", "STYLES AND STANDARDS", "AUTHOR"]),
@@ -711,7 +713,7 @@ fn split_buttons_follow_the_capture() {
     // No other panel has a split button.
     let count: usize =
         DocumentKind::ALL.into_iter().flat_map(|k| inventor().ribbon(k).tabs.iter()).flat_map(|t| &t.panels).map(|p| p.dropdowns.len()).sum();
-    assert_eq!(count, 3 * 4 + 1 + 1 + 1 + 1, "Work Features on four tabs, Primitives, sketch Fillet on two sketch tabs, Place");
+    assert_eq!(count, 3 * 4 + 1 + 2 + 2 + 1, "Work Features on four tabs, Primitives, sketch Fillet and Format on two sketch tabs, Place");
     assert!(validate(inventor()).is_empty(), "{:?}", validate(inventor()));
 }
 

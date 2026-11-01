@@ -167,10 +167,11 @@ pub fn panel_lists(app: &SolveApp, tab: &str) -> PanelLists {
     static LISTS: std::sync::Mutex<BTreeMap<String, PanelLists>> = std::sync::Mutex::new(BTreeMap::new());
     let ribbon = crate::profile::ribbon(app);
     let sketching = app.session.active_sketch.is_some();
-    let cache = format!("{}/{:?}/{tab}/{sketching}", crate::profile::active(app).id, app.session.doc.kind);
+    let editing = app.session.active_component != 0 && !sketching;
+    let cache = format!("{}/{:?}/{tab}/{sketching}/{editing}", crate::profile::active(app).id, crate::profile::editing_kind(app));
     let mut lists = match LISTS.lock() {
-        Ok(mut lists) => lists.entry(cache).or_insert_with(|| panel_lists_of(ribbon, tab, sketching)).clone(),
-        Err(_) => panel_lists_of(ribbon, tab, sketching),
+        Ok(mut lists) => lists.entry(cache).or_insert_with(|| panel_lists_of(ribbon, tab, sketching, editing)).clone(),
+        Err(_) => panel_lists_of(ribbon, tab, sketching, editing),
     };
     let scope = crate::profile::custom_scope(app);
     let hidden = |panel: &str| ribbon.tab(tab).and_then(|t| t.panel(panel)).is_some_and(|p| p.hidden);
@@ -190,12 +191,12 @@ pub fn set_panel_shown(app: &mut SolveApp, tab: &str, panel: &str, shown: bool) 
 /// [`panel_lists`] worked out from a ribbon: the tab's panels shown always (and those shown
 /// while sketching, when `sketching`), with their registry commands, keeping a panel only when
 /// it lists some command (or is SELECT, which holds the selection filter).
-fn panel_lists_of(ribbon: &'static crate::profile::Ribbon, tab: &str, sketching: bool) -> PanelLists {
+fn panel_lists_of(ribbon: &'static crate::profile::Ribbon, tab: &str, sketching: bool, editing: bool) -> PanelLists {
     use crate::profile::Shown;
     let Some(tab) = ribbon.tab(tab) else { return Vec::new() };
     tab.panels
         .iter()
-        .filter(|p| p.shown == Shown::Always || (sketching && p.shown == Shown::Sketch))
+        .filter(|p| p.shown == Shown::Always || (sketching && p.shown == Shown::Sketch) || (editing && p.shown == Shown::Component))
         .filter_map(|p| {
             let cmds: Vec<&'static CommandSpec> = p.commands.iter().filter_map(|id| solidcraft_engine::find_command(id)).collect();
             (!cmds.is_empty() || p.id == "SELECT").then_some((p.id.as_str(), cmds, p.promoted))
@@ -332,7 +333,8 @@ fn panels_menu(app: &SolveApp) -> Option<Item> {
         return None;
     }
     let tab = app.ui.tab.as_str();
-    let all = panel_lists_of(crate::profile::ribbon(app), tab, app.session.active_sketch.is_some());
+    let sketching = app.session.active_sketch.is_some();
+    let all = panel_lists_of(crate::profile::ribbon(app), tab, sketching, app.session.active_component != 0 && !sketching);
     if all.is_empty() {
         return None;
     }
@@ -478,7 +480,7 @@ mod migration_tests {
         let tabs: std::collections::BTreeSet<&str> = crate::workspace::SECTIONS.iter().map(|s| s.tab).chain(["NO SUCH TAB"]).collect();
         let ids = |l: &PanelLists| l.iter().map(|(p, cmds, n)| (*p, cmds.iter().map(|c| c.id).collect::<Vec<_>>(), *n)).collect::<Vec<_>>();
         for tab in tabs {
-            let fresh = panel_lists_of(crate::profile::ribbon(&app), tab, false);
+            let fresh = panel_lists_of(crate::profile::ribbon(&app), tab, false, false);
             assert_eq!(ids(&panel_lists(&app, tab)), ids(&fresh), "{tab}");
             assert_eq!(ids(&panel_lists(&app, tab)), ids(&fresh), "{tab}, kept");
         }

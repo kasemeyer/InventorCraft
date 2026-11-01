@@ -38,6 +38,9 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("component")
         .params("bodies: [names] → one new component per body, named after it"),
     CommandSpec::new("component.activate", "Activate Component", activate).icon("activate").noundo().params("component: id or name (0 or \"root\" for the design); occurrence?, path?: exact placement used to author shared geometry"),
+    CommandSpec::new("component.finish_edit", "Return", finish_edit).icon("finish").noundo()
+        .enabled(|s| if s.active_component == 0 { Err("no component is being edited".into()) } else if s.active_sketch.is_some() { Err("finish the sketch first".into()) } else { Ok(()) })
+        .params("returns from the edited occurrence to its exact parent placement, or the design root"),
     CommandSpec::new("component.list", "List Components", list).icon("list").noundo().params(
         "compact?: bool (counts of bodies, features, sketches and construction planes instead of their names; occurrences leave out \
          identity transforms; children as occurrence ids); bodies?: bool (with compact: body names, not their count)",
@@ -189,6 +192,23 @@ fn activate(s: &mut Session, p: &Value) -> Result<Value> {
     s.active_occurrence_path = path;
     s.revision += 1;
     Ok(json!({ "active": id }))
+}
+
+fn finish_edit(s: &mut Session, _: &Value) -> Result<Value> {
+    if s.active_sketch.is_some() {
+        return Err(bad("component.finish_edit", "finish the sketch first"));
+    }
+    let mut path = s.active_occurrence_path.clone().unwrap_or_else(|| s.doc.first_path(s.active_component));
+    path.pop();
+    let params = if let Some(occurrence) = path.last().copied() {
+        let placement = s.occurrence_placement(&path)?;
+        json!({"component":placement.component,"occurrence":occurrence,"path":path})
+    } else {
+        json!({"component":0})
+    };
+    let result = activate(s, &params)?;
+    s.selection.clear();
+    Ok(result)
 }
 
 fn list(s: &mut Session, p: &Value) -> Result<Value> {

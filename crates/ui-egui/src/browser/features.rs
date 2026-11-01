@@ -83,9 +83,10 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: 
 pub(super) fn row(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: &[u64], scope: &str, index: usize, depth: usize, acts: &mut Actions) {
     let Some(feature) = app.session.doc.features.get(index) else { return };
     let (id, label, icon) = (feature.id, feature.name.clone(), crate::timeline::icon_of(&feature.kind));
+    let plane = matches!(feature.kind, FeatureKind::ConstructionPlane { .. });
     let selected = app.session.selection.contains(&Sel::Feature { id });
     app.tree.order.push(format!("f:{id}"));
-    let r = draw_row(ui, ui.id().with(("browser_feature", id)), &Row { depth, icon, label: &label, selected, ..Default::default() });
+    let r = draw_row(ui, ui.id().with(("browser_feature", scope, id)), &Row { depth, icon, label: &label, selected, ..Default::default() });
     if let Some(rect) = r.rect {
         crate::scenario::publish_handle(&format!("row:browser-feature:{scope}:{id}"), rect.center());
         if app.tree.reveal_feature.as_ref().is_some_and(|target| target.id == id && target.path == path) {
@@ -102,7 +103,10 @@ pub(super) fn row(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: &
         click_select(app, ui, format!("f:{id}"), Some(Sel::Feature { id }));
     }
     if let Some(at) = r.secondary {
-        acts.menu = Some((at, Target::Feature { id }));
+        if plane {
+            let _ = app.run("select.set", json!({"items":[Sel::Plane {name:label}]}));
+        }
+        acts.menu = Some((at, if plane { Target::Plane { id } } else { Target::Feature { id } }));
     }
 }
 
@@ -111,6 +115,36 @@ pub(super) fn row(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: &
 mod tests {
     use super::*;
     use crate::scenario::Harness;
+
+    #[test]
+    fn double_clicking_each_copys_feature_edits_that_exact_placement() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        let part = h.app.run("component.create", json!({"name":"Block"})).unwrap();
+        let feature = h.app.run("solid.box", json!({"length":30,"width":20,"height":10})).unwrap()["feature"].as_u64().unwrap();
+        let first = part["occurrence"].as_u64().unwrap();
+        let second = h.app.run("occurrence.copy", json!({"occurrence":first,"translate":[80,0,0]})).unwrap()["occurrence"].as_u64().unwrap();
+        h.call("ui.resize", json!({"width":1200,"height":1600}));
+        for occurrence in [first, second] {
+            h.app.tree.expanded.insert(format!("o:{occurrence}/features"));
+        }
+        for occurrence in [first, second] {
+            h.app.run("component.activate", json!({"component":0})).unwrap();
+            h.frames(3);
+            let handle = format!("row:browser-feature:o:{occurrence}:{feature}");
+            h.step(&json!({"click":{"handle":handle},"double":true})).unwrap();
+            assert_eq!(
+                h.app.session.active_occurrence_path,
+                Some(vec![occurrence]),
+                "status={:?}, selection={:?}",
+                h.app.status,
+                h.app.session.selection
+            );
+            assert!(h.app.dialog.is_some());
+            crate::dialogs::cancel(&mut h.app);
+            crate::test_support::clicks_expire(&mut h);
+        }
+    }
 
     fn feature_rows(h: &mut Harness, cache: &str) -> Vec<String> {
         h.app.tree.model = match cache {

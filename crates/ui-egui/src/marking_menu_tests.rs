@@ -281,6 +281,48 @@ fn the_ring_is_not_cleared_by_the_hold_tracker() {
 }
 
 #[test]
+fn long_assembly_lists_never_cover_the_quick_bubbles() {
+    let mut h = inventor(DocumentKind::Assembly);
+    h.app.home.open = false;
+    let part = h.app.run("component.create", json!({"name":"Block"})).unwrap();
+    h.app.run("solid.box", json!({"length":20,"width":20,"height":20})).unwrap();
+    h.app.run("component.activate", json!({"component":0})).unwrap();
+    h.call("ui.resize", json!({"width":1000,"height":650}));
+    for y in [250.0, 400.0, 580.0] {
+        h.app.session.selection = vec![Sel::Occurrence { path: vec![part["occurrence"].as_u64().unwrap()] }];
+        open_for(&mut h.app, pos2(600.0, y), Target::Viewport);
+        h.frames(4);
+        let pills = h.ctx.memory(|m| m.area_rect(egui::Id::new("sc_marking_menu"))).unwrap();
+        let list = h.ctx.memory(|m| m.area_rect(egui::Id::new("sc_context_menu"))).unwrap();
+        assert!(!pills.intersects(list), "the long list hides the bubbles at {y}: {pills:?}, {list:?}");
+        if y == 250.0 {
+            assert!(list.top() >= pills.bottom(), "keep the bubbles above a scrolling list when there is room below");
+        }
+        assert!(h.ctx.content_rect().contains_rect(pills));
+        assert!(h.ctx.content_rect().contains_rect(list));
+        assert!(crate::scenario::handle_at("marking:constraint.create").is_some(), "the quick actions remain drawn");
+        let open = ring(&h.app).unwrap().into_iter().find(|item| item.id == "ui.openComponent").unwrap();
+        assert_eq!(open.label, "Open", "a disabled action still has a user-facing label");
+        crate::context_menu::close(&mut h.app);
+        h.frames(2);
+    }
+}
+
+#[test]
+fn editing_a_part_inside_an_assembly_uses_the_part_quick_bubbles() {
+    let mut h = inventor(DocumentKind::Assembly);
+    h.app.home.open = false;
+    h.app.run("component.create", json!({"name":"Block"})).unwrap();
+    h.app.run("solid.box", json!({"length":20,"width":20,"height":20})).unwrap();
+    h.app.session.selection.clear();
+    open_for(&mut h.app, pos2(600.0, 350.0), Target::Viewport);
+    h.frames(3);
+    assert_eq!(context(&h.app), MenuContext::Empty);
+    assert!(crate::scenario::handle_at("marking:solid.extrude").is_some());
+    assert!(crate::scenario::handle_at("marking:sketch.create").is_some());
+}
+
+#[test]
 fn marking_menus_have_no_hold_or_flick() {
     let mut h = inventor(DocumentKind::Part);
     h.app.home.open = false;

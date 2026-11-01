@@ -45,7 +45,7 @@ pub fn context(app: &SolveApp) -> Context {
     if app.session.active_sketch.is_some() {
         return Context::Sketch;
     }
-    match app.session.doc.kind {
+    match crate::profile::editing_kind(app) {
         DocumentKind::Part => Context::Part,
         DocumentKind::Assembly => Context::Assembly,
         DocumentKind::Drawing => Context::Drawing,

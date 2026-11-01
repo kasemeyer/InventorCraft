@@ -43,7 +43,7 @@ pub(crate) fn entries(app: &SolveApp) -> Vec<(&'static str, &'static str, bool)>
         ("undo", "undo", FileAction::Undo.enabled(app)),
         ("redo", "redo", FileAction::Redo.enabled(app)),
         ("select", "filter", design_shown(app)),
-        ("return", "finish", live && app.session.active_sketch.is_some()),
+        ("return", "finish", live && (app.session.active_sketch.is_some() || app.session.active_component != 0)),
         ("update", "compute", update),
     ]
 }
@@ -86,7 +86,10 @@ pub(crate) fn run(app: &mut SolveApp, ctx: &egui::Context, id: &str) {
         "undo" => FileAction::Undo.run(app),
         "redo" => FileAction::Redo.run(app),
         "select" => toggle(ctx, SELECT, SELECT_OPENED),
-        "return" => app.start("sketch.finish"),
+        "return" if app.session.active_sketch.is_some() => app.start("sketch.finish"),
+        "return" => {
+            let _ = app.run("component.finish_edit", serde_json::json!({}));
+        }
         "update" => app.start("timeline.compute_all"),
         _ => {}
     }

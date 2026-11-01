@@ -771,25 +771,20 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
     if one {
         let b = bodies.first().cloned().unwrap_or_default();
         if app.session.doc.kind == solidcraft_engine::doc::DocumentKind::Assembly
-            && let Some(component) = app
-                .session
-                .world_state()
-                .bodies
-                .iter()
-                .find(|body| body.name == b)
-                .map(|body| app.session.doc.model_body_component(body))
+            && let Some(component) =
+                app.session.world_state().bodies.iter().find(|body| body.name == b).map(|body| app.session.doc.model_body_component(body))
             && component != 0
         {
             let path = app.menu.canvas_occurrence_path.clone().unwrap_or_else(|| app.session.doc.first_path(component));
+            let active = editing_occurrence(app, &path);
             v.push(Item::sep());
-            v.push(
-                act("ui.activate", if app.session.active_component == component { "Finish Edit" } else { "Edit" }, "component")
-                    .with(json!({
-                        "component": if app.session.active_component == component { 0 } else { component },
-                        "occurrence": path.last(),
-                        "path": path,
-                    })),
-            );
+            v.push(act(if active { "component.finish_edit" } else { "ui.activate" }, if active { "Finish Edit" } else { "Edit" }, "component").with(
+                json!({
+                    "component": component,
+                    "occurrence": path.last(),
+                    "path": path,
+                }),
+            ));
             if app.session.doc.links.contains_key(&component) {
                 v.push(act("ui.openComponent", "Open", "folder").with(json!({"component": component})));
             }
@@ -815,17 +810,16 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
 /// can have many placements, so the first path is wrong for a right-click on a later copy.
 fn body_occurrence_path(app: &SolveApp, world_body: &str) -> Option<Vec<u64>> {
     let state = app.session.model.state();
-    app.session
-        .doc
-        .body_frames(&state)
-        .into_iter()
-        .find_map(|(name, _, path, _)| (name == world_body && !path.is_empty()).then_some(path))
+    app.session.doc.body_frames(&state).into_iter().find_map(|(name, _, path, _)| (name == world_body && !path.is_empty()).then_some(path))
 }
 
 /// Edit and Open from the browser's occurrence menu, for a solid picked in the canvas.
 fn canvas_occurrence_actions(app: &SolveApp) -> Vec<Item> {
     let Some(path) = app.menu.canvas_occurrence_path.as_deref() else { return Vec::new() };
-    occurrence_items(app, path).into_iter().filter(|item| matches!(item.id.as_str(), "ui.activate" | "ui.openComponent")).collect()
+    occurrence_items(app, path)
+        .into_iter()
+        .filter(|item| matches!(item.id.as_str(), "ui.activate" | "component.finish_edit" | "ui.openComponent"))
+        .collect()
 }
 
 fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
@@ -966,6 +960,15 @@ pub(crate) fn drive_refusal(app: &SolveApp, id: u64) -> Option<String> {
     }
 }
 
+fn editing_occurrence(app: &SolveApp, path: &[u64]) -> bool {
+    app.session.active_component != 0
+        && app
+            .session
+            .active_occurrence_path
+            .as_deref()
+            .map_or_else(|| app.session.doc.first_path(app.session.active_component) == path, |active| active == path)
+}
+
 fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
     let Ok(placement) = app.session.occurrence_placement(path) else { return Vec::new() };
     let mut entries = component_items(app, placement.component);
@@ -976,9 +979,10 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
     for item in &mut entries {
         match item.id.as_str() {
             "ui.activate" => {
-                if app.session.active_component == placement.component {
+                if editing_occurrence(app, path) {
                     item.label = "Finish Edit".into();
-                    item.params = Some(json!({"component": 0}));
+                    item.id = "component.finish_edit".into();
+                    item.params = Some(json!({}));
                     item.enabled = true;
                 } else {
                     item.label = "Edit".into();
@@ -1057,6 +1061,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let doc = &app.session.doc;
     let occ = doc.occurrence_of(id);
     let active = app.session.active_component == id;
+    let edit_environment = crate::profile::active(app).workflow.component_edit_environment;
     let bodies = component_bodies(app, id);
     let hidden = !bodies.is_empty() && bodies.iter().all(|b| app.session.visibility.hidden_bodies.contains(b));
     let names = json!(bodies);
@@ -1068,9 +1073,13 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
         let grounded = occ.is_some_and(|o| o.grounded);
         let oid = occ.map(|o| o.id).unwrap_or(0);
         v.push(
-            act("ui.activate", if active { "Finish Edit" } else { "Edit" }, "component")
-                .with(json!({ "component": if active { 0 } else { id } }))
-                .on(true),
+            act(
+                if active && edit_environment { "component.finish_edit" } else { "ui.activate" },
+                if edit_environment { if active { "Finish Edit" } else { "Edit" } } else { "Activate" },
+                "component",
+            )
+            .with(json!({ "component": id }))
+            .on(!active || edit_environment),
         );
         if doc.links.contains_key(&id) {
             v.push(act("ui.openComponent", "Open", "folder").with(json!({"component": id})));
@@ -2101,9 +2110,7 @@ pub fn open(app: &mut SolveApp, at: Pos2) {
     app.menu.over_geometry = app.viewport.hover.is_some();
     let canvas_occurrence_path = app.viewport.hover.as_ref().and_then(|hit| {
         let body = match hit {
-            crate::viewport::Hit::Face { body, .. }
-            | crate::viewport::Hit::Edge { body, .. }
-            | crate::viewport::Hit::Vertex { body, .. } => body,
+            crate::viewport::Hit::Face { body, .. } | crate::viewport::Hit::Edge { body, .. } | crate::viewport::Hit::Vertex { body, .. } => body,
             _ => return None,
         };
         body_occurrence_path(app, body)
@@ -2274,17 +2281,17 @@ fn list_place(c: Pos2, h: f32, screen: Rect) -> Pos2 {
 /// Where a marking menu's list goes: centred under the cursor, `LIST_DROP` below it, or ending
 /// that far above it when it does not fit below (as the capture shows near the bottom), kept on
 /// screen.
-fn marking_list_place(at: Pos2, h: f32, screen: Rect) -> Pos2 {
+fn marking_list_layout(at: Pos2, h: f32, screen: Rect) -> (Pos2, f32) {
     let drop = crate::marking_menu::LIST_DROP;
     let x = (at.x - LIST_W / 2.0).clamp(screen.left() + 4.0, (screen.right() - LIST_W - 4.0).max(screen.left() + 4.0));
-    let y = if at.y + drop + h <= screen.bottom() - 4.0 {
-        at.y + drop
-    } else if at.y - drop - h >= screen.top() + 4.0 {
-        at.y - drop - h
+    let below = (screen.bottom() - 4.0 - at.y - drop).max(0.0);
+    let above = (at.y - drop - screen.top() - 4.0).max(0.0);
+    if h <= below || (h > above && (below >= 160.0 || below >= above)) {
+        (pos2(x, at.y + drop), h.min(below))
     } else {
-        (screen.bottom() - h - 4.0).max(screen.top())
-    };
-    pos2(x, y)
+        let height = h.min(above);
+        (pos2(x, at.y - drop - height), height)
+    }
 }
 
 /// Width of list menus.
@@ -2395,6 +2402,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let mut inside = app.menu.opener.is_some_and(|r| pointer.is_some_and(|p| r.contains(p)));
 
     let marking = crate::marking_menu::layout(app).is_some();
+    let mut max_list_height = (screen.height() - 8.0).max(30.0);
     let list_at = if target == Target::Workspace {
         pos2(at.x.clamp(screen.left(), (screen.right() - 470.0).max(screen.left())), at.y)
     } else if app.menu.radial && marking {
@@ -2402,6 +2410,21 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         let ring = radial_items(app);
         let offsets = &crate::marking_menu::PILL_OFFSETS;
         let bounds = crate::ui_kit::marking_bounds(ctx, at, &ring, offsets);
+        let shift = |min: f32, max: f32, lo: f32, hi: f32| {
+            if min < lo {
+                lo - min
+            } else if max > hi {
+                hi - max
+            } else {
+                0.0
+            }
+        };
+        let delta = vec2(
+            shift(bounds.left(), bounds.right(), screen.left() + 4.0, screen.right() - 4.0),
+            shift(bounds.top(), bounds.bottom(), screen.top() + 4.0, screen.bottom() - 4.0),
+        );
+        let anchor = at + delta;
+        let bounds = bounds.translate(delta);
         inside |= pointer.is_some_and(|p| bounds.contains(p));
         let resp = Container::new(ctx, Surface::Popup)
             .area(egui::Id::new("sc_marking_menu"))
@@ -2409,10 +2432,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             .order(egui::Order::Foreground)
             .show(ctx, |ui| {
                 let _ = ui.allocate_exact_size(bounds.size(), Sense::hover());
-                picked = crate::ui_kit::marking_ring(ui, at, &ring, offsets).or(picked.take());
+                picked = crate::ui_kit::marking_ring(ui, anchor, &ring, offsets).or(picked.take());
             });
         inside |= resp.response.contains_pointer();
-        marking_list_place(at, list_height(&list), screen)
+        let (pos, height) = marking_list_layout(anchor, list_height(&list), screen);
+        max_list_height = height;
+        pos
     } else if app.menu.radial {
         let c = radial_center(at, screen);
         let radial = radial_items(app);
@@ -2430,7 +2455,21 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         inside |= resp.response.contains_pointer();
         list_place(c, list_height(&list), screen)
     } else {
-        place(at, Vec2::ZERO, vec2(LIST_W, list_height(&list)), screen)
+        let height = list_height(&list);
+        if height > screen.height() - 8.0 {
+            let below = (screen.bottom() - at.y - 4.0).max(0.0);
+            let above = (at.y - screen.top() - 4.0).max(0.0);
+            let x = at.x.clamp(screen.left() + 4.0, (screen.right() - LIST_W - 4.0).max(screen.left() + 4.0));
+            if below >= 160.0 || below >= above {
+                max_list_height = below;
+                pos2(x, at.y)
+            } else {
+                max_list_height = above;
+                pos2(x, at.y - above)
+            }
+        } else {
+            place(at, Vec2::ZERO, vec2(LIST_W, height), screen)
+        }
     };
 
     let had_submenu = app.menu.submenu.is_some();
@@ -2454,6 +2493,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     let mut submenu_row = None;
     let key_row = app.menu.key_row;
+    let scroll_list = (marking && app.menu.radial) || list_height(&list) > max_list_height;
     let resp = Container::new(ctx, Surface::Popup)
         .area(egui::Id::new("sc_context_menu"))
         .fixed_pos(list_at)
@@ -2464,23 +2504,30 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 picked = crate::ui_kit::workspace_menu(ui, &list, key_row, (screen.bottom() - list_at.y).max(160.0)).or(picked.take());
             } else {
                 menu_frame(ui, |ui| {
-                    for (k, item) in list.iter().enumerate() {
-                        if item.children.is_empty() {
-                            if let Some(p) = list_row_lit(ui, item, key_row == Some(k)) {
-                                picked = Some(p);
-                            }
-                        } else {
-                            let row = kit_item(item, key_row == Some(k) || app.menu.submenu == Some(k)).show(ui);
-                            if item.enabled && ((row.hovered() && ctx.input(|i| i.pointer.delta() != Vec2::ZERO)) || row.clicked()) {
-                                if app.menu.submenu != Some(k) {
-                                    app.menu.submenu_key = None;
+                    let mut rows = |ui: &mut egui::Ui| {
+                        for (k, item) in list.iter().enumerate() {
+                            if item.children.is_empty() {
+                                if let Some(p) = list_row_lit(ui, item, key_row == Some(k)) {
+                                    picked = Some(p);
                                 }
-                                app.menu.submenu = Some(k);
-                            }
-                            if app.menu.submenu == Some(k) {
-                                submenu_row = Some((k, row.rect));
+                            } else {
+                                let row = kit_item(item, key_row == Some(k) || app.menu.submenu == Some(k)).show(ui);
+                                if item.enabled && ((row.hovered() && ctx.input(|i| i.pointer.delta() != Vec2::ZERO)) || row.clicked()) {
+                                    if app.menu.submenu != Some(k) {
+                                        app.menu.submenu_key = None;
+                                    }
+                                    app.menu.submenu = Some(k);
+                                }
+                                if app.menu.submenu == Some(k) {
+                                    submenu_row = Some((k, row.rect));
+                                }
                             }
                         }
+                    };
+                    if scroll_list {
+                        egui::ScrollArea::vertical().id_salt("context_list").max_height((max_list_height - 14.0).max(1.0)).show(ui, &mut rows);
+                    } else {
+                        rows(ui);
                     }
                 });
             }

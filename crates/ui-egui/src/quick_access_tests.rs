@@ -10,6 +10,30 @@ use crate::test_support::{click, inventor};
 
 const ORDER: [&str; 8] = ["new", "open", "save", "undo", "redo", "select", "return", "update"];
 
+#[test]
+fn return_finishes_the_sketch_then_returns_through_the_exact_parent_placement() {
+    let mut h = on_design(inventor(solidcraft_engine::doc::DocumentKind::Assembly));
+    let parent = h.app.run("component.create", json!({"name":"Subassembly"})).unwrap();
+    let child = h.app.run("component.create", json!({"name":"Block"})).unwrap();
+    let parent_id = parent["component"].as_u64().unwrap();
+    let parent_occ = parent["occurrence"].as_u64().unwrap();
+    let child_occ = child["occurrence"].as_u64().unwrap();
+    let copy = h.app.run("occurrence.copy", json!({"occurrence":parent_occ,"translate":[100,0,0]})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("component.activate", json!({"component":child["component"],"occurrence":child_occ,"path":[copy,child_occ]})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    let ctx = h.ctx.clone();
+    run(&mut h.app, &ctx, "return");
+    assert!(h.app.session.active_sketch.is_none());
+    assert_eq!(h.app.session.active_occurrence_path, Some(vec![copy, child_occ]));
+    assert!(entries(&h.app).contains(&("return", "finish", true)));
+    run(&mut h.app, &ctx, "return");
+    assert_eq!(h.app.session.active_component, parent_id);
+    assert_eq!(h.app.session.active_occurrence_path, Some(vec![copy]));
+    run(&mut h.app, &ctx, "return");
+    assert_eq!(h.app.session.active_component, 0);
+    assert!(entries(&h.app).contains(&("return", "finish", false)));
+}
+
 /// The design on screen, drawn twice.
 fn on_design(mut h: Harness) -> Harness {
     h.app.home.open = false;

@@ -292,6 +292,22 @@ fn component_menu_activates_grounds_and_pastes() {
 }
 
 #[test]
+fn another_copy_of_the_active_part_still_offers_edit() {
+    let mut app = sample_app();
+    let b = body(&app);
+    app.run("component.from_bodies", json!({"bodies":[b]})).unwrap();
+    let component = app.session.doc.components[0].id;
+    let first = app.session.doc.occurrence_of(component).unwrap().id;
+    let second = app.run("occurrence.copy", json!({"occurrence":first,"translate":[100,0,0]})).unwrap()["occurrence"].as_u64().unwrap();
+    app.run("component.activate", json!({"component":component,"occurrence":first,"path":[first]})).unwrap();
+    let target = Target::Occurrence { path: vec![second] };
+    let item = context_menu::items(&app, &target).into_iter().find(|i| i.id == "ui.activate").unwrap();
+    assert_eq!(item.label, "Edit");
+    context_menu::run_item(&mut app, &item, pos2(0.0, 0.0));
+    assert_eq!(app.session.active_occurrence_path, Some(vec![second]));
+}
+
+#[test]
 fn move_shortcut_uses_the_selected_nested_instance_and_pending_position() {
     let mut app = SolveApp::new(Session::default(), Services::default());
     let parent = app.run("component.create", json!({"name":"Assembly"})).unwrap()["occurrence"].as_u64().unwrap();
