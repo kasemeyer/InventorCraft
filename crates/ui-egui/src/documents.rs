@@ -60,6 +60,7 @@ impl DocSlot {
 #[derive(Default)]
 pub struct Documents {
     pub(crate) source_save: Option<crate::source_save::Panel>,
+    pub(crate) source_shared: std::collections::BTreeMap<std::path::PathBuf, solidcraft_engine::doc::Document>,
     slots: Vec<Option<DocSlot>>,
     pub active: usize,
     /// A tab waiting for the answer to "save changes?".
@@ -99,6 +100,13 @@ pub(crate) fn source_tab_dirty(app: &SolveApp, path: &str) -> bool {
         .any(|slot| slot.session.path.as_deref().is_some_and(|p| key(p) == wanted) && slot.session.is_dirty())
 }
 
+pub(crate) fn session_at(app: &SolveApp, index: usize) -> Option<&Session> {
+    if index == app.docs.active { Some(&app.session) } else { app.docs.slots.get(index).and_then(Option::as_ref).map(|s| &s.session) }
+}
+pub(crate) fn session_at_mut(app: &mut SolveApp, index: usize) -> Option<&mut Session> {
+    if index == app.docs.active { Some(&mut app.session) } else { app.docs.slots.get_mut(index).and_then(Option::as_mut).map(|s| &mut s.session) }
+}
+
 pub(crate) fn dirty_linked_tabs(app: &SolveApp) -> Vec<(usize, String)> {
     app.docs
         .slots
@@ -118,6 +126,7 @@ pub(crate) fn save_source_tab(app: &mut SolveApp, index: usize, path: &str) -> R
     if slot.session.path.as_deref().is_none_or(|p| key(p) != key(path)) {
         return Err("The source tab changed. Review the save list again.".into());
     }
+    crate::source_sessions::validate_file(&slot.session, path)?;
     slot.session.execute("file.save", &json!({})).map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -240,6 +249,9 @@ pub fn switch(app: &mut SolveApp, i: usize) {
     app.home.open = false;
     if i == app.docs.active || i >= app.docs.slots.len() {
         return;
+    }
+    if let Err(error) = crate::source_sessions::synchronize(app) {
+        app.set_status(error, true);
     }
     // A saved linked source can be edited in its own tab while its assembly remains open.
     // When returning to that assembly, reload the source snapshot before showing it. Compute
@@ -522,6 +534,7 @@ pub fn close(app: &mut SolveApp, i: usize, force: bool) {
     if app.docs.active > i {
         app.docs.active -= 1;
     }
+    crate::source_sessions::forget_unused(app);
 }
 
 /// Close several tabs (Close Other Tabs, Close All Tabs; #3055): each with unsaved changes asks

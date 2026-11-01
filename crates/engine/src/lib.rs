@@ -578,6 +578,10 @@ impl Session {
         self.saved = self.doc.clone();
         self.saved_visibility = self.visibility.clone();
     }
+    /// The document revision last read from or successfully written to this session's file.
+    pub fn saved_document(&self) -> &Document {
+        &self.saved
+    }
 
     pub fn render_backend(&self) -> render::BackendDescriptor {
         let mut backend = render::builtin_backend();

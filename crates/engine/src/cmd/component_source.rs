@@ -11,7 +11,8 @@ const CMD: &str = "component.edit_source";
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new(CMD, "Edit Linked Part", edit)
         .icon("component")
-        .params("component: linked leaf-part id; load original editable history without writing its source"),
+        .noundo()
+        .params("component: linked leaf-part id; open?: return its unsaved document and baseline; document?: synchronize a source document without writing files; saved?: source document matches its file; component:0 with document replaces a standalone source draft"),
     CommandSpec::new("component.source_status", "Source Save Status", status).icon("save").noundo().params("→ sources: component, file, dirty"),
     CommandSpec::new("component.save_source", "Save Linked Part", save)
         .icon("save")
@@ -89,7 +90,7 @@ pub(crate) fn begin(s: &mut Session, c: u64) -> Result<()> {
     if source.doc.features.len() > 10000 || source.doc.params.len() > 10000 {
         return Err(bad(CMD, "source history exceeds edit limit"));
     }
-    let mut edit = SourceEdit {
+    let edit = SourceEdit {
         source: Box::new((*source.doc).clone()),
         ids: BTreeMap::new(),
         names: BTreeMap::new(),
@@ -98,17 +99,35 @@ pub(crate) fn begin(s: &mut Session, c: u64) -> Result<()> {
         baseline_features: Vec::new(),
         baseline_params: Vec::new(),
     };
+    materialize(s, c, &source, edit, true)
+}
+
+fn materialize(s: &mut Session, c: u64, source: &Session, mut edit: SourceEdit, clean: bool) -> Result<()> {
+    if !source.doc.components.is_empty() || !source.doc.links.is_empty() || source.doc.drawing.is_some() || !source.doc.configs.columns.is_empty() {
+        return Err(bad(CMD, "source synchronization currently requires an unconfigured leaf part"));
+    }
+    if source.doc.features.len() > 10000 || source.doc.params.len() > 10000 || source.model.results.iter().any(|r| r.error.is_some()) {
+        return Err(bad(CMD, "source history is too large or has failed features"));
+    }
+    let link = s.doc.links.get(&c).cloned().ok_or_else(|| bad(CMD, "missing source link"))?;
     let mut scratch = s.scratch();
     scratch.path.clone_from(&s.path);
+    if let Some(maximum) = edit.ids.values().max() {
+        scratch.doc_mut().next_id = scratch.doc.next_id.max(maximum.checked_add(1).ok_or_else(|| bad(CMD, "feature id limit"))?);
+    }
     let mut used: BTreeSet<String> = s.doc.features.iter().filter(|f| f.id != link.feature).map(|f| f.name.clone()).collect();
     for f in &source.doc.features {
-        let id = scratch.doc.next_id;
-        scratch.doc_mut().next_id = id.checked_add(1).ok_or_else(|| bad(CMD, "feature id limit"))?;
-        edit.ids.insert(f.id, id);
-        edit.names.insert(f.name.clone(), unique(&f.name, &mut used));
+        if let std::collections::btree_map::Entry::Vacant(entry) = edit.ids.entry(f.id) {
+            let id = scratch.doc.next_id;
+            scratch.doc_mut().next_id = id.checked_add(1).ok_or_else(|| bad(CMD, "feature id limit"))?;
+            entry.insert(id);
+        }
+        let name = edit.names.get(&f.name).filter(|n| !used.contains(*n)).cloned().unwrap_or_else(|| unique(&f.name, &mut used));
+        used.insert(name.clone());
+        edit.names.insert(f.name.clone(), name);
     }
     for p in &source.doc.params {
-        edit.parameters.insert(p.name.clone(), format!("source{c}_{}", p.name));
+        edit.parameters.entry(p.name.clone()).or_insert_with(|| format!("source{c}_{}", p.name));
     }
     let source_bodies = source.model.state();
     let assembly_bodies = s.model.state();
@@ -145,8 +164,10 @@ pub(crate) fn begin(s: &mut Session, c: u64) -> Result<()> {
             && let Some(anchor) = super::sketch::face::anchor_mut(plane)
         {
             anchor.component = c;
-            anchor.path.clear();
-            anchor.author_path.clear();
+            // Both sides use the same placement, so the attachment stays in part
+            // coordinates while retaining the explicit path required by assembly evaluation.
+            anchor.path = scratch.doc.first_path(c);
+            anchor.author_path = anchor.path.clone();
         }
         features.push(f);
     }
@@ -162,20 +183,86 @@ pub(crate) fn begin(s: &mut Session, c: u64) -> Result<()> {
         scratch.doc_mut().params.push(p);
     }
     scratch.refresh();
-    if scratch.model.results.iter().any(|r| r.error.is_some()) {
-        return Err(bad(CMD, "source history cannot be evaluated in this assembly"));
+    if let Some(failed) = scratch.model.results.iter().find(|r| r.error.is_some()) {
+        return Err(bad(CMD, format!("source history cannot be evaluated in this assembly: feature {}: {:?}", failed.id, failed.error)));
     }
     rebind_relationships(&mut scratch, s, c)?;
-    edit.baseline_features = own_features(&scratch.doc, c);
-    edit.baseline_params = own_params(&scratch.doc, &edit);
+    if clean {
+        edit.baseline_features = own_features(&scratch.doc, c);
+        edit.baseline_params = own_params(&scratch.doc, &edit);
+    }
     scratch.doc_mut().source_edits.insert(c, edit);
     s.accept_computed(scratch);
     Ok(())
 }
 fn edit(s: &mut Session, p: &Value) -> Result<Value> {
+    if let Some(value) = p.get("document") {
+        let doc = Document::from_json(&value.to_string())?;
+        if p.get("component").and_then(Value::as_u64) == Some(0) {
+            let checked = Session::new(doc.clone());
+            if checked.model.results.iter().any(|r| r.error.is_some()) {
+                return Err(bad(CMD, "source draft has failed features"));
+            }
+            *s.doc_mut() = doc;
+            s.refresh();
+            if p.get("saved").and_then(Value::as_bool).unwrap_or(false) {
+                s.saved = s.doc.clone();
+            }
+            return Ok(json!({"synchronized":true}));
+        }
+        let c = component(p)?;
+        adopt(s, c, doc, p.get("saved").and_then(Value::as_bool).unwrap_or(false))?;
+        return Ok(json!({"synchronized":true}));
+    }
     let c = component(p)?;
     begin(s, c)?;
+    if p.get("open").and_then(Value::as_bool).unwrap_or(false) {
+        let (doc, edit) = draft(s, c)?;
+        let baseline = edit.source.clone();
+        if s.doc.source_edits.get(&c) != Some(&edit) {
+            s.doc_mut().source_edits.insert(c, edit);
+        }
+        return Ok(json!({"document":doc,"baseline":baseline,"dirty":dirty(&s.doc,c)}));
+    }
     Ok(json!({"component":c}))
+}
+
+fn adopt(s: &mut Session, c: u64, doc: Document, saved: bool) -> Result<()> {
+    begin(s, c)?;
+    let mut state = s.scratch();
+    state.path.clone_from(&s.path);
+    if state.doc.marker.is_some_and(|m| m >= state.doc.features.len()) {
+        state.doc_mut().marker = None;
+    }
+    let mut edit = state.doc.source_edits.get(&c).cloned().ok_or_else(|| bad(CMD, "missing source edit"))?;
+    let source = Session::new(doc.clone());
+    let (_, sf, faces) = super::component_link::session_bodies(&source, "Unsaved source")?;
+    let at = state.doc.features.iter().position(|f| f.component == c).ok_or_else(|| bad(CMD, "missing editable history"))?;
+    let parameters: BTreeSet<_> = edit.parameters.values().cloned().collect();
+    let relationships = state.doc.assembly.clone();
+    state.doc_mut().assembly = Default::default();
+    state.doc_mut().features.retain(|f| f.component != c);
+    state.doc_mut().params.retain(|p| !parameters.contains(&p.name));
+    state.doc_mut().source_edits.remove(&c);
+    let id = state.doc_mut().add_feature(sf.kind, Some("Source draft"))?;
+    let index = state.doc.feature_index(id).ok_or_else(|| bad(CMD, "missing source draft"))?;
+    let mut feature = state.doc_mut().features.remove(index);
+    feature.component = c;
+    feature.body_names = sf.body_names.into_iter().map(|n| edit.bodies.get(&n).cloned().unwrap_or(n)).collect();
+    feature.link_faces = faces;
+    state.doc_mut().features.insert(at.min(index), feature);
+    if let Some(link) = state.doc_mut().links.get_mut(&c) {
+        link.feature = id;
+    }
+    if saved {
+        edit.source = Box::new(doc);
+    }
+    state.refresh();
+    materialize(&mut state, c, &source, edit, saved)?;
+    state.doc_mut().assembly = relationships;
+    rebind_relationships(&mut state, s, c)?;
+    s.accept_computed(state);
+    Ok(())
 }
 
 /// Replace imported identities in relationships with those of the same geometric faces in
@@ -257,6 +344,9 @@ pub(crate) fn draft(s: &Session, c: u64) -> Result<(Document, SourceEdit)> {
     let bodies = inverse(&edit.bodies);
     let mut parameters = inverse(&edit.parameters);
     let features = own_features(&s.doc, c);
+    for id in ids.values() {
+        doc.next_id = doc.next_id.max(id.checked_add(1).ok_or_else(|| bad(CMD, "source id limit"))?);
+    }
     for f in &features {
         if let std::collections::btree_map::Entry::Vacant(entry) = ids.entry(f.id) {
             let id = doc.next_id;
@@ -264,6 +354,9 @@ pub(crate) fn draft(s: &Session, c: u64) -> Result<(Document, SourceEdit)> {
             entry.insert(id);
             edit.ids.insert(id, f.id);
         }
+    }
+    for id in ids.values() {
+        doc.next_id = doc.next_id.max(id.checked_add(1).ok_or_else(|| bad(CMD, "source id limit"))?);
     }
     let mut needed: BTreeSet<String> = parameters.keys().cloned().collect();
     for f in &features {
@@ -286,6 +379,7 @@ pub(crate) fn draft(s: &Session, c: u64) -> Result<(Document, SourceEdit)> {
         }
     }
     let mut used: BTreeSet<_> = doc.params.iter().map(|p| p.name.clone()).collect();
+    used.extend(parameters.values().cloned());
     for name in &needed {
         if !parameters.contains_key(name) {
             let local = unique_parameter(name, &mut used);

@@ -32,13 +32,6 @@ pub(crate) fn open(app: &mut SolveApp, component: u64) {
     if app.file_picker_busy() || app.file_load.busy() {
         return;
     }
-    if let Ok(status) = app.session.execute("component.source_status", &json!({}))
-        && status["sources"].as_array().into_iter().flatten().any(|r| r["component"] == component && r["dirty"] == true)
-    {
-        crate::source_save::request(app);
-        app.set_status("Save the edited part in the file list, then choose Open again.", false);
-        return;
-    }
     let Some(link) = app.session.doc.links.get(&component) else {
         app.set_status("This component has no linked source design", true);
         return;
@@ -50,16 +43,31 @@ pub(crate) fn open(app: &mut SolveApp, component: u64) {
         app.session.path.as_deref().and_then(|p| Path::new(p).parent()).unwrap_or_else(|| Path::new(".")).join(source)
     };
     let path = path.canonicalize().unwrap_or(path);
-    if !path.is_file() {
-        app.set_status(format!("Linked source file not found: {}", path.display()), true);
-        return;
-    }
     let same_file = |candidate: &str| {
         let candidate = Path::new(candidate);
         candidate.canonicalize().unwrap_or_else(|_| candidate.to_path_buf()) == path
     };
     if let Some(tab) = crate::documents::tab_paths(app).iter().position(|p| p.as_deref().is_some_and(same_file)) {
         crate::documents::switch(app, tab);
+    } else if app.session.doc.source_edits.contains_key(&component) {
+        if app.session.active_sketch.is_some() {
+            app.set_status("Finish the sketch before opening its part in a separate tab.", true);
+            return;
+        }
+        let result = app.run("component.edit_source", json!({"component":component,"open":true}));
+        let opened = result.and_then(|value| {
+            let baseline = serde_json::from_value(value["baseline"].clone()).map_err(|e| e.to_string())?;
+            let mut source = solidcraft_engine::Session::new(baseline);
+            source.path = Some(path.to_string_lossy().into_owned());
+            source.mark_saved();
+            source.execute("component.edit_source", &json!({"component":0,"document":value["document"]})).map_err(|e| e.to_string())?;
+            crate::documents::open_tab(app, source)
+        });
+        if let Err(error) = opened {
+            app.set_status(error, true);
+        }
+    } else if !path.is_file() {
+        app.set_status(format!("Linked source file not found: {}", path.display()), true);
     } else {
         app.open_path_async(&path.to_string_lossy());
     }
@@ -216,6 +224,174 @@ mod tests {
     use crate::context_menu::{self, Target};
     use solidcraft_engine::Session;
     use std::path::PathBuf;
+
+    fn unsaved_source_fixture() -> (crate::scenario::Harness, u64, PathBuf) {
+        let mut h = crate::test_support::inventor(solidcraft_engine::doc::DocumentKind::Assembly);
+        let path = h.dir.join("Shared.tcipart");
+        let mut part = Session::default();
+        part.execute("document.new_part", &json!({})).unwrap();
+        part.execute("solid.box", &json!({"length":20,"width":20,"height":10})).unwrap();
+        part.execute("file.save", &json!({"path":path})).unwrap();
+        let made = h.app.run("component.insert_design", json!({"path":path})).unwrap();
+        let c = made["component"].as_u64().unwrap();
+        h.app.run("occurrence.copy", json!({"occurrence":made["occurrence"],"translate":[80,0,0]})).unwrap();
+        h.app.run("file.save", json!({"path":h.dir.join("Assembly.tciasm")})).unwrap();
+        h.app.run("component.activate", json!({"component":c})).unwrap();
+        h.app.run("solid.box", json!({"length":3,"width":3,"height":3,"corner":[30,0,0]})).unwrap();
+        h.app.run("component.finish_edit", json!({})).unwrap();
+        (h, c, path)
+    }
+
+    #[test]
+    fn unsaved_face_sketch_history_round_trips_through_the_part_tab() {
+        let mut h = crate::test_support::inventor(solidcraft_engine::doc::DocumentKind::Assembly);
+        let path = h.dir.join("FacePart.tcipart");
+        let mut part = Session::default();
+        part.execute("document.new_part", &json!({})).unwrap();
+        part.execute("sketch.create", &json!({"plane":"XY"})).unwrap();
+        part.execute("sketch.rectangle.two_point", &json!({"p0":[0,0],"p1":[30,20]})).unwrap();
+        part.execute("sketch.finish", &json!({})).unwrap();
+        part.execute("solid.extrude", &json!({"distance":"10 mm"})).unwrap();
+        part.execute("file.save", &json!({"path":path})).unwrap();
+        let made = h.app.run("component.insert_design", json!({"path":path})).unwrap();
+        let c = made["component"].as_u64().unwrap();
+        let second = h.app.run("occurrence.copy", json!({"occurrence":made["occurrence"],"translate":[80,0,0]})).unwrap();
+        h.app.run("component.activate", json!({"component":c,"occurrence":second["occurrence"],"path":[second["occurrence"]]})).unwrap();
+        h.app.run("sketch.create", json!({"plane":{"face":[85,10,10],"path":[second["occurrence"]]}})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[-2,-2],"p1":[2,2]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("solid.extrude", json!({"distance":"3 mm","operation":"join"})).unwrap();
+        h.app.run("component.finish_edit", json!({})).unwrap();
+        open(&mut h.app, c);
+        h.settle();
+        h.app.run("solid.box", json!({"length":"5 mm","width":"5 mm","height":"5 mm","corner":[50,0,0]})).unwrap();
+        crate::documents::switch(&mut h.app, 0);
+        assert_eq!(h.app.session.doc.features.len(), 5, "{:?}", h.app.status);
+        assert!(h.app.session.model.results.iter().all(|r| r.error.is_none()));
+    }
+
+    #[test]
+    fn unsaved_open_shares_edits_return_save_and_undo_without_writing_on_open() {
+        let (mut h, c, path) = unsaved_source_fixture();
+        let bytes = std::fs::read(&path).unwrap();
+        open(&mut h.app, c);
+        h.settle();
+        assert_eq!(h.app.docs.count(), 2);
+        assert!(h.app.docs.source_save.is_none());
+        assert_eq!(h.app.session.doc.features.len(), 2);
+        assert!(h.app.session.is_dirty());
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        h.app.run("solid.box", json!({"length":4,"width":4,"height":4,"corner":[40,0,0]})).unwrap();
+        crate::documents::switch(&mut h.app, 0);
+        assert_eq!(h.app.session.world_state().bodies.len(), 6, "{:?}", h.app.status);
+        crate::toolbar::save(&mut h.app);
+        let panel = h.app.docs.source_save.take().unwrap();
+        assert_eq!(panel.rows.len(), 1);
+        assert_eq!(panel.rows[0].tab, Some(1));
+        crate::source_save::apply(&mut h.app, panel, true);
+        h.settle();
+        assert!(!h.app.session.is_dirty(), "{:?}", h.app.status);
+        crate::documents::switch(&mut h.app, 1);
+        assert!(!h.app.session.is_dirty());
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(h.app.session.doc.features.len(), 2);
+        crate::documents::switch(&mut h.app, 0);
+        assert_eq!(h.app.session.world_state().bodies.len(), 4);
+        assert!(h.app.session.is_dirty());
+    }
+
+    #[test]
+    fn unsaved_open_keeps_divergent_tab_drafts_and_refuses_save() {
+        let (mut h, c, path) = unsaved_source_fixture();
+        let bytes = std::fs::read(&path).unwrap();
+        open(&mut h.app, c);
+        h.settle();
+        h.app.run("solid.box", json!({"length":4,"width":4,"height":4,"corner":[40,0,0]})).unwrap();
+        let root = crate::documents::session_at_mut(&mut h.app, 0).unwrap();
+        root.execute("component.activate", &json!({"component":c})).unwrap();
+        root.execute("solid.box", &json!({"length":6,"width":6,"height":6,"corner":[60,0,0]})).unwrap();
+        root.execute("component.finish_edit", &json!({})).unwrap();
+        let root_features = root.doc.features.clone();
+        let part_features = h.app.session.doc.features.clone();
+        let error = crate::source_sessions::synchronize(&mut h.app).unwrap_err();
+        assert!(error.contains("different edits"), "{error}");
+        assert_eq!(crate::documents::session_at(&h.app, 0).unwrap().doc.features, root_features);
+        assert_eq!(h.app.session.doc.features, part_features);
+        crate::toolbar::save(&mut h.app);
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        assert!(h.app.session.is_dirty());
+    }
+
+    #[test]
+    fn unsaved_open_refuses_an_external_source_overwrite_from_the_part_tab() {
+        let (mut h, c, path) = unsaved_source_fixture();
+        open(&mut h.app, c);
+        h.settle();
+        let mut outside = Session::default();
+        outside.execute("document.new_part", &json!({})).unwrap();
+        outside.execute("solid.box", &json!({"length":99,"width":10,"height":10})).unwrap();
+        outside.execute("file.save", &json!({"path":path})).unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        crate::toolbar::save(&mut h.app);
+        assert!(h.app.status.as_ref().is_some_and(|(s, _, error)| *error && s.contains("changed outside")), "{:?}", h.app.status);
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        assert!(h.app.session.is_dirty());
+    }
+
+    #[test]
+    fn unsaved_part_changes_flow_between_two_assemblies_without_a_part_tab() {
+        let (mut h, _, path) = unsaved_source_fixture();
+        let bytes = std::fs::read(&path).unwrap();
+        let mut other = Session::default();
+        other.execute("document.new_assembly", &json!({})).unwrap();
+        let c = other.execute("component.insert_design", &json!({"path":path})).unwrap()["component"].as_u64().unwrap();
+        crate::documents::open_tab(&mut h.app, other).unwrap();
+        assert_eq!(h.app.session.world_state().bodies.len(), 2);
+        h.app.run("component.activate", json!({"component":c})).unwrap();
+        h.app.run("solid.box", json!({"length":4,"width":4,"height":4,"corner":[40,0,0]})).unwrap();
+        h.app.run("component.finish_edit", json!({})).unwrap();
+        crate::documents::switch(&mut h.app, 0);
+        assert_eq!(h.app.session.world_state().bodies.len(), 6, "{:?}", h.app.status);
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        crate::toolbar::save(&mut h.app);
+        let panel = h.app.docs.source_save.take().unwrap();
+        assert_eq!(panel.rows.len(), 1);
+        crate::source_save::apply(&mut h.app, panel, true);
+        h.settle();
+        assert!(!h.app.session.is_dirty(), "{:?}", h.app.status);
+        let other = crate::documents::session_at_mut(&mut h.app, 1).unwrap();
+        assert_eq!(other.execute("component.source_status", &json!({})).unwrap()["sources"][0]["dirty"], false);
+    }
+
+    #[test]
+    fn newly_opened_assemblies_join_the_unsaved_part_and_closing_tabs_keeps_its_draft() {
+        let (mut h, c, path) = unsaved_source_fixture();
+        let bytes = std::fs::read(&path).unwrap();
+        open(&mut h.app, c);
+        h.settle();
+        let other = |path: &std::path::Path| {
+            let mut s = Session::default();
+            s.execute("document.new_assembly", &json!({})).unwrap();
+            s.execute("component.insert_design", &json!({"path":path})).unwrap();
+            s
+        };
+        crate::documents::open_tab(&mut h.app, other(&path)).unwrap();
+        assert_eq!(h.app.session.world_state().bodies.len(), 2, "{:?}", h.app.status);
+        assert_eq!(crate::documents::session_at(&h.app, 1).unwrap().doc.features.len(), 2);
+        assert!(crate::documents::session_at(&h.app, 1).unwrap().is_dirty());
+        crate::documents::close(&mut h.app, 2, true);
+        crate::documents::close(&mut h.app, 0, true);
+        assert_eq!(h.app.docs.count(), 1);
+        assert!(h.app.docs.source_shared.is_empty());
+        assert_eq!(h.app.session.doc.features.len(), 2);
+        crate::documents::open_tab(&mut h.app, other(&path)).unwrap();
+        assert_eq!(h.app.session.world_state().bodies.len(), 2, "{:?}", h.app.status);
+        crate::documents::close(&mut h.app, 0, true);
+        assert_eq!(h.app.docs.count(), 1);
+        assert_eq!(h.app.session.world_state().bodies.len(), 2);
+        assert!(h.app.session.is_dirty());
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    }
 
     #[test]
     fn source_save_list_selects_files_and_save_all_finishes_the_round_trip() {

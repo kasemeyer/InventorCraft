@@ -24,6 +24,10 @@ pub(crate) fn request(app: &mut SolveApp) -> bool {
     if app.file_picker_busy() {
         return false;
     }
+    if let Err(error) = crate::source_sessions::synchronize(app).and_then(|()| crate::source_sessions::validate_source_save(app)) {
+        app.set_status(error, true);
+        return true;
+    }
     let value = match app.session.execute("component.source_status", &json!({})) {
         Ok(value) => value,
         Err(error) => {
@@ -38,10 +42,13 @@ pub(crate) fn request(app: &mut SolveApp) -> bool {
         .filter(|r| r["dirty"] == true)
         .filter_map(|r| Some(Row { component: r["component"].as_u64()?, file: r["file"].as_str()?.to_string(), save: true, saved: false, tab: None }))
         .collect();
+    let mut files = std::collections::BTreeSet::new();
+    rows.retain(|row| files.insert(crate::source_sessions::key(&row.file)));
     let key = |p: &str| std::path::Path::new(p).canonicalize().unwrap_or_else(|_| std::path::PathBuf::from(p));
     if let Ok(links) = app.session.execute("component.links", &json!({})) {
         for (index, path) in crate::documents::dirty_linked_tabs(app) {
-            if rows.iter().any(|r| key(&r.file) == key(&path)) {
+            if let Some(row) = rows.iter_mut().find(|r| key(&r.file) == key(&path)) {
+                row.tab = Some(index);
                 continue;
             }
             if let Some(component) = links["links"]
@@ -66,6 +73,12 @@ pub(crate) fn apply(app: &mut SolveApp, mut panel: Panel, all: bool) {
         app.set_status("The document changed. Review its save list again.", true);
         return;
     }
+    if let Err(error) = crate::source_sessions::synchronize(app) {
+        panel.error = Some(error);
+        panel.document = app.session.doc.clone();
+        app.docs.source_save = Some(panel);
+        return;
+    }
     for row in &mut panel.rows {
         if !row.saved && (all || row.save) {
             if row.tab.is_none() && crate::documents::source_tab_dirty(app, &row.file) {
@@ -76,9 +89,10 @@ pub(crate) fn apply(app: &mut SolveApp, mut panel: Panel, all: bool) {
             }
             let outcome = if let Some(index) = row.tab {
                 crate::documents::save_source_tab(app, index, &row.file)
+                    .and_then(|()| crate::source_sessions::synchronize(app))
                     .and_then(|()| app.run("component.update_links", json!({"component":row.component})).map(|_| ()))
             } else {
-                app.run("component.save_source", json!({"component":row.component})).map(|_| ())
+                app.run("component.save_source", json!({"component":row.component})).and_then(|_| crate::source_sessions::synchronize(app))
             };
             if let Err(error) = outcome {
                 panel.error = Some(error);

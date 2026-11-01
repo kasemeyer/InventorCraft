@@ -263,6 +263,7 @@ pub mod smart_extrude;
 #[cfg(test)]
 mod smart_extrude_ui_tests;
 mod source_save;
+mod source_sessions;
 pub mod space_mouse;
 pub mod space_mouse_calibration;
 pub mod space_mouse_model;
@@ -883,25 +884,9 @@ impl SolveApp {
         }
         let t0 = now_ms();
         if id == "component.activate" && profile::active(self).workflow.component_edit_environment {
-            if let Some(component) = params.get("component").and_then(Value::as_u64)
-                && let Some(link) = self.session.doc.links.get(&component)
-            {
-                let source = std::path::PathBuf::from(&link.path);
-                let source = if source.is_absolute() {
-                    source
-                } else {
-                    self.session
-                        .path
-                        .as_deref()
-                        .and_then(|p| std::path::Path::new(p).parent())
-                        .unwrap_or_else(|| std::path::Path::new("."))
-                        .join(source)
-                };
-                if documents::source_tab_dirty(self, &source.to_string_lossy()) {
-                    let message = "Save the source tab's changes before editing this part in place.";
-                    self.set_status(message, true);
-                    return Err(message.into());
-                }
+            if let Err(error) = source_sessions::synchronize(self) {
+                self.set_status(error.clone(), true);
+                return Err(error);
             }
             params["source_edit"] = json!(true);
         }

@@ -106,7 +106,9 @@ fn go_to(s: &mut Session, snap: Snapshot) -> Snapshot {
     // Undo changes history, not which source revision was last written to disk.
     if !was.doc.source_edits.is_empty() && !s.doc.source_edits.is_empty() {
         for (component, baseline) in &was.doc.source_edits {
-            if s.doc.source_edits.contains_key(component) && s.doc.links.get(component) == was.doc.links.get(component) {
+            if s.doc.source_edits.contains_key(component)
+                && s.doc.links.get(component).map(|l| &l.path) == was.doc.links.get(component).map(|l| &l.path)
+            {
                 s.doc_mut().source_edits.insert(*component, baseline.clone());
             }
         }
