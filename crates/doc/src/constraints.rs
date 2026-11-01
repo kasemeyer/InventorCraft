@@ -312,6 +312,22 @@ impl Constraint {
     /// `min ≤ max`, a solution its kind has, a non-empty name of at most 128 characters. A `state`
     /// that does not fit is not an error (the solve re-seeds it).
     pub fn validate(&self) -> Result<()> {
+        self.check(false)
+    }
+
+    /// [`validate`](Self::validate) as a loaded file is checked: crossed limits (`min > max`)
+    /// are kept, not refused — the solve reports that constraint lost with the reason, and the
+    /// rest of the assembly opens (R207b, R212).
+    pub fn validate_loaded(&self) -> Result<()> {
+        self.check(true)
+    }
+
+    /// Whether `min` is above `max`.
+    pub fn limits_cross(&self) -> bool {
+        matches!((self.limits.min, self.limits.max), (Some(min), Some(max)) if min > max)
+    }
+
+    fn check(&self, crossed_limits_ok: bool) -> Result<()> {
         let bad = |why: String| Err(DocError::Invalid(why));
         check_name_text(&self.name)?;
         if !self.solution.fits(self.kind) {
@@ -331,7 +347,8 @@ impl Constraint {
                 return bad(format!("{what} {v} is not a number within ±{cap} {unit}"));
             }
         }
-        if let (Some(min), Some(max)) = (self.limits.min, self.limits.max)
+        if !crossed_limits_ok
+            && let (Some(min), Some(max)) = (self.limits.min, self.limits.max)
             && min > max
         {
             return bad(format!("min {min} is above max {max}"));
@@ -366,7 +383,7 @@ pub(crate) fn validate_loaded(asm: &Assembly) -> Result<()> {
     let mut names = std::collections::BTreeSet::new();
     for c in &asm.constraints {
         let refuse = |why: String| DocError::Invalid(format!("constraint {}: {why}", c.name));
-        c.validate().map_err(|e| refuse(e.to_string()))?;
+        c.validate_loaded().map_err(|e| refuse(e.to_string()))?;
         if c.id >= COMPILED_BASE {
             return Err(refuse(format!("id {} is in the range kept for compiled joints", c.id)));
         }

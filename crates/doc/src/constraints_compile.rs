@@ -130,7 +130,12 @@ fn bounds_of(doc: &Document, c: &Constraint) -> Result<Option<(f64, f64)>, Strin
     }
     let lo = side("min", &c.exprs.min, c.limits.min, f64::NEG_INFINITY)?;
     let hi = side("max", &c.exprs.max, c.limits.max, f64::INFINITY)?;
-    Ok(Some((lo.min(hi), hi.max(lo))))
+    // Crossed limits (a literal min above max from an older file, or expressions that crossed)
+    // are a problem the row reports, never swapped quietly (R207b).
+    if lo > hi {
+        return Err(format!("limits cross: min {lo} is above max {hi}"));
+    }
+    Ok(Some((lo, hi)))
 }
 
 /// A Mate's or an Insert's limits as a joint value's (mm): a missing side is the largest offset

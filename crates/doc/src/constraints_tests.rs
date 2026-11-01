@@ -368,3 +368,16 @@ fn next_item_id_is_above_every_constraint() {
     assert_eq!(doc.allocate_id().unwrap(), 501);
     assert_eq!(doc.next_item_id().unwrap(), 502);
 }
+
+/// Crossed limits refuse a new constraint but not a loaded one: the file opens and the solve
+/// reports that constraint lost with the reason (R207b).
+#[test]
+fn crossed_limits_are_refused_on_create_and_kept_on_load() {
+    let mut c = mate(1, "Mate:1");
+    c.limits.min = Some(5.0);
+    c.limits.max = Some(2.0);
+    assert!(c.limits_cross());
+    assert!(c.validate().is_err());
+    c.validate_loaded().unwrap();
+    assert!(!mate(2, "Mate:2").limits_cross());
+}
