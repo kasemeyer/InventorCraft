@@ -271,6 +271,9 @@ pub struct Session {
     /// Interactive loaders may show it provisionally; it never becomes model state.
     pub open_preview: Option<Box<dyn Fn(solidcraft_io::DesignPreview) + Send + Sync>>,
     saved: Arc<Document>,
+    dirty_cache: std::sync::Mutex<Option<DirtyCache>>,
+    saved_outputs: std::collections::BTreeMap<u64, Vec<String>>,
+    pub(crate) source_models: Arc<std::collections::BTreeMap<u64, Model>>,
     /// Messages for the command line / log.
     pub log: Vec<String>,
     /// Increments on every document change (views use it to refresh).
@@ -378,6 +381,12 @@ pub struct Session {
     pub(crate) motion_traces: cmd::motion::associative::Cache,
 }
 
+struct DirtyCache {
+    doc: std::sync::Weak<Document>,
+    saved: std::sync::Weak<Document>,
+    dirty: bool,
+}
+
 /// A sketch changed by one frame of an interactive gesture (`live: true`).
 #[derive(Clone, Debug)]
 pub struct LiveEdit {
@@ -482,6 +491,13 @@ impl Session {
         });
         Session {
             saved: doc.clone(),
+            dirty_cache: std::sync::Mutex::new(None),
+            source_models: Arc::new(std::collections::BTreeMap::new()),
+            saved_outputs: model
+                .results
+                .iter()
+                .map(|r| (r.id, r.state.bodies.iter().filter(|b| b.feature == r.id).map(|b| b.name.clone()).collect()))
+                .collect(),
             doc,
             model,
             undo: Vec::new(),
@@ -570,17 +586,61 @@ impl Session {
 
     /// The design has changes not in its file: in the document, or in what is hidden.
     pub fn is_dirty(&self) -> bool {
-        (!Arc::ptr_eq(&self.doc, &self.saved) && *self.doc != *self.saved)
-            || self.visibility != self.saved_visibility
-            || self.doc.source_edits.keys().any(|c| cmd::component_source::dirty(&self.doc, *c))
+        let mut cache = self.dirty_cache.lock().unwrap_or_else(|e| e.into_inner());
+        let dirty =
+            if let Some(c) = cache.as_ref().filter(|c| c.doc.as_ptr() == Arc::as_ptr(&self.doc) && c.saved.as_ptr() == Arc::as_ptr(&self.saved)) {
+                c.dirty
+            } else {
+                let dirty = (!Arc::ptr_eq(&self.doc, &self.saved) && *self.doc != *self.saved)
+                    || self.doc.source_edits.keys().any(|c| cmd::component_source::dirty(&self.doc, *c));
+                // Weak identities don't keep obsolete designs alive or force a deep COW clone.
+                *cache = Some(DirtyCache { doc: Arc::downgrade(&self.doc), saved: Arc::downgrade(&self.saved), dirty });
+                dirty
+            };
+        dirty || self.visibility != self.saved_visibility
     }
     pub fn mark_saved(&mut self) {
         self.saved = self.doc.clone();
+        self.saved_outputs = self
+            .model
+            .results
+            .iter()
+            .map(|r| (r.id, r.state.bodies.iter().filter(|b| b.feature == r.id).map(|b| b.name.clone()).collect()))
+            .collect();
         self.saved_visibility = self.visibility.clone();
     }
     /// The document revision last read from or successfully written to this session's file.
     pub fn saved_document(&self) -> &Document {
         &self.saved
+    }
+    pub fn saved_document_arc(&self) -> &Arc<Document> {
+        &self.saved
+    }
+
+    /// Compare source revisions using already evaluated output labels, without running geometry.
+    pub fn source_comparison(&self, saved: bool) -> Document {
+        let mut doc = if saved { (*self.saved).clone() } else { (*self.doc).clone() };
+        for f in &mut doc.features {
+            if f.body_names.is_empty() {
+                f.body_names = if saved {
+                    self.saved_outputs.get(&f.id).cloned().unwrap_or_default()
+                } else {
+                    self.model
+                        .result(f.id)
+                        .map(|r| r.state.bodies.iter().filter(|b| b.feature == f.id).map(|b| b.name.clone()).collect())
+                        .unwrap_or_default()
+                };
+            }
+        }
+        doc
+    }
+
+    /// Open a pending source once; its saved baseline is data, not a second model to rebuild.
+    pub fn source_draft(doc: Document, baseline: Document, comparison_baseline: Document) -> Self {
+        let mut session = Self::new(doc);
+        session.saved = Arc::new(baseline);
+        session.saved_outputs = comparison_baseline.features.into_iter().map(|f| (f.id, f.body_names)).collect();
+        session
     }
 
     pub fn render_backend(&self) -> render::BackendDescriptor {
@@ -1188,6 +1248,9 @@ impl Session {
             path: None,
             open_preview: None,
             saved: self.saved.clone(),
+            dirty_cache: std::sync::Mutex::new(None),
+            source_models: self.source_models.clone(),
+            saved_outputs: self.saved_outputs.clone(),
             log: Vec::new(),
             revision: self.revision,
             auto_project: self.auto_project,
@@ -1260,6 +1323,7 @@ impl Session {
         let previous_revision = self.revision;
         self.doc = computed.doc;
         self.model = computed.model;
+        self.source_models = computed.source_models;
         self.world_cache = computed.world_cache;
         self.undo.append(&mut computed.undo);
         if self.undo.len() > MAX_UNDO {

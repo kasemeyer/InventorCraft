@@ -1576,12 +1576,12 @@ impl SolveApp {
 
     /// An opened assembly is brought up to date with its linked components when the profile
     /// says so (Inventor updates on open; SolidCraft keeps Update Links by hand) — R212.
-    pub fn update_links_on_open(&mut self) {
+    pub fn update_links_on_open(&mut self) -> bool {
         if !profile::active(self).workflow.update_links_on_open
             || self.session.doc.kind != solidcraft_engine::doc::DocumentKind::Assembly
             || self.session.doc.occurrences.is_empty()
         {
-            return;
+            return false;
         }
         match self.run("component.update_links", json!({})) {
             Ok(r) => {
@@ -1589,8 +1589,12 @@ impl SolveApp {
                 if updated > 0 {
                     self.set_status(format!("{} linked component(s) updated from their files", updated), false);
                 }
+                true
             }
-            Err(e) => self.set_status(format!("Update Links: {e}"), true),
+            Err(e) => {
+                self.set_status(format!("Update Links: {e}"), true);
+                false
+            }
         }
     }
 

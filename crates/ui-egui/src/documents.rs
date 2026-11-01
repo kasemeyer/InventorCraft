@@ -61,6 +61,8 @@ impl DocSlot {
 pub struct Documents {
     pub(crate) source_save: Option<crate::source_save::Panel>,
     pub(crate) source_shared: std::collections::BTreeMap<std::path::PathBuf, solidcraft_engine::doc::Document>,
+    pub(crate) source_checked: Vec<crate::source_sessions::Checkpoint>,
+    pub(crate) source_files: std::collections::BTreeMap<std::path::PathBuf, Vec<crate::source_sessions::FileCheck>>,
     slots: Vec<Option<DocSlot>>,
     pub active: usize,
     /// A tab waiting for the answer to "save changes?".
@@ -256,7 +258,7 @@ pub fn switch(app: &mut SolveApp, i: usize) {
     // A saved linked source can be edited in its own tab while its assembly remains open.
     // When returning to that assembly, reload the source snapshot before showing it. Compute
     // All alone only recomputes the snapshot already stored in the assembly.
-    let refresh_linked_source = !app.session.is_dirty()
+    let mut refresh_linked_source = !app.session.is_dirty()
         && crate::profile::active(app).workflow.update_links_on_open
         && app.session.path.as_deref().is_some_and(|path| {
             app.docs
@@ -265,6 +267,12 @@ pub fn switch(app: &mut SolveApp, i: usize) {
                 .and_then(Option::as_ref)
                 .is_some_and(|slot| slot.session.doc.kind == DocumentKind::Assembly && crate::linked_source::is_source_of(&slot.session, path))
         });
+    if refresh_linked_source && let Some(path) = app.session.path.clone() {
+        refresh_linked_source = crate::source_sessions::source_file_changed(app, &path, i);
+    }
+    let refreshed_source = refresh_linked_source
+        .then(|| app.session.path.clone().and_then(|p| crate::source_sessions::file_stamp(&p).map(|stamp| (p, stamp))))
+        .flatten();
     let Some(incoming) = app.docs.slots.get_mut(i).and_then(Option::take) else { return };
     let out = swap_in(app, incoming);
     let a = app.docs.active;
@@ -273,7 +281,13 @@ pub fn switch(app: &mut SolveApp, i: usize) {
     }
     app.docs.active = i;
     if refresh_linked_source {
-        app.update_links_on_open();
+        let updated = app.update_links_on_open();
+        if updated
+            && let Some((path, stamp)) = refreshed_source
+            && crate::source_sessions::file_stamp(&path) == Some(stamp)
+        {
+            crate::source_sessions::remember_file(app, &path, stamp);
+        }
     }
     // A drawing that becomes active shows its models as they are now (R68).
     crate::drawing_models::refresh_drawing(app);

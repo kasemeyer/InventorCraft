@@ -206,13 +206,16 @@ fn materialize(s: &mut Session, c: u64, source: &Session, mut edit: SourceEdit, 
     if source.doc.features.len() > 10000 || source.doc.params.len() > 10000 || source.model.results.iter().any(|r| r.error.is_some()) {
         return Err(bad(CMD, "source history is too large or has failed features"));
     }
-    let link = s.doc.links.get(&c).cloned().ok_or_else(|| bad(CMD, "missing source link"))?;
     let mut scratch = s.scratch();
     scratch.path.clone_from(&s.path);
+    if scratch.doc.marker.is_some_and(|m| m >= s.doc.features.len()) {
+        scratch.doc_mut().marker = None;
+    }
     if let Some(maximum) = edit.ids.values().max() {
         scratch.doc_mut().next_id = scratch.doc.next_id.max(maximum.checked_add(1).ok_or_else(|| bad(CMD, "feature id limit"))?);
     }
-    let mut used: BTreeSet<String> = s.doc.features.iter().filter(|f| f.id != link.feature).map(|f| f.name.clone()).collect();
+    let replacing = s.doc.source_edits.contains_key(&c);
+    let mut used: BTreeSet<String> = s.doc.features.iter().filter(|f| f.component != c).map(|f| f.name.clone()).collect();
     for f in &source.doc.features {
         if let std::collections::btree_map::Entry::Vacant(entry) = edit.ids.entry(f.id) {
             let id = scratch.doc.next_id;
@@ -229,12 +232,15 @@ fn materialize(s: &mut Session, c: u64, source: &Session, mut edit: SourceEdit, 
     let source_bodies = source.model.state();
     let assembly_bodies = s.model.state();
     let current: Vec<_> = assembly_bodies.bodies.iter().filter(|b| s.doc.model_body_component(b) == c).map(|b| b.name.clone()).collect();
-    if source_bodies.bodies.len() != current.len() {
+    if !replacing && source_bodies.bodies.len() != current.len() {
         return Err(bad(CMD, "source changed since insertion; update the link before editing"));
     }
     let mut body_names: BTreeSet<String> = assembly_bodies.bodies.iter().map(|b| b.name.clone()).collect();
-    for (b, name) in source_bodies.bodies.iter().zip(current) {
-        edit.bodies.entry(b.name.clone()).or_insert(name);
+    body_names.extend(s.doc.reserved_body_names.iter().cloned());
+    if !replacing {
+        for (b, name) in source_bodies.bodies.iter().zip(current) {
+            edit.bodies.entry(b.name.clone()).or_insert(name);
+        }
     }
     for r in &source.model.results {
         for b in &r.state.bodies {
@@ -243,6 +249,14 @@ fn materialize(s: &mut Session, c: u64, source: &Session, mut edit: SourceEdit, 
             }
         }
     }
+    for name in &source.doc.reserved_body_names {
+        if !edit.bodies.contains_key(name) {
+            edit.bodies.insert(name.clone(), unique(name, &mut body_names));
+        }
+    }
+    let owned_names: BTreeSet<_> = edit.bodies.values().collect();
+    scratch.doc_mut().reserved_body_names.retain(|name| !owned_names.contains(name));
+    scratch.doc_mut().reserved_body_names.extend(source.doc.reserved_body_names.iter().filter_map(|name| edit.bodies.get(name).cloned()));
     let mut features = Vec::new();
     for original in &source.doc.features {
         let mut f = original.clone();
@@ -268,8 +282,13 @@ fn materialize(s: &mut Session, c: u64, source: &Session, mut edit: SourceEdit, 
         }
         features.push(f);
     }
-    let at = scratch.doc.feature_index(link.feature).ok_or_else(|| bad(CMD, "linked snapshot is missing"))?;
-    scratch.doc_mut().features.splice(at..=at, features);
+    let at = scratch.doc.features.iter().position(|f| f.component == c).ok_or_else(|| bad(CMD, "linked history is missing"))?;
+    scratch.doc_mut().features.retain(|f| f.component != c);
+    scratch.doc_mut().features.splice(at..at, features);
+    if replacing {
+        let mapped: BTreeSet<_> = edit.parameters.values().collect();
+        scratch.doc_mut().params.retain(|p| !mapped.contains(&p.name));
+    }
     for original in &source.doc.params {
         let mut p = original.clone();
         p.name = edit.parameters.get(&p.name).cloned().ok_or_else(|| bad(CMD, "missing parameter identity"))?;
@@ -290,20 +309,28 @@ fn materialize(s: &mut Session, c: u64, source: &Session, mut edit: SourceEdit, 
     }
     scratch.doc_mut().source_edits.insert(c, edit);
     s.accept_computed(scratch);
+    std::sync::Arc::make_mut(&mut s.source_models).insert(c, source.model.clone());
     Ok(())
 }
 fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(value) = p.get("document") {
         let doc = Document::from_json(&value.to_string())?;
         if p.get("component").and_then(Value::as_u64) == Some(0) {
-            let checked = Session::new(doc.clone());
+            let mut checked = s.scratch();
+            *checked.doc_mut() = doc;
+            checked.refresh();
             if checked.model.results.iter().any(|r| r.error.is_some()) {
                 return Err(bad(CMD, "source draft has failed features"));
             }
-            *s.doc_mut() = doc;
-            s.refresh();
+            s.accept_computed(checked);
             if p.get("saved").and_then(Value::as_bool).unwrap_or(false) {
                 s.saved = s.doc.clone();
+                s.saved_outputs = s
+                    .model
+                    .results
+                    .iter()
+                    .map(|r| (r.id, r.state.bodies.iter().filter(|b| b.feature == r.id).map(|b| b.name.clone()).collect()))
+                    .collect();
             }
             return Ok(json!({"synchronized":true}));
         }
@@ -316,10 +343,20 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     if p.get("open").and_then(Value::as_bool).unwrap_or(false) {
         let (doc, edit) = draft(s, c)?;
         let baseline = edit.source.clone();
+        let mut comparison_baseline = (*baseline).clone();
+        let projected = edit.graph.as_ref().map(|g| g.baseline.features.as_slice()).unwrap_or(&edit.baseline_features);
+        let bodies = inverse(&edit.bodies);
+        for f in &mut comparison_baseline.features {
+            if f.body_names.is_empty()
+                && let Some(p) = edit.ids.get(&f.id).and_then(|id| projected.iter().find(|f| f.id == *id))
+            {
+                f.body_names = p.body_names.iter().map(|b| bodies.get(b).cloned().unwrap_or_else(|| b.clone())).collect();
+            }
+        }
         if s.doc.source_edits.get(&c) != Some(&edit) {
             s.doc_mut().source_edits.insert(c, edit);
         }
-        return Ok(json!({"document":doc,"baseline":baseline,"dirty":dirty(&s.doc,c)}));
+        return Ok(json!({"document":doc,"baseline":baseline,"comparison_baseline":comparison_baseline,"dirty":dirty(&s.doc,c)}));
     }
     Ok(json!({"component":c}))
 }
@@ -329,38 +366,15 @@ fn adopt(s: &mut Session, c: u64, doc: Document, saved: bool) -> Result<()> {
     if s.doc.source_edits.get(&c).is_some_and(|e| e.graph.is_some()) {
         return graph::adopt(s, c, doc, saved);
     }
-    let mut state = s.scratch();
-    state.path.clone_from(&s.path);
-    if state.doc.marker.is_some_and(|m| m >= state.doc.features.len()) {
-        state.doc_mut().marker = None;
-    }
-    let mut edit = state.doc.source_edits.get(&c).cloned().ok_or_else(|| bad(CMD, "missing source edit"))?;
-    let source = Session::new(doc.clone());
-    let (_, sf, faces) = super::component_link::session_bodies(&source, "Unsaved source")?;
-    let at = state.doc.features.iter().position(|f| f.component == c).ok_or_else(|| bad(CMD, "missing editable history"))?;
-    let parameters: BTreeSet<_> = edit.parameters.values().cloned().collect();
-    let relationships = state.doc.assembly.clone();
-    state.doc_mut().assembly = Default::default();
-    state.doc_mut().features.retain(|f| f.component != c);
-    state.doc_mut().params.retain(|p| !parameters.contains(&p.name));
-    state.doc_mut().source_edits.remove(&c);
-    let id = state.doc_mut().add_feature(sf.kind, Some("Source draft"))?;
-    let index = state.doc.feature_index(id).ok_or_else(|| bad(CMD, "missing source draft"))?;
-    let mut feature = state.doc_mut().features.remove(index);
-    feature.id = s.doc.links.get(&c).ok_or_else(|| bad(CMD, "missing source link"))?.feature;
-    feature.component = c;
-    feature.body_names = sf.body_names.into_iter().map(|n| edit.bodies.get(&n).cloned().unwrap_or(n)).collect();
-    feature.link_faces = faces;
-    state.doc_mut().features.insert(at.min(index), feature);
+    let mut edit = s.doc.source_edits.get(&c).cloned().ok_or_else(|| bad(CMD, "missing source edit"))?;
+    let mut source = Session::new(Document::default());
+    *source.doc_mut() = doc.clone();
+    source.model = s.source_models.get(&c).cloned().unwrap_or_default();
+    source.model.evaluate(&source.doc);
     if saved {
         edit.source = Box::new(doc);
     }
-    state.refresh();
-    materialize(&mut state, c, &source, edit, saved)?;
-    state.doc_mut().assembly = relationships;
-    rebind_relationships(&mut state, s, c)?;
-    s.accept_computed(state);
-    Ok(())
+    materialize(s, c, &source, edit, saved)
 }
 
 /// Replace imported identities in relationships with those of the same geometric faces in
@@ -443,6 +457,7 @@ pub(crate) fn draft(s: &Session, c: u64) -> Result<(Document, SourceEdit)> {
     let mut ids = inverse(&edit.ids);
     let mut names = inverse(&edit.names);
     let mut bodies = inverse(&edit.bodies);
+    doc.reserved_body_names = s.doc.reserved_body_names.iter().filter_map(|name| bodies.get(name).cloned()).collect();
     let mut parameters = inverse(&edit.parameters);
     let features = own_features(&s.doc, c);
     let mut used_bodies: BTreeSet<_> = bodies.values().cloned().collect();
@@ -546,10 +561,6 @@ pub(crate) fn draft(s: &Session, c: u64) -> Result<(Document, SourceEdit)> {
         doc.params.push(p);
     }
     doc.marker = None;
-    let checked = Session::new(doc.clone());
-    if checked.model.results.iter().any(|r| r.error.is_some()) {
-        return Err(bad(CMD, "part depends on assembly geometry; independent source save is not supported for those references"));
-    }
     Ok((doc, edit))
 }
 fn status(s: &mut Session, _: &Value) -> Result<Value> {
@@ -568,6 +579,9 @@ fn save(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad("component.save_source", "source file changed outside this edit session; no file was overwritten"));
     }
     let mut part = Session::new(doc);
+    if part.model.results.iter().any(|r| r.error.is_some()) {
+        return Err(bad(CMD, "source does not build independently; its draft is kept and no file was written"));
+    }
     part.execute("file.save", &json!({"path":path}))?;
     edit.source = Box::new((*part.doc).clone());
     edit.baseline_features = own_features(&s.doc, c);

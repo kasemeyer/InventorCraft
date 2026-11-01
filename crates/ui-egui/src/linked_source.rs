@@ -61,10 +61,10 @@ pub(crate) fn open(app: &mut SolveApp, component: u64) {
         let result = app.run("component.edit_source", json!({"component":component,"open":true}));
         let opened = result.and_then(|value| {
             let baseline = serde_json::from_value(value["baseline"].clone()).map_err(|e| e.to_string())?;
-            let mut source = solidcraft_engine::Session::new(baseline);
+            let doc = serde_json::from_value(value["document"].clone()).map_err(|e| e.to_string())?;
+            let comparison_baseline = serde_json::from_value(value["comparison_baseline"].clone()).map_err(|e| e.to_string())?;
+            let mut source = solidcraft_engine::Session::source_draft(doc, baseline, comparison_baseline);
             source.path = Some(path.to_string_lossy().into_owned());
-            source.mark_saved();
-            source.execute("component.edit_source", &json!({"component":0,"document":value["document"]})).map_err(|e| e.to_string())?;
             crate::documents::open_tab(app, source)
         });
         if let Err(error) = opened {
@@ -380,6 +380,50 @@ mod tests {
     }
 
     #[test]
+    fn source_switches_keep_warm_geometry_and_still_propagate_edits_and_body_renames() {
+        let (mut h, c, path) = unsaved_source_fixture();
+        open(&mut h.app, c);
+        h.settle();
+        let feature = h.app.session.doc.features[0].id;
+        h.app.run("timeline.edit", json!({"feature":feature,"set":{"length":"35 mm"}})).unwrap();
+        crate::documents::switch(&mut h.app, 0);
+        assert!(
+            h.app.session.model.state().bodies.iter().any(|b| (solidcraft_engine::kernel::measure(&b.body).unwrap().bbox.max.x - 35.).abs() < 1e-6)
+        );
+        crate::documents::switch(&mut h.app, 1);
+        let current: Vec<_> = (0..2)
+            .map(|i| {
+                let s = crate::documents::session_at(&h.app, i).unwrap();
+                (s.doc.clone(), s.model.recomputed)
+            })
+            .collect();
+        for _ in 0..12 {
+            crate::documents::switch(&mut h.app, 0);
+            crate::documents::switch(&mut h.app, 1);
+        }
+        for (i, (doc, recomputed)) in current.iter().enumerate() {
+            let s = crate::documents::session_at(&h.app, i).unwrap();
+            assert!(std::sync::Arc::ptr_eq(doc, &s.doc), "switching an unchanged tab mutated its history");
+            assert_eq!(s.model.recomputed, *recomputed, "switching an unchanged tab rebuilt its geometry");
+        }
+        let saved = h.app.session.source_comparison(true);
+        let body = h.app.session.model.state().bodies.iter().find(|b| b.feature == feature).unwrap().name.clone();
+        h.app.run("body.rename", json!({"body":body,"name":"Renamed"})).unwrap();
+        assert_eq!(h.app.session.source_comparison(true), saved, "body rename changed the saved comparison baseline");
+        assert_ne!(h.app.session.source_comparison(false).features[0].body_names, saved.features[0].body_names);
+        crate::documents::switch(&mut h.app, 0);
+        assert!(h.app.session.model.state().body("Renamed").is_some(), "{:?}", h.app.status);
+        crate::toolbar::save(&mut h.app);
+        let panel = h.app.docs.source_save.take().unwrap();
+        crate::source_save::apply(&mut h.app, panel, true);
+        h.settle();
+        assert!(!h.app.session.is_dirty(), "{:?}", h.app.status);
+        let mut check = Session::default();
+        check.execute("doc.open", &json!({"path":path})).unwrap();
+        assert!(check.model.state().body("Renamed").is_some());
+    }
+
+    #[test]
     fn unsaved_open_shares_edits_return_save_and_undo_without_writing_on_open() {
         let (mut h, c, path) = unsaved_source_fixture();
         let bytes = std::fs::read(&path).unwrap();
@@ -634,6 +678,11 @@ mod tests {
         assert_eq!(h.app.session.world_state().bodies.len(), 2);
         h.app.session.mark_saved();
 
+        // A second session may initially share the exact same snapshot document.
+        // Refreshing the first must not mark that older snapshot fresh in the second.
+        let second = h.app.session.scratch();
+        crate::documents::open_tab(&mut h.app, second).unwrap();
+
         let mut edited = Session::default();
         edited.execute("document.new_part", &json!({})).unwrap();
         edited.execute("solid.box", &json!({"length":10,"width":10,"height":10})).unwrap();
@@ -643,6 +692,9 @@ mod tests {
         crate::documents::switch(&mut h.app, 0);
 
         assert_eq!(h.app.session.world_state().bodies.len(), 4, "both occurrences use the updated source");
+        crate::documents::switch(&mut h.app, 2);
+        crate::documents::switch(&mut h.app, 1);
+        assert_eq!(h.app.session.world_state().bodies.len(), 4, "the other assembly also refreshes its older snapshot");
         let _ = std::fs::remove_dir_all(folder);
     }
 

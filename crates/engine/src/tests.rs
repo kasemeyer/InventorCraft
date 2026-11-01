@@ -3283,6 +3283,31 @@ fn drawing_on_existing_points_connects_to_them() {
 }
 
 #[test]
+fn dirty_comparison_cache_tracks_mutations_saves_and_visibility() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10}));
+    s.mark_saved();
+    let original = s.doc.name.clone();
+    assert!(!s.is_dirty());
+    s.doc_mut().name = "Changed".into();
+    assert!(s.is_dirty());
+    // This revision has only one strong owner. A weak cache identity must still
+    // invalidate when doc_mut dissociates it, without pinning/cloning its history.
+    assert_eq!(std::sync::Arc::strong_count(&s.doc), 1);
+    s.doc_mut().name = original;
+    assert!(!s.is_dirty());
+    s.doc_mut().name = "Saved change".into();
+    assert!(s.is_dirty());
+    s.mark_saved();
+    assert!(!s.is_dirty());
+    let visibility = s.visibility.clone();
+    s.visibility.origin_hidden = Some(true);
+    assert!(s.is_dirty());
+    s.visibility = visibility;
+    assert!(!s.is_dirty());
+}
+
+#[test]
 fn computed_import_preserves_file_and_earlier_undo_history() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));

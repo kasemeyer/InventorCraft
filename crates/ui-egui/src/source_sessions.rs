@@ -21,20 +21,10 @@ fn linked_file(session: &Session, path: &str) -> PathBuf {
     key(&path.to_string_lossy())
 }
 fn comparable(doc: &Document) -> Document {
-    let evaluated = Session::new(doc.clone());
     let mut out = doc.clone();
     out.next_id = 0;
     if out.marker.is_some_and(|m| m >= out.features.len()) {
         out.marker = None;
-    }
-    for feature in &mut out.features {
-        if feature.body_names.is_empty() {
-            feature.body_names = evaluated
-                .model
-                .result(feature.id)
-                .map(|r| r.state.bodies.iter().filter(|b| b.feature == feature.id).map(|b| b.name.clone()).collect())
-                .unwrap_or_default();
-        }
     }
     out
 }
@@ -43,8 +33,64 @@ struct Revision {
     component: Option<u64>,
     doc: Document,
     baseline: Document,
+    comparable: Document,
+    baseline_comparable: Document,
     dirty: bool,
     label: String,
+}
+
+pub(crate) struct Checkpoint {
+    doc: std::sync::Weak<Document>,
+    saved: std::sync::Weak<Document>,
+    path: Option<String>,
+    sketch: Option<u64>,
+    visibility: solidcraft_engine::Visibility,
+}
+impl Checkpoint {
+    fn new(s: &Session) -> Self {
+        Self {
+            doc: std::sync::Arc::downgrade(&s.doc),
+            saved: std::sync::Arc::downgrade(s.saved_document_arc()),
+            path: s.path.clone(),
+            sketch: s.active_sketch,
+            visibility: s.visibility.clone(),
+        }
+    }
+    fn matches(&self, s: &Session) -> bool {
+        self.doc.as_ptr() == std::sync::Arc::as_ptr(&s.doc)
+            && self.saved.as_ptr() == std::sync::Arc::as_ptr(s.saved_document_arc())
+            && self.path == s.path
+            && self.sketch == s.active_sketch
+            && self.visibility == s.visibility
+    }
+}
+pub(crate) struct FileCheck {
+    doc: std::sync::Weak<Document>,
+    stamp: (u64, std::time::SystemTime),
+}
+pub(crate) fn file_stamp(path: &str) -> Option<(u64, std::time::SystemTime)> {
+    std::fs::metadata(path).ok().and_then(|m| Some((m.len(), m.modified().ok()?)))
+}
+pub(crate) fn source_file_changed(app: &mut SolveApp, path: &str, destination: usize) -> bool {
+    let file = key(path);
+    let Some(stamp) = file_stamp(path) else { return true };
+    let Some(doc) = documents::session_at(app, destination).map(|s| std::sync::Arc::downgrade(&s.doc)) else { return true };
+    let checks = app.docs.source_files.entry(file).or_default();
+    checks.retain(|c| c.doc.strong_count() > 0);
+    checks.iter().find(|c| c.doc.as_ptr() == doc.as_ptr()).is_none_or(|c| c.stamp != stamp)
+}
+pub(crate) fn remember_file(app: &mut SolveApp, path: &str, stamp: (u64, std::time::SystemTime)) {
+    let doc = std::sync::Arc::downgrade(&app.session.doc);
+    let checks = app.docs.source_files.entry(key(path)).or_default();
+    checks.retain(|c| c.doc.strong_count() > 0);
+    if let Some(check) = checks.iter_mut().find(|c| c.doc.as_ptr() == doc.as_ptr()) {
+        check.stamp = stamp;
+        return;
+    }
+    if checks.len() >= 64 {
+        checks.remove(0);
+    }
+    checks.push(FileCheck { doc, stamp });
 }
 
 /// Recover older snapshot-local additions before Open/Save could overlook their file owner.
@@ -67,6 +113,7 @@ pub(crate) fn prepare_local(session: &mut Session, component: Option<u64>) -> Re
 }
 
 pub(crate) fn forget_unused(app: &mut SolveApp) {
+    app.docs.source_checked.clear();
     let mut files = std::collections::BTreeSet::new();
     for index in 0..app.docs.count() {
         if let Some(session) = documents::session_at(app, index) {
@@ -76,9 +123,16 @@ pub(crate) fn forget_unused(app: &mut SolveApp) {
         }
     }
     app.docs.source_shared.retain(|path, _| files.contains(path));
+    app.docs.source_files.retain(|path, _| files.contains(path));
 }
 
 pub(crate) fn synchronize(app: &mut SolveApp) -> Result<(), String> {
+    if app.docs.source_checked.len() == app.docs.count()
+        && app.docs.source_checked.iter().enumerate().all(|(i, c)| documents::session_at(app, i).is_some_and(|s| c.matches(s)))
+    {
+        return Ok(());
+    }
+    app.docs.source_checked.clear();
     let mut groups: BTreeMap<PathBuf, Vec<(usize, u64)>> = BTreeMap::new();
     for index in 0..app.docs.count() {
         if let Some(session) = documents::session_at(app, index) {
@@ -112,6 +166,8 @@ pub(crate) fn synchronize(app: &mut SolveApp) -> Result<(), String> {
                 component: None,
                 doc: (*s.doc).clone(),
                 baseline: s.saved_document().clone(),
+                comparable: comparable(&s.source_comparison(false)),
+                baseline_comparable: comparable(&s.source_comparison(true)),
                 dirty: s.is_dirty(),
                 label: format!("{} (source tab)", s.doc.name),
             });
@@ -124,9 +180,12 @@ pub(crate) fn synchronize(app: &mut SolveApp) -> Result<(), String> {
             let result = s.execute("component.edit_source", &json!({"component":component,"open":true})).map_err(|e| e.to_string())?;
             let doc: Document = serde_json::from_value(result["document"].clone()).map_err(|e| e.to_string())?;
             let baseline: Document = serde_json::from_value(result["baseline"].clone()).map_err(|e| e.to_string())?;
+            let comparison_baseline: Document = serde_json::from_value(result["comparison_baseline"].clone()).map_err(|e| e.to_string())?;
             revisions.push(Revision {
                 tab: index,
                 component: Some(component),
+                comparable: comparable(&doc),
+                baseline_comparable: comparable(&comparison_baseline),
                 doc,
                 baseline,
                 dirty: result["dirty"] == true,
@@ -136,20 +195,20 @@ pub(crate) fn synchronize(app: &mut SolveApp) -> Result<(), String> {
         let Some(first) = revisions.first() else {
             continue;
         };
-        let common = app.docs.source_shared.get(&file).cloned().unwrap_or_else(|| comparable(&first.baseline));
-        let canonical: Vec<_> = revisions.iter().map(|r| comparable(&r.doc)).collect();
-        let baselines: Vec<_> = revisions.iter().map(|r| comparable(&r.baseline)).collect();
+        let common = app.docs.source_shared.get(&file).cloned().unwrap_or_else(|| first.baseline_comparable.clone());
+        let canonical: Vec<_> = revisions.iter().map(|r| &r.comparable).collect();
+        let baselines: Vec<_> = revisions.iter().map(|r| &r.baseline_comparable).collect();
         let changed: Vec<_> = canonical
             .iter()
             .enumerate()
             .filter(|(i, doc)| {
                 let stale_clean =
                     !revisions[*i].dirty && **doc == baselines[*i] && revisions.iter().enumerate().any(|(j, r)| r.dirty && baselines[j] == **doc);
-                **doc != common && !stale_clean
+                **doc != &common && !stale_clean
             })
             .map(|(i, _)| i)
             .collect();
-        let chosen = changed.first().copied().or_else(|| canonical.iter().position(|doc| *doc == common)).unwrap_or(0);
+        let chosen = changed.first().copied().or_else(|| canonical.iter().position(|doc| **doc == common)).unwrap_or(0);
         if let Some(other) = changed.iter().find(|index| canonical[**index] != canonical[chosen]) {
             let name = file.file_name().unwrap_or_default().to_string_lossy();
             return Err(format!(
@@ -157,7 +216,7 @@ pub(crate) fn synchronize(app: &mut SolveApp) -> Result<(), String> {
                 revisions[chosen].label, revisions[*other].label
             ));
         }
-        let saved = revisions.iter().find(|r| !r.dirty && comparable(&r.baseline) == canonical[chosen]);
+        let saved = revisions.iter().find(|r| !r.dirty && &r.baseline_comparable == canonical[chosen]);
         let doc = saved.map_or(&revisions[chosen].doc, |r| &r.baseline).clone();
         for (index, revision) in revisions.iter().enumerate() {
             let needs_baseline = saved.is_some() && revision.baseline != doc;
@@ -168,8 +227,9 @@ pub(crate) fn synchronize(app: &mut SolveApp) -> Result<(), String> {
             s.execute("component.edit_source", &json!({"component":revision.component.unwrap_or(0),"document":doc,"saved":saved.is_some()}))
                 .map_err(|e| e.to_string())?;
         }
-        app.docs.source_shared.insert(file, canonical[chosen].clone());
+        app.docs.source_shared.insert(file, (*canonical[chosen]).clone());
     }
+    app.docs.source_checked = (0..app.docs.count()).filter_map(|i| documents::session_at(app, i).map(Checkpoint::new)).collect();
     Ok(())
 }
 

@@ -91,6 +91,8 @@ pub(super) fn scope(doc: &Document, c: u64, edit: &SourceEdit) -> Option<Documen
     out.parts = doc.parts.iter().filter(|(id, _)| owned.contains(id)).map(|(id, p)| (*id, p.clone())).collect();
     out.body_components = doc.body_components.iter().filter(|(_, id)| owned.contains(id)).map(|(b, id)| (b.clone(), *id)).collect();
     out.body_offsets = doc.body_offsets.iter().filter(|(b, _)| out.body_components.contains_key(*b)).map(|(b, m)| (b.clone(), *m)).collect();
+    let names: BTreeSet<_> = edit.bodies.values().collect();
+    out.reserved_body_names = doc.reserved_body_names.iter().filter(|n| names.contains(n)).cloned().collect();
     Some(out)
 }
 
@@ -235,6 +237,7 @@ fn remap(doc: &Document, maps: &Maps, from: Option<&str>, to: &str, depth: usize
         .map(|(b, c)| Ok((maps.bodies.get(b).cloned().unwrap_or_else(|| b.clone()), id(&maps.components, *c)?)))
         .collect::<Result<_>>()?;
     out.body_offsets = doc.body_offsets.iter().map(|(b, m)| (maps.bodies.get(b).cloned().unwrap_or_else(|| b.clone()), *m)).collect();
+    out.reserved_body_names = doc.reserved_body_names.iter().map(|b| maps.bodies.get(b).cloned().unwrap_or_else(|| b.clone())).collect();
     for c in &mut out.assembly.constraints {
         c.id = id(&maps.constraints, c.id)?;
         c.name = maps.constraint_names.get(&c.name).cloned().unwrap_or_else(|| c.name.clone());
@@ -339,6 +342,7 @@ pub(super) fn begin(s: &mut Session, c: u64, source: &Session, mut edit: SourceE
         edit.names.entry(f.name.clone()).or_insert_with(|| unique(&f.name, &mut used));
     }
     let mut used: BTreeSet<_> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+    used.extend(s.doc.reserved_body_names.iter().cloned());
     let mut projected = (*source.doc).clone();
     for (f, r) in projected.features.iter_mut().filter_map(|f| source.model.result(f.id).map(|r| (f, r))) {
         if f.body_names.is_empty() {
@@ -348,6 +352,11 @@ pub(super) fn begin(s: &mut Session, c: u64, source: &Session, mut edit: SourceE
             if !edit.bodies.contains_key(&b.name) {
                 edit.bodies.insert(b.name.clone(), unique(&b.name, &mut used));
             }
+        }
+    }
+    for name in &source.doc.reserved_body_names {
+        if !edit.bodies.contains_key(name) {
+            edit.bodies.insert(name.clone(), unique(name, &mut used));
         }
     }
     let mut used: BTreeSet<_> = s.doc.params.iter().map(|p| p.name.clone()).collect();
@@ -387,6 +396,9 @@ pub(super) fn begin(s: &mut Session, c: u64, source: &Session, mut edit: SourceE
     scratch.doc_mut().parts.extend(projected.parts);
     scratch.doc_mut().body_components.extend(projected.body_components);
     scratch.doc_mut().body_offsets.extend(projected.body_offsets);
+    let names: BTreeSet<_> = edit.bodies.values().collect();
+    scratch.doc_mut().reserved_body_names.retain(|n| !names.contains(n));
+    scratch.doc_mut().reserved_body_names.extend(projected.reserved_body_names);
     scratch.doc_mut().assembly.constraints.extend(projected.assembly.constraints);
     scratch.doc_mut().next_id = next;
     scratch.doc_mut().marker = None;
@@ -497,9 +509,8 @@ pub(super) fn draft(s: &Session, c: u64) -> Result<(Document, SourceEdit)> {
     doc.next_id = next;
     doc.marker = None;
     checked(&doc)?;
-    let evaluated = Session::new(doc.clone());
-    if evaluated.model.results.iter().any(|r| r.error.is_some()) {
-        return Err(bad(CMD, "subassembly does not build independently; its draft is kept"));
+    if s.model.results.iter().any(|r| scoped.features.iter().any(|f| f.id == r.id) && r.error.is_some()) {
+        return Err(bad(CMD, "subassembly has failed features; its draft is kept"));
     }
     edit.ids = inverse(&maps.features);
     edit.names = inverse(&maps.names);
