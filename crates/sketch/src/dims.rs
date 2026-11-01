@@ -85,6 +85,19 @@ pub fn dim_frame(sk: &Sketch, k: &ConstraintKind) -> Option<DimFrame> {
             let dir = unit(cb - ca, Vec2::X);
             DimFrame::Linear { p0: ca - dir * sk.radius(a)?, p1: cb + dir * sk.radius(b)?, dir }
         }
+        CircleGap { a, b, nested, .. } => {
+            let (ca, cb) = (sk.center(a)?, sk.center(b)?);
+            let (ra, rb) = (sk.radius(a)?, sk.radius(b)?);
+            if nested {
+                // Both edges on the same side of the enclosing round's centre.
+                let (big, small, rbig, rsmall) = if ra >= rb { (ca, cb, ra, rb) } else { (cb, ca, rb, ra) };
+                let out = unit(small - big, Vec2::X);
+                DimFrame::Linear { p0: small + out * rsmall, p1: big + out * rbig, dir: out }
+            } else {
+                let dir = unit(cb - ca, Vec2::X);
+                DimFrame::Linear { p0: ca + dir * ra, p1: cb - dir * rb, dir }
+            }
+        }
         PointLineDistance { p, l, .. } | LinearDiameter { p, l, .. } => {
             let (a, b) = line_ends(sk, l)?;
             let q = sk.point(p)?;

@@ -472,7 +472,7 @@ fn anchor(sk: &Sketch, k: &ConstraintKind) -> Option<Vec2> {
         LineCircleDistance { c, .. } => sk.center(c),
         Length { l, .. } | LineAngle { l, .. } => mid(l),
         Radius { c, .. } | Diameter { c, .. } | ArcLength { c, .. } | ArcSweep { c, .. } => mid(c),
-        SlotOverallLength { a, b, .. } => Some((sk.center(a)? + sk.center(b)?) * 0.5),
+        SlotOverallLength { a, b, .. } | CircleGap { a, b, .. } => Some((sk.center(a)? + sk.center(b)?) * 0.5),
     }
 }
 

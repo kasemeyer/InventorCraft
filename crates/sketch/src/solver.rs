@@ -371,6 +371,14 @@ impl State<'_> {
         let (cb, rb) = self.round(b);
         ca.dist(cb) + ra + rb
     }
+    /// Edge-to-edge gap of two rounds: near edges apart (`d - ra - rb`), or the ring between a
+    /// round and the one enclosing it (`|ra - rb| - d`).
+    fn circle_gap(&self, a: usize, b: usize, nested: bool) -> f64 {
+        let (ca, ra) = self.round(a);
+        let (cb, rb) = self.round(b);
+        let d = ca.dist(cb);
+        if nested { (ra - rb).abs() - d } else { d - ra - rb }
+    }
     /// Curvature vector of a curve at its point `p` (towards the centre of curvature).
     fn curvature_at(&self, c: usize, p: usize) -> Vec2 {
         let Some(kind) = self.sk.curves.get(c).map(|c| &c.kind) else { return Vec2::ZERO };
@@ -583,6 +591,7 @@ fn residuals(s: &State, k: &ConstraintKind, out: &mut Vec<f64>) {
         }
         ArcSweep { c, value } => out.push((s.arc_sweep(c) - value) * s.sk.radius(c).unwrap_or(1.0).max(1.0)),
         SlotOverallLength { a, b, value } => out.push(s.slot_length(a, b) - value),
+        CircleGap { a, b, nested, value } => out.push(s.circle_gap(a, b, nested) - value),
         Radius { c, value } => out.push(s.radius_of(c) - value),
         Diameter { c, value } => out.push(2.0 * s.round(c).1 - value),
         Angle { a, b, value, flip } => {
@@ -640,6 +649,7 @@ fn measure(s: &State, k: &ConstraintKind) -> Option<f64> {
         }
         ArcSweep { c, .. } => s.arc_sweep(c),
         SlotOverallLength { a, b, .. } => s.slot_length(a, b),
+        CircleGap { a, b, nested, .. } => s.circle_gap(a, b, nested),
         Radius { c, .. } => s.radius_of(c),
         Diameter { c, .. } => 2.0 * s.round(c).1,
         Angle { a, b, flip, .. } => {
@@ -883,7 +893,7 @@ fn block_refs(sk: &Sketch, b: &Block) -> Vec<Ref> {
             ArcSweep { c, .. } | Radius { c, .. } | Diameter { c, .. } | ArcLength { c, .. } => vec![C(c)],
             Parallel { a, b } | Perpendicular { a, b } | Collinear { a, b } | Angle { a, b, .. } => vec![L(a), L(b)],
             Equal { a, b } if line(a) => vec![L(a), L(b)],
-            Equal { a, b } | Concentric { a, b } | SlotOverallLength { a, b, .. } => vec![R(a), R(b)],
+            Equal { a, b } | Concentric { a, b } | SlotOverallLength { a, b, .. } | CircleGap { a, b, .. } => vec![R(a), R(b)],
             Tangent { a, b } => tangent(a, b).to_vec(),
             Smooth { a, b } => vec![C(a), C(b)],
             Symmetric { p, q, l } => vec![P(p), P(q), L(l)],

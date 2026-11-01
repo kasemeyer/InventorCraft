@@ -2454,6 +2454,36 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
                 let gap = (d - r).abs();
                 (ConstraintKind::LineCircleDistance { l, c, value: gap, inside }, gap)
             }
+            // Two circles or arcs: centre to centre by default; the edge-to-edge gap when they
+            // are concentric or nested, or when asked for (`type: "gap"`); R213.
+            ((None, Some(a)), Some((None, Some(b)))) if is_round(a) && is_round(b) => {
+                let (ca, cb) = sk.center(a).zip(sk.center(b)).ok_or_else(|| bad(cmd, "cannot dimension that curve"))?;
+                let (ra, rb) = sk.radius(a).zip(sk.radius(b)).ok_or_else(|| bad(cmd, "cannot dimension that curve"))?;
+                let d = ca.dist(cb);
+                let nested = d + ra.min(rb) <= ra.max(rb) + 1e-9;
+                let (pa, pb) = (round_center(sk, a), round_center(sk, b));
+                if matches!(ty.as_str(), "gap" | "tangent") || nested || pa.is_none() || pb.is_none() || pa == pb {
+                    let value = if nested { (ra - rb).abs() - d } else { d - ra - rb };
+                    (ConstraintKind::CircleGap { a, b, nested, value }, value)
+                } else {
+                    let (p, q) = (pa.unwrap_or(0), pb.unwrap_or(0));
+                    match auto_orientation(&ty, ca, cb, text_at) {
+                        "horizontal" => (ConstraintKind::DistanceX { p, q, value: (cb.x - ca.x).abs() }, (cb.x - ca.x).abs()),
+                        "vertical" => (ConstraintKind::DistanceY { p, q, value: (cb.y - ca.y).abs() }, (cb.y - ca.y).abs()),
+                        _ => (ConstraintKind::Distance { p, q, value: d }, d),
+                    }
+                }
+            }
+            // A circle or arc and a point: measured from the centre (R213).
+            ((Some(q), None), Some((None, Some(c)))) | ((None, Some(c)), Some((Some(q), None))) if is_round(c) => {
+                let p = round_center(sk, c).ok_or_else(|| bad(cmd, "cannot dimension that curve"))?;
+                let (pa, pb) = (sk.point(p).unwrap_or_default(), sk.point(q).unwrap_or_default());
+                match auto_orientation(&ty, pa, pb, text_at) {
+                    "horizontal" => (ConstraintKind::DistanceX { p, q, value: (pb.x - pa.x).abs() }, (pb.x - pa.x).abs()),
+                    "vertical" => (ConstraintKind::DistanceY { p, q, value: (pb.y - pa.y).abs() }, (pb.y - pa.y).abs()),
+                    _ => (ConstraintKind::Distance { p, q, value: pa.dist(pb) }, pa.dist(pb)),
+                }
+            }
             _ => return Err(bad(cmd, "cannot dimension that combination of entities")),
         };
         let is_angle = k.is_angle();

@@ -196,6 +196,11 @@ read in the design's units, exactly as if it were typed into the dimension box: 
 unit regardless of the design, pass an expression with one: `"value": "50 mm"` or
 `"value": "0.5 in"`. Angles are degrees unless the expression says otherwise.
 
+Two circles or arcs dimension centre to centre by default (`DistanceX`/`DistanceY` when the
+text sits above or beside them); concentric or nested rounds take their ring width, the edge-to-edge
+gap. `"type": "gap"` asks for the edge gap between rounds that sit apart. A circle and a point
+measure from the circle's centre.
+
 The viewport also shows an X/Y/Z-aligned dimension chain between the endpoints of the
 currently shown distance (centre, minimum or maximum), with each world-axis distance
 labelled separately as an absolute value (including zero).

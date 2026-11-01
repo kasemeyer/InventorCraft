@@ -933,6 +933,13 @@ pub(crate) fn read(sk: &Sketch, before: &dyn Fn(usize) -> Option<Vec2>, on_curve
                     rel(k1.c, k2.c, Rel::Dist(d));
                 }
             }
+            CircleGap { a, b, nested, value } => {
+                if let (Some(k1), Some(k2), Some(r1), Some(r2)) = (round(a), round(b), r_of(a), r_of(b))
+                    && let Some(d) = dim(if nested { (r1 - r2).abs() - value } else { value + r1 + r2 })
+                {
+                    rel(k1.c, k2.c, Rel::Dist(d));
+                }
+            }
             Midpoint { p, l } if p < n => {
                 if let Some((a, b)) = line(l).filter(|(a, b)| p != *a && p != *b) {
                     ties.push(Tie::OnLine { p, l });

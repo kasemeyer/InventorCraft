@@ -334,6 +334,15 @@ pub enum ConstraintKind {
         b: usize,
         value: f64,
     },
+    /// Edge-to-edge gap between two circles or arcs: the near edges when they sit apart
+    /// (`nested` false), or the ring between a round and the one enclosing it (`nested` true,
+    /// the ring width of concentric circles).
+    CircleGap {
+        a: usize,
+        b: usize,
+        nested: bool,
+        value: f64,
+    },
     Radius {
         c: usize,
         value: f64,
@@ -396,6 +405,7 @@ impl ConstraintKind {
             | LineAngle { value, .. }
             | ArcSweep { value, .. }
             | SlotOverallLength { value, .. }
+            | CircleGap { value, .. }
             | Radius { value, .. }
             | Diameter { value, .. }
             | ArcLength { value, .. }
@@ -417,6 +427,7 @@ impl ConstraintKind {
             | LineAngle { value, .. }
             | ArcSweep { value, .. }
             | SlotOverallLength { value, .. }
+            | CircleGap { value, .. }
             | Radius { value, .. }
             | Diameter { value, .. }
             | ArcLength { value, .. }
@@ -452,7 +463,7 @@ impl ConstraintKind {
             Radius { .. } => "RadialDimension",
             Diameter { .. } => "DiameterDimension",
             Angle { .. } | LineAngle { .. } | ArcSweep { .. } => "AngularDimension",
-            SlotOverallLength { .. } => "LinearDimension",
+            SlotOverallLength { .. } | CircleGap { .. } => "LinearDimension",
             Smooth { .. } => "Smooth",
             ArcLength { .. } => "ArcLengthDimension",
             LinearDiameter { .. } => "LinearDiameterDimension",
@@ -479,7 +490,7 @@ impl ConstraintKind {
             Parallel { a, b } | Perpendicular { a, b } | Collinear { a, b } | Tangent { a, b } | Equal { a, b } | Concentric { a, b } => {
                 (vec![], vec![a, b])
             }
-            Angle { a, b, .. } | SlotOverallLength { a, b, .. } => (vec![], vec![a, b]),
+            Angle { a, b, .. } | SlotOverallLength { a, b, .. } | CircleGap { a, b, .. } => (vec![], vec![a, b]),
             Midpoint { p, l } | PointLineDistance { p, l, .. } => (vec![p], vec![l]),
             LineCircleDistance { l, c, .. } => (vec![], vec![l, c]),
             Symmetric { p, q, l } => (vec![p, q], vec![l]),
@@ -537,7 +548,7 @@ impl ConstraintKind {
                 fc(a);
                 fc(b);
             }
-            Angle { a, b, .. } | SlotOverallLength { a, b, .. } => {
+            Angle { a, b, .. } | SlotOverallLength { a, b, .. } | CircleGap { a, b, .. } => {
                 fc(a);
                 fc(b);
             }
@@ -984,6 +995,13 @@ impl Sketch {
             Radius { c, .. } if matches!(self.curves.get(c).map(|x| &x.kind), Some(CurveKind::Ellipse { .. })) => {}
             Radius { c, .. } | Diameter { c, .. } => need_round(c)?,
             Concentric { a, b } => {
+                need_round(a)?;
+                need_round(b)?;
+            }
+            CircleGap { a, b, .. } => {
+                if a == b {
+                    return Err(SketchError::Invalid("a circle gap needs two different circles or arcs".into()));
+                }
                 need_round(a)?;
                 need_round(b)?;
             }

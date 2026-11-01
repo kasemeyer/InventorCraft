@@ -423,3 +423,67 @@ fn box_edges_measure_by_point_only() {
         assert!(s.execute("inspect.measure", &json!({"items": [pick]})).is_err());
     }
 }
+
+// --- R213: sketch distance dimensions between circles -------------------------------------
+
+fn circle(s: &mut Session, at: [f64; 2], r: f64) -> String {
+    run(s, "sketch.circle.center", json!({"center": at, "radius": r}))["curves"][0].as_str().unwrap().to_string()
+}
+
+/// Two circles apart: the dimension between them is centre to centre and drives that distance.
+#[test]
+fn two_circles_apart_take_a_centre_to_centre_dimension() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let a = circle(&mut s, [0.0, 0.0], 3.0);
+    let b = circle(&mut s, [10.0, 0.0], 2.0);
+    run(&mut s, "sketch.dimension", json!({"entities": [a], "value": 6}));
+    run(&mut s, "sketch.dimension", json!({"entities": [b], "value": 4}));
+    let r = run(&mut s, "sketch.dimension", json!({"entities": [a, b], "value": 12}));
+    assert!(close(&r["measured"], 12.0, 1e-9) && r["type"] == "LinearDimension", "{r}");
+    let m = measure(&mut s, vec![json!({"type": "sketch_curve", "id": a}), json!({"type": "sketch_curve", "id": b})]);
+    assert!(close(&m["center_distance"], 12.0, 1e-6), "{m}");
+}
+
+/// Asked for the gap, two circles apart measure edge to edge: centre distance minus both radii.
+#[test]
+fn two_circles_apart_take_an_edge_gap_when_asked() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let a = circle(&mut s, [0.0, 0.0], 3.0);
+    let b = circle(&mut s, [10.0, 0.0], 2.0);
+    run(&mut s, "sketch.dimension", json!({"entities": [a], "value": 6}));
+    run(&mut s, "sketch.dimension", json!({"entities": [b], "value": 4}));
+    run(&mut s, "sketch.dimension", json!({"entities": [a, b], "type": "gap", "value": 4}));
+    let m = measure(&mut s, vec![json!({"type": "sketch_curve", "id": a}), json!({"type": "sketch_curve", "id": b})]);
+    assert!(close(&m["center_distance"], 9.0, 1e-6), "{m}");
+}
+
+/// Concentric circles (the owner's case): the dimension between them is the ring width, and it
+/// drives the radii apart by that much.
+#[test]
+fn concentric_circles_take_their_ring_width() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let a = circle(&mut s, [0.0, 0.0], 4.0);
+    let b = circle(&mut s, [0.0, 0.0], 2.0);
+    run(&mut s, "sketch.dimension", json!({"entities": [a], "value": 8}));
+    let r = run(&mut s, "sketch.dimension", json!({"entities": [a, b], "value": 3}));
+    assert!(close(&r["measured"], 3.0, 1e-9) && r["type"] == "LinearDimension", "{r}");
+    let da = measure(&mut s, vec![json!({"type": "sketch_curve", "id": a})])["diameter"].as_f64().unwrap();
+    let db = measure(&mut s, vec![json!({"type": "sketch_curve", "id": b})])["diameter"].as_f64().unwrap();
+    assert!(((da - db) * 0.5 - 3.0).abs() < 1e-6, "ring width {} (diameters {da} / {db})", (da - db) * 0.5);
+}
+
+/// A circle and a point measure from the circle's centre.
+#[test]
+fn a_circle_and_a_point_measure_from_the_centre() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let c = circle(&mut s, [0.0, 0.0], 3.0);
+    let p = run(&mut s, "sketch.point", json!({"point": [7.0, 0.0]}));
+    let pid = p["created"]["points"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.dimension", json!({"entities": [c], "value": 6}));
+    let r = run(&mut s, "sketch.dimension", json!({"entities": [c, pid], "value": 9}));
+    assert!(close(&r["measured"], 9.0, 1e-9) && r["type"] == "LinearDimension", "{r}");
+}
