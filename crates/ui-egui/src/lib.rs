@@ -891,7 +891,9 @@ impl SolveApp {
         if id == "component.activate" && source_work::begin(self, source_work::Action::Edit(params.clone())) {
             return Ok(Value::Null);
         }
-        if matches!(id, "parameters.change" | "timeline.edit") && source_work::begin(self, source_work::Action::Command(id.into(), params.clone())) {
+        if matches!(id, "parameters.change" | "timeline.edit" | "material.assign" | "appearance.assign" | "component.metadata.set" | "library.apply")
+            && source_work::begin(self, source_work::Action::Command(id.into(), params.clone()))
+        {
             return Ok(Value::Null);
         }
         if id == "component.activate" && profile::active(self).workflow.component_edit_environment {

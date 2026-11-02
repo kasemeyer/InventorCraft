@@ -27,6 +27,8 @@ pub struct ModelBody {
     pub source_name: Option<String>,
     /// Definition geometry coordinates to this computed body's frame.
     pub source_transform: crate::Mat,
+    /// Full placement identity on computed world bodies; empty on definition bodies.
+    pub occurrence_path: Vec<u64>,
     pub body: Body,
     /// Feature that created it.
     pub feature: u64,
@@ -73,6 +75,7 @@ impl ModelBody {
             name,
             source_name: None,
             source_transform: crate::IDENTITY,
+            occurrence_path: Vec::new(),
             body,
             feature,
             mesh: Arc::new(OnceLock::new()),
@@ -7894,6 +7897,7 @@ pub fn world_state_reusing(doc: &Document, st: &ModelState, placed_before: &mut 
             placed.source_key = b.geometry_key().unwrap_or(0);
             placed.source_name = Some(b.definition_name().to_string());
             placed.source_transform = crate::mat_mul(&bm, &b.source_transform);
+            placed.occurrence_path = path.clone();
             placed.component = comp;
             placed.transferred = b.transferred;
             placed.imported = b.imported.clone();

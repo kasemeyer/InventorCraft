@@ -6,6 +6,8 @@ use solidcraft_sketch::CurveKind;
 use super::CommandSpec;
 use crate::params::{bad, bool_, str_, string_list};
 use crate::{EngineError, Result, Session};
+#[path = "appearance_occurrence.rs"]
+mod occurrence;
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("inspect.measure", "Measure", measure)
@@ -29,7 +31,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("material")
         .params("bodies: [names]; material: name (Steel, Aluminum, ABS Plastic, …, or one made with material.create; `material.list`)"),
     CommandSpec::new("appearance.assign", "Appearance", appearance).at("SOLID", "MODIFY").icon("appearance").key("A").params(
-        "bodies?: [names]; faces?: [[x,y,z] on faces] (body?: which body, default the nearest); components?: [names or ids, or occurrence names]; \
+        "bodies?: [world names]; faces?: [[x,y,z] on faces] (body?: which body, default the nearest); components?: [definition names or ids]; paths?: [[occurrence ids]] for whole-placement overrides; scope?: definition (default), occurrence or context (active definition edits its source; other placements receive assembly overrides); \
              appearance?: library name or stable starter.* ID (appearance.library) | color: \"#rrggbb\" or [r, g, b] (0–255), opacity? (0–1, default 1); \
              name?: inert copied look label (requires color, mutually exclusive with appearance); pbr?: {metallic:0..1, roughness:0.045..1, dielectric_ior:1..3} (requires color/appearance and opacity 1); a starter ID or registered starter name resolves its recipe before color overrides; omitted pbr retains that response and pbr: null explicitly clears it. Unavailable glass recipes refuse through either selector. Other custom labels with an explicit color retain legacy scalar behavior. Neither appearance nor color (or color: null): clear, so the face follows its body, the body its component, the component its material",
     ),
@@ -355,7 +357,15 @@ fn model_threads(s: &mut Session, _p: &Value) -> Result<Value> {
 
 fn physical_material(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "material.assign";
-    let bodies = string_list(p, "bodies");
+    let world = s.world_state();
+    let components: Vec<_> = string_list(p, "bodies").iter().filter_map(|name| world.body(name).map(|b| b.component)).collect();
+    super::component_source::prepare_properties(s, components)?;
+    let bodies: Vec<_> = string_list(p, "bodies")
+        .iter()
+        .map(|name| {
+            world.body(name).map_or_else(|| Ok(name.clone()), |b| Ok(super::component_source::property_body(s, b)?.definition_name().to_string()))
+        })
+        .collect::<Result<_>>()?;
     let material = str_(p, "material").ok_or_else(|| bad(cmd, "`material` must be a material name"))?;
     let canonical = s.doc.material_name(material).ok_or_else(|| bad(cmd, format!("unknown material `{material}` (see material.list)")))?;
     let st = s.model.state();
@@ -453,7 +463,39 @@ pub(super) fn appearance(s: &mut Session, p: &Value) -> Result<Value> {
     } else if p.get("pbr").is_some_and(|v| !v.is_null()) {
         return Err(bad(cmd, "`pbr` requires a color or appearance"));
     }
-    let bodies = string_list(p, "bodies");
+    let world = s.world_state();
+    let scope = match p.get("scope") {
+        None | Some(Value::Null) => "definition",
+        Some(Value::String(scope)) if matches!(scope.as_str(), "definition" | "occurrence" | "context") => scope,
+        _ => return Err(bad(cmd, "scope must be definition, occurrence or context")),
+    };
+    let selected_components: Vec<_> = string_list(p, "bodies")
+        .iter()
+        .filter_map(|name| world.body(name).map(|b| b.component))
+        .chain(p.get("faces").and_then(Value::as_array).into_iter().flatten().filter_map(|f| {
+            let point = crate::params::vec3(f).or_else(|| f.get("point").and_then(crate::params::vec3))?;
+            let given = f.get("body").and_then(Value::as_str).or_else(|| str_(p, "body"));
+            let body = if let Some(name) = given {
+                world.body(name)
+            } else {
+                world.bodies.iter().find(|b| solidcraft_doc::appearance::face_index_at(b, point).is_some())
+            };
+            body.map(|b| b.component)
+        }))
+        .collect();
+    let context_occurrence = scope == "context" && selected_components.iter().any(|c| *c != 0 && *c != s.active_component);
+    if scope == "occurrence" || context_occurrence || p.get("paths").is_some() {
+        return occurrence::assign(s, p, look);
+    }
+    let components =
+        selected_components.into_iter().chain(string_list(p, "components").iter().filter_map(|name| s.doc.find_component(name))).collect::<Vec<_>>();
+    super::component_source::prepare_properties(s, components)?;
+    let bodies: Vec<_> = string_list(p, "bodies")
+        .iter()
+        .map(|name| {
+            world.body(name).map_or_else(|| Ok(name.clone()), |b| Ok(super::component_source::property_body(s, b)?.definition_name().to_string()))
+        })
+        .collect::<Result<_>>()?;
     let st = s.model.state();
     if bodies.iter().any(|b| st.body(b).is_none()) {
         return Err(bad(cmd, "`bodies` must list existing bodies"));
@@ -463,11 +505,26 @@ pub(super) fn appearance(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(list) = p.get("faces") {
         let list = list.as_array().filter(|a| a.len() <= 10_000).ok_or_else(|| bad(cmd, "`faces` must list points [x, y, z]"))?;
         for v in list {
-            let pt = crate::params::vec3(v)
+            let mut pt = crate::params::vec3(v)
                 .or_else(|| v.get("point").and_then(crate::params::vec3))
                 .ok_or_else(|| bad(cmd, "`faces` must list points [x, y, z]"))?;
+            let given = v.get("body").and_then(Value::as_str).or_else(|| str_(p, "body"));
+            let definition = if let Some(name) = given {
+                world.body(name)
+            } else {
+                world
+                    .bodies
+                    .iter()
+                    .filter(|b| solidcraft_doc::appearance::face_index_at(b, pt).is_some())
+                    .min_by(|a, b| dist_to(a, pt).total_cmp(&dist_to(b, pt)))
+            };
+            let definition = definition.map(|body| super::component_source::property_body(s, body)).transpose()?;
+            if let Some(body) = &definition {
+                let inverse = solidcraft_doc::mat_inverse(&body.source_transform).ok_or_else(|| bad(cmd, "invalid body placement"))?;
+                pt = solidcraft_doc::apply_point(&inverse, pt);
+            }
             let on = |b: &solidcraft_doc::ModelBody| solidcraft_doc::appearance::face_index_at(b, pt).is_some();
-            let body = match v.get("body").and_then(Value::as_str).or_else(|| str_(p, "body")) {
+            let body = match definition.as_ref().map(|b| b.definition_name()).or(given) {
                 Some(n) => st.body(n).filter(|b| on(b)).map(|b| b.name.clone()),
                 None => st.bodies.iter().filter(|b| on(b)).min_by(|a, b| dist_to(a, pt).total_cmp(&dist_to(b, pt))).map(|b| b.name.clone()),
             };
@@ -633,12 +690,13 @@ fn appearance_library(_s: &mut Session, _p: &Value) -> Result<Value> {
 fn appearance_list(s: &mut Session, p: &Value) -> Result<Value> {
     let a = &s.doc.appearances;
     // "In this design": each look used, with where.
-    let mut used: Vec<(solidcraft_doc::appearance::Look, Vec<Value>, Vec<Value>, Vec<Value>)> = Vec::new();
-    fn slot(used: &mut Vec<(solidcraft_doc::appearance::Look, Vec<Value>, Vec<Value>, Vec<Value>)>, l: &solidcraft_doc::appearance::Look) -> usize {
+    type Used = (solidcraft_doc::appearance::Look, Vec<Value>, Vec<Value>, Vec<Value>, Vec<Value>);
+    let mut used: Vec<Used> = Vec::new();
+    fn slot(used: &mut Vec<Used>, l: &solidcraft_doc::appearance::Look) -> usize {
         match used.iter().position(|(u, ..)| u == l) {
             Some(i) => i,
             None => {
-                used.push((l.clone(), Vec::new(), Vec::new(), Vec::new()));
+                used.push((l.clone(), Vec::new(), Vec::new(), Vec::new(), Vec::new()));
                 used.len() - 1
             }
         }
@@ -661,13 +719,33 @@ fn appearance_list(s: &mut Session, p: &Value) -> Result<Value> {
             u.3.push(json!(c));
         }
     }
+    for occurrence in &a.occurrences {
+        let targets = occurrence
+            .look
+            .iter()
+            .map(|look| (look, json!({"path":occurrence.path,"owner":occurrence.owner})))
+            .chain(occurrence.bodies.iter().map(|(body, look)| (look, json!({"path":occurrence.path,"owner":occurrence.owner,"body":body}))))
+            .chain(
+                occurrence
+                    .faces
+                    .iter()
+                    .map(|face| (&face.look, json!({"path":occurrence.path,"owner":occurrence.owner,"body":face.body,"point":face.point}))),
+            );
+        for (look, target) in targets {
+            let i = slot(&mut used, look);
+            if let Some(u) = used.get_mut(i) {
+                u.4.push(target);
+            }
+        }
+    }
     let in_design: Vec<Value> = used
         .iter()
-        .map(|(l, b, f, c)| {
+        .map(|(l, b, f, c, paths)| {
             let mut value = look_json(l);
             value["bodies"] = json!(b);
             value["faces"] = json!(f);
             value["components"] = json!(c);
+            value["occurrences"] = json!(paths);
             value
         })
         .collect();

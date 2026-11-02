@@ -246,6 +246,8 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(e) = s.model.result(id).and_then(|r| r.error.clone()) {
         return Err(EngineError::Other(e));
     }
+    let source = s.read_source(&file)?;
+    super::component_source::snapshot_properties(s, comp, &source)?;
     let st = s.model.state();
     let bodies: Vec<&str> = st.bodies.iter().filter(|b| b.feature == id).map(|b| b.name.as_str()).collect();
     Ok(
@@ -325,6 +327,17 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
     }
     if let Some(e) = s.doc.links.values().find_map(|l| s.model.result(l.feature).and_then(|r| r.error.clone())) {
         return Err(EngineError::Other(e));
+    }
+    let properties: Vec<_> = s
+        .doc
+        .links
+        .iter()
+        .filter(|(c, _)| only.is_none_or(|id| id == **c) && !s.doc.source_edits.contains_key(c))
+        .map(|(c, link)| (*c, resolve(s.path.as_deref(), &link.path)))
+        .collect();
+    for (component, file) in properties {
+        let source = s.read_source(&file)?;
+        super::component_source::snapshot_properties(s, component, &source)?;
     }
     // A reference whose face the design no longer has says so here, not only in the joint list.
     if !updated.is_empty() {
@@ -760,6 +773,240 @@ mod tests {
         assert!(error.contains("no longer matches"), "{error}");
         assert_eq!(*s.doc, *before);
         assert_eq!(std::fs::read(&file).unwrap(), bytes);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn source_properties_custom_material_conflicts_are_atomic_and_density_edits_remain_owned() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-material-owner-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("Block.tcipart");
+        let mut part = Session::default();
+        run(&mut part, "document.new_part", json!({}));
+        run(&mut part, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Block"}));
+        run(&mut part, "material.create", json!({"name":"Shop alloy","density_g_cm3":2.0}));
+        run(&mut part, "material.create", json!({"name":"Unused source material","density_g_cm3":0.5}));
+        run(&mut part, "material.assign", json!({"bodies":["Block"],"material":"Shop alloy"}));
+        run(&mut part, "file.save", json!({"path":source}));
+        let original = std::fs::read(&source).unwrap();
+        let mut s = Session::default();
+        run(&mut s, "document.new_assembly", json!({}));
+        run(&mut s, "material.create", json!({"name":"Shop alloy","density_g_cm3":1.0}));
+        let before = s.doc.clone();
+        assert!(s.execute("component.insert_design", &json!({"path":source})).unwrap_err().to_string().contains("conflicts"));
+        assert_eq!(s.doc, before);
+        assert_eq!(std::fs::read(&source).unwrap(), original);
+        run(&mut s, "material.edit", json!({"material":"Shop alloy","name":"Assembly alloy"}));
+        let made = run(&mut s, "component.insert_design", json!({"path":source}));
+        let c = made["component"].as_u64().unwrap();
+        run(&mut s, "component.activate", json!({"component":c,"source_edit":true}));
+        run(&mut s, "material.edit", json!({"material":"Shop alloy","density_g_cm3":3.0}));
+        assert!(super::super::component_source::dirty(&s.doc, c));
+        assert_eq!(s.doc.user_material("Assembly alloy").unwrap().density, 1.0);
+        let mass = run(&mut s, "component.properties", json!({"component":c}))["total"]["mass_g"].as_f64().unwrap();
+        assert!((mass - 3.0).abs() < 1e-6);
+        run(&mut s, "component.save_source", json!({"component":c}));
+        let draft = run(&mut s, "component.edit_source", json!({"component":c,"open":true}));
+        let mut external = Session::new(solidcraft_doc::Document::from_json(&draft["document"].to_string()).unwrap());
+        assert_eq!(external.doc.user_material("Unused source material").unwrap().density, 0.5);
+        assert!(external.doc.user_material("Assembly alloy").is_none());
+        run(&mut external, "material.edit", json!({"material":"Shop alloy","density_g_cm3":4.0}));
+        run(&mut s, "component.edit_source", json!({"component":c,"document":external.doc,"saved":false}));
+        assert_eq!(s.doc.user_material("Shop alloy").unwrap().density, 4.0);
+        assert_eq!(s.doc.user_material("Assembly alloy").unwrap().density, 1.0);
+        assert!(super::super::component_source::dirty(&s.doc, c));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn source_properties_legacy_assembly_paint_is_preserved_without_exporting_it_to_the_part() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-legacy-paint-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("Block.tcipart");
+        let mut part = Session::default();
+        run(&mut part, "document.new_part", json!({}));
+        run(&mut part, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Block"}));
+        run(&mut part, "file.save", json!({"path":source}));
+        let mut s = Session::default();
+        run(&mut s, "document.new_assembly", json!({}));
+        let made = run(&mut s, "component.insert_design", json!({"path":source}));
+        let c = made["component"].as_u64().unwrap();
+        run(&mut s, "occurrence.copy", json!({"occurrence":made["occurrence"],"translate":[30,0,0]}));
+        s.doc_mut().appearances.components.insert(c, solidcraft_doc::appearance::Look::custom([34, 68, 204], 1.0));
+        run(&mut s, "component.edit_source", json!({"component":c}));
+        assert!(!super::super::component_source::dirty(&s.doc, c));
+        assert_eq!(s.doc.appearances.occurrences.len(), 2);
+        assert!(!s.doc.appearances.components.contains_key(&c));
+        for body in &s.world_state().bodies {
+            assert_eq!(s.doc.model_body_look(body).unwrap().color, [34, 68, 204]);
+        }
+        let draft = run(&mut s, "component.edit_source", json!({"component":c,"open":true}));
+        let source = solidcraft_doc::Document::from_json(&draft["document"].to_string()).unwrap();
+        assert!(source.appearances.is_empty());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn source_properties_nested_overrides_keep_their_owning_document_through_edit_save_and_refresh() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-nested-properties-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let sub_file = dir.join("Sub.tciasm");
+        let outer_file = dir.join("Outer.tciasm");
+        let mut sub = Session::default();
+        run(&mut sub, "document.new_assembly", json!({}));
+        run(
+            &mut sub,
+            "component.metadata.set",
+            json!({"component":0,"part_number":"SUB-1","properties":{"Finish":"Raw"},"values":{"com.example.source":{"keep":true}}}),
+        );
+        let part = run(&mut sub, "component.create", json!({"name":"Block"}))["component"].as_u64().unwrap();
+        run(&mut sub, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Block"}));
+        run(&mut sub, "material.assign", json!({"bodies":["Block"],"material":"Steel"}));
+        run(&mut sub, "component.activate", json!({"component":"root"}));
+        let a = sub.doc.first_path(part)[0];
+        let b = run(&mut sub, "occurrence.copy", json!({"occurrence":a,"translate":[30,0,0]}))["occurrence"].as_u64().unwrap();
+        run(&mut sub, "appearance.assign", json!({"paths":[[b]],"color":"#22cc22"}));
+        run(&mut sub, "file.save", json!({"path":sub_file}));
+        let original = std::fs::read(&sub_file).unwrap();
+        let mut s = Session::default();
+        run(&mut s, "document.new_assembly", json!({}));
+        let inserted = run(&mut s, "component.insert_design", json!({"path":sub_file}));
+        let c = inserted["component"].as_u64().unwrap();
+        let first = inserted["occurrence"].as_u64().unwrap();
+        let second = run(&mut s, "occurrence.copy", json!({"occurrence":first,"translate":[100,0,0]}))["occurrence"].as_u64().unwrap();
+        let selected =
+            s.world_state().bodies.iter().find(|body| body.occurrence_path == [second] && body.mesh().bounds().min.x > 120.0).unwrap().name.clone();
+        run(&mut s, "appearance.assign", json!({"scope":"occurrence","bodies":[selected],"color":"#2244cc"}));
+        run(&mut s, "component.activate", json!({"component":c,"occurrence":second,"path":[second],"source_edit":true}));
+        let edit = s.doc.source_edits[&c].clone();
+        let graph = edit.graph.as_ref().unwrap();
+        let child = graph.components[&part];
+        let nested_b = graph.occurrences[&b];
+        assert!(
+            s.doc.appearances.occurrences.iter().any(|o| o.owner == 0 && o.path == [second, nested_b]),
+            "selected {selected}; mapped {:?}; overrides {:?}",
+            graph.occurrences,
+            s.doc.appearances.occurrences
+        );
+        assert!(s.doc.appearances.occurrences.iter().any(|o| o.owner == c && o.path == [first, nested_b]));
+        let world = s.world_state();
+        assert_eq!(
+            s.doc.model_body_look(world.bodies.iter().find(|body| body.occurrence_path == [second, nested_b]).unwrap()).unwrap().color,
+            [34, 68, 204]
+        );
+        // Source-local overrides must project to every placement of the source, not just
+        // the canonical parent used to store the projection.
+        assert_eq!(
+            s.doc.model_body_look(world.bodies.iter().find(|body| body.occurrence_path == [first, nested_b]).unwrap()).unwrap().color,
+            [34, 204, 34]
+        );
+        run(&mut s, "component.metadata.set", json!({"component":c,"part_number":"SUB-2","properties":{"Finish":"Painted"}}));
+        run(&mut s, "component.metadata.set", json!({"component":child,"description":"Child definition"}));
+        let child_body = s.model.state().bodies.iter().find(|body| body.component == child).unwrap().name.clone();
+        run(&mut s, "material.assign", json!({"bodies":[child_body],"material":"Aluminum"}));
+        assert!(super::super::component_source::dirty(&s.doc, c));
+        assert_eq!(std::fs::read(&sub_file).unwrap(), original);
+        run(&mut s, "component.finish_edit", json!({}));
+        run(&mut s, "component.save_source", json!({"component":c}));
+        run(&mut s, "file.save", json!({"path":outer_file}));
+        let mut opened = Session::default();
+        run(&mut opened, "doc.open", json!({"path":sub_file}));
+        assert_eq!(opened.doc.metadata.part_number(), Some("SUB-2"));
+        assert_eq!(opened.doc.properties["Finish"], "Painted");
+        assert_eq!(opened.doc.components.iter().find(|d| d.id == part).unwrap().metadata.description(), Some("Child definition"));
+        assert_eq!(opened.doc.materials["Block"], "Aluminum");
+        assert_eq!(opened.doc.appearances.occurrences.len(), 1);
+        assert_eq!(opened.doc.appearances.occurrences[0].owner, 0);
+        assert_eq!(opened.doc.appearances.occurrences[0].path, [b]);
+        run(&mut opened, "component.metadata.set", json!({"component":0,"revision":"C"}));
+        run(&mut opened, "file.save", json!({}));
+        run(&mut s, "component.update_links", json!({}));
+        assert_eq!(run(&mut s, "component.metadata", json!({"component":c}))["revision"], "C");
+        assert!(s.doc.appearances.occurrences.iter().any(|o| o.owner == 0 && o.path == [second, nested_b]));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn source_properties_save_definition_edits_but_keep_second_occurrence_paint_in_the_assembly() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-source-properties-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("Block.tcipart");
+        let assembly = dir.join("Pair.tciasm");
+        let mut part = Session::default();
+        run(&mut part, "document.new_part", json!({}));
+        run(&mut part, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Block"}));
+        run(
+            &mut part,
+            "component.metadata.set",
+            json!({"component":0,"part_number":"P-1","properties":{"Stock":"A"},"values":{"com.example.tool":{"keep":[1,2,3]}}}),
+        );
+        run(&mut part, "material.assign", json!({"bodies":["Block"],"material":"Steel"}));
+        run(&mut part, "appearance.assign", json!({"bodies":["Block"],"color":"#cc2222"}));
+        run(&mut part, "appearance.assign", json!({"faces":[{"body":"Block","point":[5,5,10]}],"color":"#22cc22"}));
+        run(&mut part, "file.save", json!({"path":source}));
+        let original = std::fs::read(&source).unwrap();
+        let mut s = Session::default();
+        run(&mut s, "document.new_assembly", json!({}));
+        run(&mut s, "document.metadata.set", json!({"values":{"part_number":"ASM-1","com.example.assembly":{"keep":true}}}));
+        let inserted = run(&mut s, "component.insert_design", json!({"path":source}));
+        let c = inserted["component"].as_u64().unwrap();
+        let first = inserted["occurrence"].as_u64().unwrap();
+        let second = run(&mut s, "occurrence.copy", json!({"occurrence":first,"translate":[30,0,0]}))["occurrence"].as_u64().unwrap();
+        run(&mut s, "appearance.assign", json!({"paths":[[second]],"color":"#2244cc"}));
+        run(&mut s, "component.activate", json!({"component":c,"occurrence":second,"path":[second],"source_edit":true}));
+        let body = s.model.state().bodies.iter().find(|b| b.component == c).unwrap().name.clone();
+        let placed_body = s.world_state().bodies.iter().find(|b| b.occurrence_path == [second]).unwrap().name.clone();
+        assert_eq!(run(&mut s, "component.metadata", json!({"component":c}))["part_number"], "P-1");
+        assert_eq!(s.doc.density(&body), part.doc.density("Block"));
+        assert!(!super::super::component_source::dirty(&s.doc, c));
+        // Recover a saved source-edit record from before property baselines existed.
+        s.doc_mut().source_edits.get_mut(&c).unwrap().baseline_properties = None;
+        let component = s.doc_mut().components.iter_mut().find(|d| d.id == c).unwrap();
+        component.metadata = Default::default();
+        component.properties.clear();
+        let recovered = run(&mut s, "component.edit_source", json!({"component":c,"open":true}));
+        assert_eq!(recovered["document"]["metadata"]["com.example.tool"], json!({"keep":[1,2,3]}));
+        assert_eq!(recovered["document"]["properties"]["Stock"], "A");
+        assert!(!super::super::component_source::dirty(&s.doc, c));
+        run(&mut s, "component.metadata.set", json!({"component":c,"part_number":"P-2","properties":{"Stock":"B"}}));
+        run(&mut s, "material.assign", json!({"bodies":[placed_body],"material":"Aluminum"}));
+        run(&mut s, "appearance.assign", json!({"bodies":[placed_body],"scope":"context","color":"#cc8822"}));
+        run(&mut s, "appearance.assign", json!({"faces":[{"body":placed_body,"point":[35,5,10]}],"scope":"context","color":"#cc22cc"}));
+        assert!(super::super::component_source::dirty(&s.doc, c));
+        assert_eq!(std::fs::read(&source).unwrap(), original);
+        let draft = run(&mut s, "component.edit_source", json!({"component":c,"open":true}));
+        let standalone = solidcraft_doc::Document::from_json(&draft["document"].to_string()).unwrap();
+        assert_eq!(standalone.metadata.part_number(), Some("P-2"));
+        assert_eq!(standalone.properties.get("Stock").map(String::as_str), Some("B"));
+        assert_eq!(standalone.materials["Block"], "Aluminum");
+        assert!(standalone.appearances.occurrences.is_empty());
+        assert_eq!(standalone.metadata.get("com.example.tool"), Some(&json!({"keep":[1,2,3]})));
+        run(&mut s, "component.finish_edit", json!({}));
+        let world = s.world_state();
+        let a = world.bodies.iter().find(|b| b.occurrence_path == [first]).unwrap();
+        let b = world.bodies.iter().find(|b| b.occurrence_path == [second]).unwrap();
+        assert_eq!(s.doc.model_body_look(a).unwrap().color, [204, 136, 34]);
+        assert_eq!(s.doc.model_body_look(b).unwrap().color, [34, 68, 204]);
+        assert_eq!(s.doc.face_colors(a).len(), 1);
+        assert!(s.doc.face_colors(b).is_empty(), "occurrence override covers source face paint");
+        run(&mut s, "component.save_source", json!({"component":c}));
+        assert!(!super::super::component_source::dirty(&s.doc, c));
+        run(&mut s, "file.save", json!({"path":assembly}));
+        let mut reopened = Session::default();
+        run(&mut reopened, "doc.open", json!({"path":source}));
+        assert_eq!(reopened.doc.materials["Block"], "Aluminum");
+        assert_eq!(reopened.doc.appearances.bodies["Block"].color, [204, 136, 34]);
+        assert_eq!(reopened.doc.appearances.faces[0].look.color, [204, 34, 204]);
+        assert!(reopened.doc.appearances.occurrences.is_empty());
+        run(&mut reopened, "doc.open", json!({"path":assembly}));
+        run(&mut reopened, "component.update_links", json!({}));
+        assert_eq!(reopened.doc.metadata.part_number(), Some("ASM-1"));
+        assert_eq!(reopened.doc.appearances.occurrences.len(), 1);
+        assert_eq!(reopened.doc.appearances.occurrences[0].path, [second]);
+        run(&mut reopened, "appearance.assign", json!({"paths":[[second]]}));
+        assert!(reopened.doc.appearances.occurrences.is_empty());
+        run(&mut reopened, "edit.undo", json!({}));
+        assert_eq!(reopened.doc.appearances.occurrences.len(), 1);
         let _ = std::fs::remove_dir_all(dir);
     }
 

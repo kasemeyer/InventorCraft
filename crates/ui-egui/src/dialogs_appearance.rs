@@ -187,6 +187,7 @@ pub struct Ap {
     pub search: String,
     /// A Browser component target, inherited by its bodies unless they have overrides.
     pub component: Option<String>,
+    pub occurrence: Option<Vec<u64>>,
     pub remove_override: bool,
     /// The last successful immediate Apply/drop, so OK does not duplicate its undo step.
     pub applied: Option<Value>,
@@ -229,6 +230,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
                 category: 0,
                 search: String::new(),
                 component: None,
+                occurrence: None,
                 remove_override: false,
                 applied: None,
                 note: None,
@@ -266,6 +268,7 @@ fn apply_params(targets: &[Sel], color: [u8; 3], opacity: f64, look: Option<&str
     if let Some(n) = look {
         p["name"] = json!(n);
     }
+    p["scope"] = json!("context");
     Some(p)
 }
 
@@ -286,13 +289,16 @@ pub fn commands(k: &Ap, inputs: &[SelInput]) -> Vec<(String, Value)> {
 }
 
 pub(super) fn selected_params(k: &Ap, items: &[Sel]) -> Option<Value> {
-    let mut p = if let Some(component) = &k.component {
+    let mut p = if let Some(path) = &k.occurrence {
+        Some(json!({"paths":[path], "color":hex(k.color), "opacity":k.opacity, "name":k.look}))
+    } else if let Some(component) = &k.component {
         Some(json!({"components": [component], "color": hex(k.color), "opacity": k.opacity, "name": k.look}))
     } else {
         apply_params(items, k.color, k.opacity, k.look.as_deref(), k.pbr)
     }?;
     // All entry points apply the complete owned response, including explicit clearing.
     p["pbr"] = json!(k.pbr);
+    p["scope"] = json!("context");
     if let Some(id) = &k.preset_id {
         if let Some(object) = p.as_object_mut() {
             object.remove("name");
@@ -344,7 +350,7 @@ fn in_design(app: &mut SolveApp) -> Vec<(Look, usize)> {
                         opacity: x.get("opacity").and_then(Value::as_f64).unwrap_or(1.0),
                         pbr: x.get("pbr").and_then(|p| serde_json::from_value(p.clone()).ok()),
                     },
-                    count(x, "bodies") + count(x, "faces") + count(x, "components"),
+                    count(x, "bodies") + count(x, "faces") + count(x, "components") + count(x, "occurrences"),
                 ))
             })
             .collect();
@@ -368,9 +374,17 @@ fn c32(c: [u8; 3], opacity: f64) -> Color32 {
 pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &mut [SelInput]) -> bool {
     // Apply To: bodies or faces (the input follows).
     if let Some(component) = &k.component {
-        ui_kit::row(ui, "Apply To", |ui| ui_kit::text(ui, &format!("Component: {component}"), ui_kit::Text::Cell));
+        let target = k
+            .occurrence
+            .as_ref()
+            .and_then(|path| path.last())
+            .and_then(|id| app.session.doc.occurrences.iter().find(|o| o.id == *id))
+            .map(|o| format!("Occurrence: {}", o.name))
+            .unwrap_or_else(|| format!("Component: {component}"));
+        ui_kit::row(ui, "Apply To", |ui| ui_kit::text(ui, &target, ui_kit::Text::Cell));
         if ui_kit::row(ui, "", |ui| ui_kit::button(ui, crate::i18n::tr_label("Select bodies or faces instead"), ui_kit::Button::Normal)).clicked() {
             k.component = None;
+            k.occurrence = None;
         }
     } else {
         let mut mode = usize::from(k.faces);
@@ -539,6 +553,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &mut [Sel
         }
         let targets = drop_target(app, k.faces);
         if let Some(mut p) = apply_params(&targets, look.color, look.opacity, k.look.as_deref(), look.pbr) {
+            p["scope"] = json!("context");
             if let Some(pbr) = look.pbr {
                 p["pbr"] = json!(pbr);
             }
@@ -589,6 +604,33 @@ mod tests {
         s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
         s.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5, "corner": [20, 0, 0]})).unwrap();
         SolveApp::new(s, Services::default())
+    }
+
+    #[test]
+    fn repeated_occurrence_menu_appearance_targets_only_the_selected_path() {
+        let mut a = app();
+        a.run("document.new_assembly", json!({})).unwrap();
+        let made = a.run("component.create", json!({"name":"Block"})).unwrap();
+        a.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Block"})).unwrap();
+        a.run("component.activate", json!({"component":"root"})).unwrap();
+        let first = made["occurrence"].as_u64().unwrap();
+        let second = a.run("occurrence.copy", json!({"occurrence":first,"translate":[30,0,0]})).unwrap()["occurrence"].as_u64().unwrap();
+        let menu = crate::context_menu::items(&a, &crate::context_menu::Target::Occurrence { path: vec![second] });
+        let item = menu.iter().find(|i| i.id == "ui.appearance").unwrap();
+        crate::context_menu::run_item(&mut a, item, egui::Pos2::ZERO);
+        let dialog = a.dialog.as_mut().unwrap();
+        let Kind::Appearance(k) = &mut dialog.kind else { panic!("appearance") };
+        assert_eq!(k.occurrence, Some(vec![second]));
+        k.color = [34, 68, 204];
+        let p = selected_params(k, &[]).unwrap();
+        assert_eq!(p["paths"], json!([[second]]));
+        a.run("appearance.assign", p).unwrap();
+        assert!(a.session.doc.appearances.bodies.is_empty());
+        assert!(a.session.doc.appearances.components.is_empty());
+        assert_eq!(a.session.doc.appearances.occurrences.len(), 1);
+        let world = a.session.world_state();
+        assert!(a.session.doc.model_body_look(world.bodies.iter().find(|b| b.occurrence_path == [first]).unwrap()).is_none());
+        assert_eq!(a.session.doc.model_body_look(world.bodies.iter().find(|b| b.occurrence_path == [second]).unwrap()).unwrap().color, [34, 68, 204]);
     }
 
     #[test]

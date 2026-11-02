@@ -2478,8 +2478,21 @@ pub struct SourceEdit {
     pub parameters: std::collections::BTreeMap<String, String>,
     pub baseline_features: Vec<Feature>,
     pub baseline_params: Vec<Param>,
+    /// Definition properties at the last source projection. Occurrence overrides are excluded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub baseline_properties: Option<Box<SourceProperties>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub graph: Option<SourceGraph>,
+}
+
+/// Properties owned by an editable source definition, in assembly identities.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct SourceProperties {
+    pub metadata: crate::Metadata,
+    pub properties: std::collections::BTreeMap<String, String>,
+    pub materials: std::collections::BTreeMap<String, String>,
+    pub user_materials: Vec<UserMaterial>,
+    pub appearances: crate::appearance::Appearances,
 }
 
 /// Reversible identities and the last saved projection of an editable linked assembly.
@@ -2518,6 +2531,9 @@ pub struct Document {
     /// Design properties (project, author…) and other tools' data, kept as they are (#1015).
     #[serde(default, skip_serializing_if = "crate::Metadata::is_empty")]
     pub metadata: crate::Metadata,
+    /// Free part properties, shared by every placement of this definition.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub properties: std::collections::BTreeMap<String, String>,
     pub params: Vec<Param>,
     pub features: Vec<Feature>,
     /// Timeline marker: features at or after this index are rolled back (not evaluated).
@@ -2807,6 +2823,7 @@ impl Document {
             kind,
             drawing: None,
             metadata: Default::default(),
+            properties: Default::default(),
             params: Vec::new(),
             features: Vec::new(),
             marker: None,

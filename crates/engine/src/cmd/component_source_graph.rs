@@ -93,6 +93,8 @@ pub(super) fn scope(doc: &Document, c: u64, edit: &SourceEdit) -> Option<Documen
     out.body_offsets = doc.body_offsets.iter().filter(|(b, _)| out.body_components.contains_key(*b)).map(|(b, m)| (b.clone(), *m)).collect();
     let names: BTreeSet<_> = edit.bodies.values().collect();
     out.reserved_body_names = doc.reserved_body_names.iter().filter(|n| names.contains(n)).cloned().collect();
+    super::properties::document(&super::properties::scope(doc, c, edit), &mut out);
+    out.appearances.occurrences = doc.appearances.occurrences.iter().filter(|o| owned.contains(&o.owner)).cloned().collect();
     Some(out)
 }
 
@@ -183,6 +185,8 @@ fn remap_edit(edit: &SourceEdit, maps: &Maps, from: Option<&str>, to: &str, dept
     }
     e.baseline_features = edit.baseline_features.iter().map(|f| feature(f, maps)).collect::<Result<_>>()?;
     e.baseline_params = edit.baseline_params.iter().map(|p| parameter(p, maps)).collect();
+    e.baseline_properties =
+        edit.baseline_properties.as_deref().map(|p| Box::new(super::properties::remap(p, &maps.bodies, &maps.features, &maps.components)));
     if let Some(g) = &mut e.graph {
         for v in g.components.values_mut() {
             *v = id(&maps.components, *v)?;
@@ -238,6 +242,25 @@ fn remap(doc: &Document, maps: &Maps, from: Option<&str>, to: &str, depth: usize
         .collect::<Result<_>>()?;
     out.body_offsets = doc.body_offsets.iter().map(|(b, m)| (maps.bodies.get(b).cloned().unwrap_or_else(|| b.clone()), *m)).collect();
     out.reserved_body_names = doc.reserved_body_names.iter().map(|b| maps.bodies.get(b).cloned().unwrap_or_else(|| b.clone())).collect();
+    let properties = super::properties::remap(&super::properties::source(doc), &maps.bodies, &maps.features, &maps.components);
+    super::properties::document(&properties, &mut out);
+    out.appearances.occurrences = doc
+        .appearances
+        .occurrences
+        .iter()
+        .map(|o| {
+            let mut next = o.clone();
+            next.owner = id(&maps.components, o.owner)?;
+            next.path = path(&o.path, maps)?;
+            let mut paint = solidcraft_doc::SourceProperties::default();
+            paint.appearances.bodies = o.bodies.clone();
+            paint.appearances.faces = o.faces.clone();
+            let paint = super::properties::remap(&paint, &maps.bodies, &maps.features, &maps.components);
+            next.bodies = paint.appearances.bodies;
+            next.faces = paint.appearances.faces;
+            Ok(next)
+        })
+        .collect::<Result<_>>()?;
     for c in &mut out.assembly.constraints {
         c.id = id(&maps.constraints, c.id)?;
         c.name = maps.constraint_names.get(&c.name).cloned().unwrap_or_else(|| c.name.clone());
@@ -389,6 +412,8 @@ pub(super) fn begin(s: &mut Session, c: u64, source: &Session, mut edit: SourceE
     let file = super::file(s, c)?;
     let to = s.path.clone().unwrap_or_else(|| std::path::absolute("Untitled.tciasm").unwrap_or_default().to_string_lossy().into_owned());
     let projected = remap(&projected, &maps, Some(&file.to_string_lossy()), &to, 0)?;
+    let projected_properties = super::properties::source(&projected);
+    let projected_overrides = projected.appearances.occurrences.clone();
     let source_parameters: BTreeSet<_> = projected.params.iter().map(|p| p.name.clone()).collect();
     let mut scratch = s.scratch();
     scratch.path.clone_from(&s.path);
@@ -409,6 +434,8 @@ pub(super) fn begin(s: &mut Session, c: u64, source: &Session, mut edit: SourceE
     scratch.doc_mut().assembly.constraints.extend(projected.assembly.constraints);
     scratch.doc_mut().next_id = next;
     scratch.doc_mut().marker = None;
+    super::properties::install(scratch.doc_mut(), c, &edit, &projected_properties)?;
+    scratch.doc_mut().appearances.occurrences.extend(projected_overrides);
     scratch.refresh();
     if scratch.model.results.iter().any(|r| r.error.is_some()) {
         return Err(bad(CMD, "linked subassembly history cannot be evaluated in its parent"));
@@ -420,6 +447,12 @@ pub(super) fn begin(s: &mut Session, c: u64, source: &Session, mut edit: SourceE
         return Err(bad(CMD, "linked subassembly changed since insertion; update its link before editing"));
     }
     rebind_external(&mut scratch, s, c, &own)?;
+    let baseline_properties = super::properties::scope(&scratch.doc, c, &edit);
+    if previous.is_none() {
+        super::properties::preserve_legacy(&mut scratch, s, c, &edit, &projected_properties)?;
+    } else {
+        super::properties::rebind_overrides(&mut scratch, s, c)?;
+    }
     edit.graph =
         Some(SourceGraph { components, occurrences, constraints, constraint_names: maps.constraint_names, baseline: Box::new(Document::default()) });
     let mut baseline = scope(&scratch.doc, c, &edit).ok_or_else(|| bad(CMD, "subassembly references leave its source"))?;
@@ -430,6 +463,7 @@ pub(super) fn begin(s: &mut Session, c: u64, source: &Session, mut edit: SourceE
     if let Some(g) = &mut edit.graph {
         *g.baseline = baseline;
     }
+    edit.baseline_properties = Some(Box::new(baseline_properties));
     scratch.doc_mut().source_edits.insert(c, edit);
     s.accept_computed(scratch);
     Ok(())
@@ -564,6 +598,8 @@ pub(super) fn draft(s: &Session, c: u64) -> Result<(Document, SourceEdit)> {
     };
     let file = super::file(s, c)?;
     let mapped = remap(&scoped, &maps, s.path.as_deref(), &file.to_string_lossy(), 0)?;
+    let mapped_properties = super::properties::source(&mapped);
+    let mapped_overrides = mapped.appearances.occurrences.clone();
     let canonical = |p: &std::path::Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
     if mapped
         .links
@@ -583,6 +619,8 @@ pub(super) fn draft(s: &Session, c: u64) -> Result<(Document, SourceEdit)> {
     doc.parts = mapped.parts;
     doc.body_components = mapped.body_components;
     doc.body_offsets = mapped.body_offsets;
+    super::properties::document(&mapped_properties, &mut doc);
+    doc.appearances.occurrences = mapped_overrides;
     doc.next_id = next;
     doc.marker = None;
     checked(&doc)?;
@@ -626,6 +664,7 @@ pub(super) fn adopt(s: &mut Session, c: u64, doc: Document, saved: bool) -> Resu
     scratch.doc_mut().body_components.retain(|_, d| !owned.contains(d));
     scratch.doc_mut().body_offsets.retain(|b, _| !old_scope.body_offsets.contains_key(b));
     scratch.doc_mut().assembly.constraints.retain(|x| !constraint_ids.contains(&x.id));
+    scratch.doc_mut().appearances.occurrences.retain(|o| !owned.contains(&o.owner));
     let snapshot_id = scratch.doc_mut().add_feature(snapshot.kind, Some("Subassembly source"))?;
     let index = scratch.doc.feature_index(snapshot_id).ok_or_else(|| bad(CMD, "missing subassembly snapshot"))?;
     let mut snapshot_feature = scratch.doc_mut().features.remove(index);

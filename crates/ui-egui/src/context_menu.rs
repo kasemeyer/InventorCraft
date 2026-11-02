@@ -1013,7 +1013,10 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
                 item.params = Some(json!({"component":placement.component,"occurrence":placement.occurrence,"path":path,"translate":[10,10,0]}));
             }
             "ui.rename" => item.label = "Rename Component".into(),
-            "ui.appearance" => item.label = "Component Appearance".into(),
+            "ui.appearance" => {
+                item.label = "Occurrence Appearance".into();
+                item.params = Some(json!({"component":placement.component,"path":path,"bodies":bodies}));
+            }
             "ui.material" => item.label = "Component Physical Material".into(),
             "ui.delete" => item.params = Some(json!({"occurrences": [placement.occurrence]})),
             "ui.hide" | "ui.show" => {
@@ -1758,7 +1761,8 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 && let Some(d) = app.dialog.as_mut()
                 && let crate::dialogs::Kind::Appearance(k) = &mut d.kind
             {
-                if let Some(id) = id_of(&p, "component")
+                if p.get("path").is_none()
+                    && let Some(id) = id_of(&p, "component")
                     && let Some(look) = app.session.doc.appearances.components.get(&id)
                 {
                     k.color = look.color;
@@ -1767,6 +1771,12 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                     k.look = Some(look.name.clone());
                 }
                 k.component = Some(name);
+                if let Some(path) = p.get("path").and_then(Value::as_array) {
+                    let path: Vec<_> = path.iter().filter_map(Value::as_u64).collect();
+                    if app.session.active_occurrence_path.as_ref() != Some(&path) {
+                        k.occurrence = Some(path);
+                    }
+                }
             }
         }
         "ui.material" => {

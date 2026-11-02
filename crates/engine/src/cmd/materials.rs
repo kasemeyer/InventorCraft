@@ -226,8 +226,18 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
             l
         }),
     };
-    let physical_card = physical_card(cmd, p)?.unwrap_or(old.physical_card);
+    let physical_card = physical_card(cmd, p)?.unwrap_or(old.physical_card.clone());
     let material = UserMaterial { name: name.clone(), density, appearance, physical_card };
+    if material != old && s.active_component != 0 && s.doc.links.contains_key(&s.active_component) {
+        let state = s.model.state();
+        let external = s.doc.materials.iter().any(|(body, name)| {
+            name.eq_ignore_ascii_case(&old.name)
+                && state.body(body).is_none_or(|b| !s.doc.component_within(s.doc.model_body_component(b), s.active_component))
+        });
+        if external {
+            return Err(bad(cmd, "this material is shared with other definitions; create a separate material for this part before editing it"));
+        }
+    }
     let mut out = material_json(&material)?;
     if let Some(m) = s.doc_mut().user_materials.get_mut(i) {
         *m = material;

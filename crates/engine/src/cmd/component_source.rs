@@ -10,6 +10,87 @@ use std::collections::{BTreeMap, BTreeSet};
 const CMD: &str = "component.edit_source";
 #[path = "component_source_graph.rs"]
 mod graph;
+#[path = "component_source_properties.rs"]
+mod properties;
+
+pub(super) fn prepare_properties(s: &mut Session, components: impl IntoIterator<Item = u64>) -> Result<()> {
+    let components: BTreeSet<_> = components.into_iter().filter(|c| s.doc.links.contains_key(c)).collect();
+    for component in components {
+        begin(s, component)?;
+    }
+    Ok(())
+}
+
+pub(super) fn property_body(s: &Session, before: &solidcraft_doc::ModelBody) -> Result<solidcraft_doc::ModelBody> {
+    let world = s.world_state();
+    if let Some(body) = world.bodies.iter().find(|b| b.occurrence_path == before.occurrence_path && b.definition_name() == before.definition_name()) {
+        return Ok(body.clone());
+    }
+    let mut found = None;
+    let candidates: Vec<_> = world.bodies.iter().filter(|b| b.occurrence_path.starts_with(&before.occurrence_path)).take(10001).collect();
+    if candidates.len() > 10000 {
+        return Err(bad(CMD, "property target matching exceeds source limit"));
+    }
+    for body in candidates {
+        if super::component_link::same_solids(&[before], &[body])? {
+            if found.is_some() {
+                return Err(bad(CMD, "property target is ambiguous in the nested source"));
+            }
+            found = Some(body.clone());
+        }
+    }
+    found.ok_or_else(|| bad(CMD, "property target cannot be matched to source history"))
+}
+
+pub(super) fn snapshot_properties(s: &mut Session, c: u64, source: &Session) -> Result<()> {
+    let state = s.model.state();
+    let source_world = source.world_state();
+    let mut materials = BTreeMap::new();
+    if !source.doc.materials.is_empty() {
+        let mut pieces = Vec::new();
+        for body in &source_world.bodies {
+            for lump in body.body.lumps()? {
+                pieces.push((
+                    solidcraft_doc::ModelBody::new(body.name.clone(), lump, body.feature),
+                    source.doc.body_material(body.definition_name()).to_string(),
+                ));
+            }
+        }
+        let mut budget = 100000usize;
+        for body in state.bodies.iter().filter(|b| b.component == c) {
+            let mut matches = BTreeSet::new();
+            for (piece, material) in &pieces {
+                budget = budget.checked_sub(1).ok_or_else(|| bad(CMD, "material matching exceeds source limit"))?;
+                if super::component_link::same_solids(&[body], &[piece])? {
+                    matches.insert(material.clone());
+                }
+            }
+            if matches.len() != 1 {
+                return Err(bad(CMD, "source physical materials cannot be uniquely matched to linked geometry"));
+            }
+            if let Some(material) = matches.first().filter(|m| m.as_str() != solidcraft_doc::DEFAULT_MATERIAL) {
+                materials.insert(body.name.clone(), material.clone());
+            }
+        }
+    }
+    for material in &source.doc.user_materials {
+        if let Some(existing) = s.doc.user_materials.iter().find(|m| m.name.eq_ignore_ascii_case(&material.name)) {
+            if existing != material {
+                return Err(bad(CMD, format!("source material `{}` conflicts with an assembly material", material.name)));
+            }
+        } else {
+            s.doc_mut().user_materials.push(material.clone());
+        }
+    }
+    if let Some(component) = s.doc_mut().components.iter_mut().find(|d| d.id == c) {
+        component.metadata = source.doc.metadata.clone();
+        component.properties = source.doc.properties.clone();
+    }
+    let names: BTreeSet<_> = state.bodies.iter().filter(|b| b.component == c).map(|b| b.name.clone()).collect();
+    s.doc_mut().materials.retain(|b, _| !names.contains(b));
+    s.doc_mut().materials.extend(materials);
+    Ok(())
+}
 
 pub(super) fn rebase_edits(doc: &Document, from: Option<&str>, to: &str, depth: usize) -> Result<BTreeMap<u64, SourceEdit>> {
     if depth > 32 {
@@ -75,6 +156,11 @@ fn own_params(doc: &Document, e: &SourceEdit) -> Vec<solidcraft_doc::Param> {
 }
 pub(crate) fn dirty(doc: &Document, c: u64) -> bool {
     if let Some(edit) = doc.source_edits.get(&c)
+        && edit.baseline_properties.as_deref().is_some_and(|baseline| properties::scope(doc, c, edit) != *baseline)
+    {
+        return true;
+    }
+    if let Some(edit) = doc.source_edits.get(&c)
         && let Some(graph) = &edit.graph
     {
         return graph::scope(doc, c, edit).is_none_or(|now| now != *graph.baseline);
@@ -87,6 +173,19 @@ pub(crate) fn dirty(doc: &Document, c: u64) -> bool {
 
 pub(crate) fn begin(s: &mut Session, c: u64) -> Result<()> {
     if s.doc.source_edits.contains_key(&c) {
+        if let Some(mut edit) = s.doc.source_edits.get(&c).filter(|e| e.baseline_properties.is_none()).cloned() {
+            let components = edit.graph.as_ref().map_or_else(|| BTreeMap::from([(0, c)]), |g| g.components.clone());
+            let projected = properties::remap(&properties::source(&edit.source), &edit.bodies, &edit.ids, &components);
+            let mut scratch = s.scratch();
+            properties::install(scratch.doc_mut(), c, &edit, &projected)?;
+            edit.baseline_properties = Some(Box::new(properties::scope(&scratch.doc, c, &edit)));
+            if let Some(graph) = &mut edit.graph {
+                properties::document(&projected, &mut graph.baseline);
+            }
+            properties::preserve_legacy(&mut scratch, s, c, &edit, &projected)?;
+            scratch.doc_mut().source_edits.insert(c, edit);
+            s.accept_computed(scratch);
+        }
         return Ok(());
     }
     let link = s.doc.links.get(&c).cloned().ok_or_else(|| bad(CMD, "component is not linked"))?;
@@ -122,6 +221,7 @@ pub(crate) fn begin(s: &mut Session, c: u64) -> Result<()> {
         parameters: BTreeMap::new(),
         baseline_features: Vec::new(),
         baseline_params: Vec::new(),
+        baseline_properties: None,
         graph: None,
     };
     if !source.doc.components.is_empty() || !source.doc.links.is_empty() {
@@ -301,6 +401,16 @@ fn materialize(s: &mut Session, c: u64, source: &Session, mut edit: SourceEdit, 
     if clean {
         edit.baseline_features = own_features(&scratch.doc, c);
         edit.baseline_params = own_params(&scratch.doc, &edit);
+    }
+    let projected = properties::remap(&properties::source(&source.doc), &edit.bodies, &edit.ids, &BTreeMap::from([(0, c)]));
+    properties::install(scratch.doc_mut(), c, &edit, &projected)?;
+    if clean {
+        edit.baseline_properties = Some(Box::new(properties::scope(&scratch.doc, c, &edit)));
+    }
+    if replacing {
+        properties::rebind_overrides(&mut scratch, s, c)?;
+    } else {
+        properties::preserve_legacy(&mut scratch, s, c, &edit, &projected)?;
     }
     scratch.doc_mut().source_edits.insert(c, edit);
     s.accept_computed(scratch);
@@ -560,6 +670,11 @@ pub(crate) fn draft(s: &Session, c: u64) -> Result<(Document, SourceEdit)> {
         doc.params.push(p);
     }
     doc.marker = None;
+    if edit.baseline_properties.is_some() {
+        let projected = properties::scope(&s.doc, c, &edit);
+        let projected = properties::remap(&projected, &bodies, &ids, &BTreeMap::from([(c, 0)]));
+        properties::document(&projected, &mut doc);
+    }
     Ok((doc, edit))
 }
 fn status(s: &mut Session, _: &Value) -> Result<Value> {
@@ -585,6 +700,7 @@ fn save(s: &mut Session, p: &Value) -> Result<Value> {
     edit.source = Box::new((*part.doc).clone());
     edit.baseline_features = own_features(&s.doc, c);
     edit.baseline_params = own_params(&s.doc, &edit);
+    edit.baseline_properties = Some(Box::new(properties::scope(&s.doc, c, &edit)));
     if edit.graph.is_some() {
         let baseline = graph::scope(&s.doc, c, &edit).ok_or_else(|| bad(CMD, "subassembly references leave its source"))?;
         if let Some(graph) = &mut edit.graph {

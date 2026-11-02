@@ -82,10 +82,9 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         "sketch.intersection_curve" => &[("a", Here), ("b", Here)],
         "inspect.curvature_comb" | "inspect.minimum_radius" | "inspect.isocurve" => &[("edges", Picks), ("faces", Picks)],
         "parts.insert" | "parts.fastener" => &[("at", Pick), ("point", Make), ("direction", Dir)],
-        "appearance.assign" => &[("faces", Picks), ("bodies", Body), ("body", Body)],
         "solid.move" => &[("bodies", Body), ("translate", Dir), ("axis", Dir), ("origin", Make)],
         "solid.combine" => &[("target", Body), ("tools", Body)],
-        "solid.remove" | "solid.bounding_solid" | "material.assign" => &[("bodies", Body)],
+        "solid.remove" | "solid.bounding_solid" => &[("bodies", Body)],
         _ => &[],
     }
 }
@@ -351,14 +350,10 @@ impl Drop for Nested {
 
 /// `params` with world picks mapped into component frames (`None`: nothing to change).
 pub fn to_local(s: &Session, id: &str, params: &Value) -> Option<Value> {
-    if id == "library.apply" {
-        // Library targets are the same world selections as appearance.assign,
-        // nested one level down. Convert at the outer boundary exactly once;
-        // run_nested subsequently receives the component-local picks and names.
-        let targets = to_local(s, "appearance.assign", params.get("targets")?)?;
-        let mut out = params.clone();
-        out["targets"] = targets;
-        return Some(out);
+    // Style/material commands resolve definition versus placement ownership themselves.
+    // Mapping a world body here would erase which repeated occurrence was selected.
+    if matches!(id, "appearance.assign" | "material.assign" | "library.apply") {
+        return None;
     }
     if id == "timeline.redefine" {
         let cmd = params.get("command")?.as_str()?;

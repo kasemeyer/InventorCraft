@@ -84,6 +84,9 @@ pub struct FaceLook {
 fn is_false(value: &bool) -> bool {
     !*value
 }
+fn is_root(value: &u64) -> bool {
+    *value == 0
+}
 
 /// The look a body was imported with, carried through later features (which build new kernel
 /// bodies without it): its colour and opacity, and its faces' colours by persistent face name.
@@ -114,6 +117,21 @@ impl ImportedLook {
 
 /// The design's appearances.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct OccurrenceAppearance {
+    pub path: Vec<u64>,
+    /// Definition document owning the override (0: this design, never a linked source).
+    #[serde(default, skip_serializing_if = "is_root")]
+    pub owner: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub look: Option<Look>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub bodies: BTreeMap<String, Look>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub faces: Vec<FaceLook>,
+}
+
+/// Definition appearances and independently owned placement overrides.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Appearances {
     /// By body name.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -123,11 +141,13 @@ pub struct Appearances {
     /// By component id.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub components: BTreeMap<u64, Look>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub occurrences: Vec<OccurrenceAppearance>,
 }
 
 impl Appearances {
     pub fn is_empty(&self) -> bool {
-        self.bodies.is_empty() && self.faces.is_empty() && self.components.is_empty()
+        self.bodies.is_empty() && self.faces.is_empty() && self.components.is_empty() && self.occurrences.is_empty()
     }
 }
 
@@ -161,8 +181,42 @@ pub fn material_look(material: &str) -> Option<Look> {
 }
 
 impl Document {
+    fn override_path<'a>(&self, owner: u64, path: &'a [u64]) -> Option<&'a [u64]> {
+        if owner == 0 {
+            return Some(path);
+        }
+        let at = path.iter().position(|id| self.occurrences.iter().any(|o| o.id == *id && o.component == owner))?;
+        path.get(at + 1..)
+    }
+
+    fn override_is_body(&self, o: &OccurrenceAppearance, body: &crate::ModelBody) -> bool {
+        self.override_path(o.owner, &o.path).zip(self.override_path(o.owner, &body.occurrence_path)).is_some_and(|(a, b)| a == b)
+    }
+    /// A containing assembly's override wins over source paint; within it, deepest wins.
+    pub fn occurrence_body_look(&self, body: &crate::ModelBody) -> Option<Look> {
+        self.occurrence_body_override(body)
+            .and_then(|o| self.override_is_body(o, body).then(|| o.bodies.get(body.definition_name())).flatten().or(o.look.as_ref()).cloned())
+    }
+
+    fn occurrence_body_override(&self, body: &crate::ModelBody) -> Option<&OccurrenceAppearance> {
+        self.appearances
+            .occurrences
+            .iter()
+            .filter(|o| {
+                !o.path.is_empty()
+                    && self
+                        .override_path(o.owner, &o.path)
+                        .zip(self.override_path(o.owner, &body.occurrence_path))
+                        .is_some_and(|(a, b)| b.starts_with(a))
+            })
+            .filter(|o| o.look.is_some() || (self.override_is_body(o, body) && o.bodies.contains_key(body.definition_name())))
+            .max_by_key(|o| (std::cmp::Reverse(self.first_path(o.owner).len()), o.path.len()))
+    }
     /// Shared definition appearance for a computed occurrence body.
     pub fn model_body_look(&self, body: &crate::ModelBody) -> Option<Look> {
+        if let Some(look) = self.occurrence_body_look(body) {
+            return Some(look);
+        }
         let name = body.definition_name();
         self.appearances
             .bodies
@@ -201,22 +255,43 @@ impl Document {
     /// The faces of a body with appearances of their own: (B-rep face index, look). A later
     /// assignment to the same face wins.
     pub fn face_colors(&self, b: &crate::ModelBody) -> Vec<(usize, Look)> {
+        let mut placements: Vec<_> = self.appearances.occurrences.iter().filter(|o| self.override_is_body(o, b) && !o.path.is_empty()).collect();
+        if let Some(body_override) = self.occurrence_body_override(b) {
+            let owner_depth = self.first_path(body_override.owner).len();
+            placements.retain(|o| self.first_path(o.owner).len() <= owner_depth);
+        }
+        placements.sort_by_key(|o| std::cmp::Reverse(self.first_path(o.owner).len()));
+        let mut out = if self.occurrence_body_look(b).is_some() { Vec::new() } else { self.assigned_face_colors(b, &self.appearances.faces, true) };
+        for placement in placements {
+            for (index, look) in self.assigned_face_colors(b, &placement.faces, false) {
+                out.retain(|(old, _)| *old != index);
+                out.push((index, look));
+            }
+        }
+        out
+    }
+
+    fn assigned_face_colors(&self, b: &crate::ModelBody, faces: &[FaceLook], imported: bool) -> Vec<(usize, Look)> {
         // Face colours the body was imported with, under the design's own.
         let to8 = |x: f32| (x.clamp(0.0, 1.0) * 255.0).round() as u8;
-        let mut out: Vec<(usize, Look)> = match b.body.paint() {
-            Some(p) => p.faces.iter().map(|f| (f.face, Look::custom(f.color.map(to8), f.opacity as f64))).collect(),
-            // Carried from an earlier version of the body: by face name (worked out only here:
-            // the viewport asks every body for its face colours on every change).
-            None => match &b.imported {
-                Some(imp) => crate::naming::face_names(b)
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(i, n)| imp.faces.get(crate::naming::strip_piece(n)).map(|(c, o)| (i, Look::custom(c.map(to8), *o as f64))))
-                    .collect(),
-                None => Vec::new(),
-            },
+        let mut out: Vec<(usize, Look)> = if !imported {
+            Vec::new()
+        } else {
+            match b.body.paint() {
+                Some(p) => p.faces.iter().map(|f| (f.face, Look::custom(f.color.map(to8), f.opacity as f64))).collect(),
+                // Carried from an earlier version of the body: by face name (worked out only here:
+                // the viewport asks every body for its face colours on every change).
+                None => match &b.imported {
+                    Some(imp) => crate::naming::face_names(b)
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, n)| imp.faces.get(crate::naming::strip_piece(n)).map(|(c, o)| (i, Look::custom(c.map(to8), *o as f64))))
+                        .collect(),
+                    None => Vec::new(),
+                },
+            }
         };
-        for f in self.appearances.faces.iter().filter(|f| f.body == b.definition_name()) {
+        for f in faces.iter().filter(|f| f.body == b.definition_name()) {
             let (p, look) = (crate::apply_point(&b.source_transform, f.point), f.look.clone());
             if f.strict_name {
                 let Some(name) = f.name.as_ref() else { continue };

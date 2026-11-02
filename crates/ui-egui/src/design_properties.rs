@@ -20,6 +20,7 @@ const OTHERS_ROWS: f32 = 6.0;
 
 /// What is being typed; the properties themselves live in the document.
 pub struct DesignProperties {
+    pub component: u64,
     /// Each well-known key's text when the window opened, in [`WELL_KNOWN`] order.
     pub opened: [String; WELL_KNOWN.len()],
     /// The fields as edited.
@@ -30,9 +31,10 @@ pub struct DesignProperties {
 
 impl DesignProperties {
     pub fn new(app: &SolveApp) -> Self {
-        let m = &app.session.doc.metadata;
+        let component = app.session.active_component;
+        let m = app.session.doc.components.iter().find(|c| c.id == component).map_or(&app.session.doc.metadata, |c| &c.metadata);
         let opened = WELL_KNOWN.map(|k| m.text(k).unwrap_or_default().to_string());
-        DesignProperties { fields: opened.clone(), opened, error: None }
+        DesignProperties { component, fields: opened.clone(), opened, error: None }
     }
 
     /// The fields that differ from what the window opened with, as `document.metadata.set`
@@ -58,7 +60,8 @@ fn apply(app: &mut SolveApp, d: &mut DesignProperties) -> bool {
     if values.is_empty() {
         return true;
     }
-    match app.run("document.metadata.set", serde_json::json!({ "values": values })) {
+    let command = if d.component == 0 { "document.metadata.set" } else { "component.metadata.set" };
+    match app.run(command, serde_json::json!({ "component": d.component, "values": values })) {
         Ok(_) => true,
         Err(e) => {
             d.error = Some(e);
@@ -88,7 +91,8 @@ fn preview(v: &Value) -> String {
 /// Draw the window when it is open. Called once per frame.
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(mut d) = app.design_properties.take() else { return };
-    let metadata = app.session.doc.metadata.clone();
+    let metadata =
+        app.session.doc.components.iter().find(|c| c.id == d.component).map_or_else(|| app.session.doc.metadata.clone(), |c| c.metadata.clone());
     let title = crate::i18n::tr_label("Design Properties");
     let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_design_properties"), "settings", title).fields().show(ctx, true, |ui| {
         for (i, key) in WELL_KNOWN.iter().enumerate() {
@@ -213,6 +217,27 @@ mod tests {
         h.step(&json!({"widget": "OK"})).unwrap();
         let d = h.app.design_properties.as_ref().expect("still open");
         assert!(d.error.as_deref().is_some_and(|e| e.contains("control character")), "{:?}", d.error);
+        assert_eq!(h.app.session.undo.len(), undo + 1);
+    }
+
+    #[test]
+    fn in_place_design_properties_edit_the_active_definition() {
+        let mut h = Harness::new();
+        h.app.run("document.new_assembly", json!({})).unwrap();
+        h.app.run("document.metadata.set", json!({"values":{"part_number":"ASM-1"}})).unwrap();
+        let c = h.app.run("component.create", json!({"name":"Block"})).unwrap()["component"].as_u64().unwrap();
+        h.app.run("component.metadata.set", json!({"component":c,"part_number":"PART-1"})).unwrap();
+        let undo = h.app.session.undo.len();
+        super::open(&mut h.app);
+        let d = h.app.design_properties.as_mut().unwrap();
+        assert_eq!(d.component, c);
+        assert_eq!(d.fields[1], "PART-1");
+        d.fields[1] = "PART-2".into();
+        h.frames(2);
+        h.step(&json!({"widget":"OK"})).unwrap();
+        assert!(h.app.design_properties.is_none());
+        assert_eq!(h.app.session.doc.metadata.part_number(), Some("ASM-1"));
+        assert_eq!(h.app.session.doc.components.iter().find(|d| d.id == c).unwrap().metadata.part_number(), Some("PART-2"));
         assert_eq!(h.app.session.undo.len(), undo + 1);
     }
 

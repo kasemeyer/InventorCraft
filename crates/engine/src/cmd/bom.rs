@@ -61,7 +61,7 @@ fn read(s: &mut Session, p: &Value) -> Result<Value> {
     if id == 0 {
         let m = &s.doc.metadata;
         return Ok(json!({"component": 0, "name": s.doc.name, "part_number": m.part_number(), "description": m.description(),
-            "revision": m.revision(), "metadata": m, "properties": {}}));
+            "revision": m.revision(), "metadata": m, "properties": s.doc.properties}));
     }
     let c = s.doc.components.iter().find(|c| c.id == id).ok_or_else(|| bad(cmd, format!("no component `{id}`")))?;
     let m = &c.metadata;
@@ -95,11 +95,13 @@ fn property(name: &str, value: &Value, cmd: &str) -> Result<Option<String>> {
 fn set(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.metadata.set";
     let id = component_id(s, p, cmd)?;
-    if id == 0 {
-        return Err(bad(cmd, "the root is the design: its properties are document.metadata.set's"));
-    }
-    let c = s.doc.components.iter().find(|c| c.id == id).ok_or_else(|| bad(cmd, format!("no component `{id}`")))?;
-    let (mut metadata, mut properties) = (c.metadata.clone(), c.properties.clone());
+    super::component_source::prepare_properties(s, [id])?;
+    let (mut metadata, mut properties) = if id == 0 {
+        (s.doc.metadata.clone(), s.doc.properties.clone())
+    } else {
+        let c = s.doc.components.iter().find(|c| c.id == id).ok_or_else(|| bad(cmd, format!("no component `{id}`")))?;
+        (c.metadata.clone(), c.properties.clone())
+    };
     let mut entries: Vec<(String, Value)> = Vec::new();
     match p.get("values") {
         None => {}
@@ -145,14 +147,18 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, format!("a component holds at most {MAX_KEYS} properties")));
     }
     // Only a real change touches the design (an undo step, unsaved changes).
-    if !changed.is_empty()
-        && let Some(c) = s.doc_mut().components.iter_mut().find(|c| c.id == id)
-    {
-        c.metadata = metadata;
-        c.properties = properties;
+    if !changed.is_empty() {
+        if id == 0 {
+            s.doc_mut().metadata = metadata;
+            s.doc_mut().properties = properties;
+        } else if let Some(c) = s.doc_mut().components.iter_mut().find(|c| c.id == id) {
+            c.metadata = metadata;
+            c.properties = properties;
+        }
     }
-    let c = s.doc.components.iter().find(|c| c.id == id);
-    Ok(json!({"component": id, "metadata": c.map(|c| &c.metadata), "properties": c.map(|c| &c.properties), "changed": changed}))
+    let mut out = read(s, &json!({"component":id}))?;
+    out["changed"] = json!(changed);
+    Ok(out)
 }
 
 #[derive(Clone, Copy, PartialEq)]

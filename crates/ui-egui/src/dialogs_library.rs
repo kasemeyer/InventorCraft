@@ -284,7 +284,7 @@ fn import_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &[SelI
         && let (Some(entry), Some(selected)) = (entry, selected)
     {
         let mut targets = serde_json::Map::new();
-        for key in ["bodies", "faces", "components"] {
+        for key in ["bodies", "faces", "components", "paths", "scope"] {
             if let Some(value) = selected.get(key) {
                 targets.insert(key.into(), value.clone());
             }

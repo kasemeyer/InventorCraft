@@ -52,6 +52,10 @@ struct Targets {
     faces: Vec<Face>,
     #[serde(default)]
     components: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    paths: Vec<Vec<u64>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    scope: Option<String>,
 }
 #[derive(Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
@@ -62,8 +66,13 @@ struct Face {
 impl Targets {
     fn validate(&self) -> Result<()> {
         let cmd = "library.apply";
-        if self.bodies.len().saturating_add(self.faces.len()).saturating_add(self.components.len()) > 1024 {
+        if self.bodies.len().saturating_add(self.faces.len()).saturating_add(self.components.len()).saturating_add(self.paths.len()) > 1024 {
             return Err(bad(cmd, "at most 1024 library application targets"));
+        }
+        if self.paths.iter().any(|path| path.is_empty() || path.len() > solidcraft_doc::MAX_PLACEMENT_DEPTH + 1 || path.contains(&0))
+            || self.scope.as_deref().is_some_and(|scope| !matches!(scope, "definition" | "occurrence" | "context"))
+        {
+            return Err(bad(cmd, "invalid library occurrence target or scope"));
         }
         for name in self.bodies.iter().chain(&self.components).chain(self.faces.iter().map(|f| &f.body)) {
             if name.is_empty() || name.len() > 1024 || name.chars().any(char::is_control) {
@@ -76,7 +85,7 @@ impl Targets {
         Ok(())
     }
     fn empty(&self) -> bool {
-        self.bodies.is_empty() && self.faces.is_empty() && self.components.is_empty()
+        self.bodies.is_empty() && self.faces.is_empty() && self.components.is_empty() && self.paths.is_empty()
     }
 }
 #[derive(Deserialize)]
@@ -159,10 +168,10 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
             nested(s, "appearance.assign", &target)?
         }
         Definition::Material(material) => {
-            if !request.targets.faces.is_empty() || !request.targets.components.is_empty() {
+            if !request.targets.faces.is_empty() || !request.targets.components.is_empty() || !request.targets.paths.is_empty() {
                 return Err(bad(cmd, "physical material assignment takes body targets only"));
             }
-            if request.targets.bodies.iter().any(|body| s.model.state().body(body).is_none()) {
+            if request.targets.bodies.iter().any(|body| s.world_state().body(body).is_none()) {
                 return Err(bad(cmd, "physical material targets must name existing bodies"));
             }
             let wanted = request.name.as_deref().unwrap_or(&material.name).trim();

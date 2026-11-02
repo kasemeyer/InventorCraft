@@ -180,7 +180,6 @@ fn hostile_part_properties_are_refused_without_a_change() {
     let undo = s.undo.len();
     for p in [
         json!({"component": "Pin"}),
-        json!({"component": 0, "part_number": "X"}),
         json!({"component": "Nope", "part_number": "X"}),
         json!({"component": "Pin", "part_number": 7}),
         json!({"component": "Pin", "part_number": "ok", "description": "bell\u{7}"}),
@@ -201,6 +200,8 @@ fn hostile_part_properties_are_refused_without_a_change() {
     // The root reads as the design's own properties.
     run(&mut s, "document.metadata.set", json!({"key": "part_number", "value": "ASM-1"}));
     assert_eq!(run(&mut s, "component.metadata", json!({"component": 0}))["part_number"], "ASM-1");
+    run(&mut s, "component.metadata.set", json!({"component":0,"properties":{"Stock":"A"}}));
+    assert_eq!(run(&mut s, "component.metadata", json!({"component":0}))["properties"]["Stock"], "A");
 }
 
 /// Two hex bolts, each with a washer and a nut placed inside it, and a third bolt alone.
