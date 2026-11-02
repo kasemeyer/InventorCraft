@@ -772,7 +772,7 @@ impl SolveApp {
         {
             let adapter = rs.adapter.clone();
             let key = render_workspace::adapter_key(&adapter.get_info());
-            self.render_workspace.defer_path_host(key, move || solidcraft_gpu::path::host_on_adapter(&adapter).map_err(|e| e.to_string()));
+            self.render_workspace.defer_viewport_path_host(key, move || solidcraft_gpu::path::host_on_adapter(&adapter).map_err(|e| e.to_string()));
         }
         render_workspace::sync_backend(self);
         self.msaa_supported = rs.msaa_supported.clone();

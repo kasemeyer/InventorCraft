@@ -61,7 +61,21 @@ mod async_path_host {
         assert_eq!(calls.load(Ordering::SeqCst), 0);
         assert!(matches!(h.app.render_workspace.path_host, PathHost::NotStarted));
         assert!(h.app.render_workspace.pending_setup.is_some());
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"UndoStock"})).unwrap();
+        h.app.run("solid.remove", json!({"bodies":["UndoStock"]})).unwrap();
+        for command in ["edit.undo", "edit.redo", "edit.undo"] {
+            h.app.run(command, json!({})).unwrap();
+            h.frames(2);
+        }
         enter(&mut h.app, true).unwrap();
+        h.frames(5);
+        assert_eq!(calls.load(Ordering::SeqCst), 0, "raster Render must not compile the path tracer");
+        assert!(matches!(h.app.render_workspace.path_host, PathHost::NotStarted));
+        // Restoring a saved GPU method must not count as clicking the GPU method selector.
+        h.app.render_workspace.view.method = ImageMethod::GpuRaytrace;
+        h.frames(5);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        select_image_method(&mut h.app, ImageMethod::GpuRaytrace);
         finish_setup(&mut h);
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         assert!(matches!(h.app.render_workspace.path_host, PathHost::Ready(_)));
@@ -78,6 +92,7 @@ mod async_path_host {
         let observed = calls.clone();
         let mut h = panel_fixture();
         assert!(matches!(h.app.render_workspace.path_host, PathHost::NotStarted));
+        select_image_method(&mut h.app, ImageMethod::GpuRaytrace);
         h.app.render_workspace.defer_path_host("late selected viewport".into(), move || {
             observed.fetch_add(1, Ordering::SeqCst);
             Err("deliberate device refusal".into())
@@ -101,9 +116,37 @@ mod async_path_host {
         h.frames(5);
         assert_eq!(h.app.render_workspace.setup_key.as_deref(), Some("selected safe-mode adapter"));
         enter(&mut h.app, true).unwrap();
+        select_image_method(&mut h.app, ImageMethod::GpuRaytrace);
         finish_setup(&mut h);
         let PathHost::Failed(message) = &h.app.render_workspace.path_host else { panic!("expected selected adapter result") };
         assert_eq!(message, "selected adapter unavailable");
+    }
+
+    #[test]
+    fn linux_policy_never_calls_or_spawns_the_driver_factory() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let calls = Arc::new(AtomicUsize::new(0));
+        let observed = calls.clone();
+        let mut h = Harness::new();
+        let cpu_available = image_host(&h.app, ImageMethod::CpuRaytrace).is_ok();
+        h.app.render_workspace.defer_path_host_with_policy(
+            "Linux adapter".into(),
+            move || {
+                observed.fetch_add(1, Ordering::SeqCst);
+                panic!("unbounded driver setup invoked")
+            },
+            true,
+        );
+        enter(&mut h.app, true).unwrap();
+        select_image_method(&mut h.app, ImageMethod::GpuRaytrace);
+        sync_backend(&mut h.app);
+        h.frames(5);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert!(h.app.render_workspace.pending_setup.is_none());
+        assert!(matches!(h.app.render_workspace.path_host, PathHost::Failed(_)));
+        assert_eq!(inspect_state(&h.app)["path_setup"], "unavailable");
+        assert!(image_host(&h.app, ImageMethod::Raster).is_ok());
+        assert_eq!(image_host(&h.app, ImageMethod::CpuRaytrace).is_ok(), cpu_available);
     }
 
     #[test]

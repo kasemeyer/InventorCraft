@@ -56,6 +56,7 @@ type PathFactory = Box<dyn FnOnce() -> Result<ImageHost, String> + Send>;
 
 pub struct State {
     pending_setup: Option<PathFactory>,
+    path_setup_requested: bool,
     pub host: Option<ExecutorDescriptor>,
     pub path_host: PathHost,
     /// How long the last path tracer setup took, in seconds, per viewport adapter
@@ -294,6 +295,7 @@ impl Default for State {
             host: None,
             path_host: PathHost::default(),
             pending_setup: None,
+            path_setup_requested: false,
             setup_seconds: Default::default(),
             setup_key: None,
             image_host: None,
@@ -314,6 +316,24 @@ impl Default for State {
 }
 
 impl State {
+    /// Driver shader compilation cannot be cancelled or memory-limited inside a thread.
+    /// Keep the Linux desktop path disabled until it can run in an isolated process.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn defer_viewport_path_host(&mut self, key: String, create: impl FnOnce() -> Result<ImageHost, String> + Send + 'static) {
+        self.defer_path_host_with_policy(key, create, cfg!(target_os = "linux"));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn defer_path_host_with_policy(&mut self, key: String, create: impl FnOnce() -> Result<ImageHost, String> + Send + 'static, blocked: bool) {
+        if blocked {
+            self.pending_setup = None;
+            self.setup_key = Some(key);
+            self.path_host = PathHost::failed("GPU path tracing is temporarily disabled on Linux because driver shader compilation can exhaust system memory. Use raster or CPU rendering.".into());
+        } else {
+            self.defer_path_host(key, create);
+        }
+    }
+
     /// Retain the selected viewport adapter, but do not open another device or
     /// compile shaders until Render is used. A later viewport installation (for
     /// example safe-mode fallback) replaces only a not-yet-started factory.
@@ -357,10 +377,18 @@ pub(crate) fn inspect_state(app: &SolveApp) -> serde_json::Value {
         ImageMethod::CpuRaytrace => "cpu_raytrace",
         ImageMethod::GpuRaytrace => "gpu_path",
     };
+    let (path_setup, path_error) = match &app.render_workspace.path_host {
+        PathHost::NotStarted => ("not_started", None),
+        PathHost::Preparing(..) => ("preparing", None),
+        PathHost::Ready(_) => ("ready", None),
+        PathHost::Failed(error) => ("unavailable", Some(error.as_str())),
+    };
     json!({
         "active": active(app), "setup": view.name, "draft_dirty": view.dirty,
         "method": method, "job": view.job, "completed": view.completed,
         "showing_result": view.result, "export_format": if view.studio.export_exr {"exr"} else {"png"},
+        "path_setup": path_setup, "path_setup_error": path_error,
+        "path_setup_requested": app.render_workspace.path_setup_requested,
     })
 }
 
@@ -393,7 +421,7 @@ pub fn host_executor(max_dimension: u32, depth: bool, samples: u32) -> Result<Ex
 
 pub fn sync_backend(app: &mut SolveApp) {
     #[cfg(not(target_arch = "wasm32"))]
-    if active(app) {
+    if active(app) && app.render_workspace.path_setup_requested && app.render_workspace.view.method == ImageMethod::GpuRaytrace {
         app.render_workspace.start_deferred_path_host();
     }
     if let Some(took) = app.render_workspace.path_host.poll() {
@@ -444,7 +472,8 @@ pub fn reset_document(app: &mut SolveApp) {
     let setup_seconds = std::mem::take(&mut app.render_workspace.setup_seconds);
     let setup_key = app.render_workspace.setup_key.take();
     let pending_setup = app.render_workspace.pending_setup.take();
-    app.render_workspace = State { host, image_host, path_host, setup_seconds, setup_key, pending_setup, ..Default::default() };
+    let path_setup_requested = app.render_workspace.path_setup_requested;
+    app.render_workspace = State { host, image_host, path_host, setup_seconds, setup_key, pending_setup, path_setup_requested, ..Default::default() };
     if active(app) {
         app.ui.tab = "MODEL".into();
     }
@@ -491,8 +520,6 @@ pub fn enter(app: &mut SolveApp, render: bool) -> Result<(), String> {
         if app.render_workspace.revision != app.session.revision && !app.render_workspace.view.dirty {
             setups::load(app);
         }
-        #[cfg(not(target_arch = "wasm32"))]
-        app.render_workspace.start_deferred_path_host();
     } else {
         if let Some((camera, perspective)) = app.render_workspace.design_camera.take() {
             app.cam = camera;
@@ -536,6 +563,9 @@ pub(crate) fn browser_mode(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
 
 fn image_host(app: &SolveApp, method: ImageMethod) -> Result<&ImageHost, String> {
     if method == ImageMethod::GpuRaytrace {
+        if let PathHost::Failed(reason) = &app.render_workspace.path_host {
+            return Err(reason.clone());
+        }
         let PathHost::Ready(host) = &app.render_workspace.path_host else {
             return Err(app.tr("render.gpu_unavailable").to_string());
         };
@@ -600,6 +630,13 @@ fn image_request(app: &SolveApp) -> Result<serde_json::Value, String> {
 
 fn select_image_method(app: &mut SolveApp, method: ImageMethod) {
     app.render_workspace.view.method = method;
+    app.render_workspace.path_setup_requested = method == ImageMethod::GpuRaytrace;
+    // Entering Render or loading saved settings is not permission to compile a path tracer.
+    // Only explicitly choosing the GPU method requests its setup.
+    if method == ImageMethod::GpuRaytrace {
+        #[cfg(not(target_arch = "wasm32"))]
+        app.render_workspace.start_deferred_path_host();
+    }
     // Raster has no exposure control. Selecting it explicitly selects its zero-EV response.
     if method == ImageMethod::Raster {
         app.render_workspace.view.draft.exposure_ev = 0.0;
