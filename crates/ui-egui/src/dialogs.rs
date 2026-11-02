@@ -1375,6 +1375,8 @@ impl Dialog {
             inp.items.retain(|x| !matches!(x, Sel::Profile { sketch: s2, .. } if s2 != sketch));
         }
         let is_fillet = matches!(self.kind, Kind::Fillet { .. }) && self.active == 0;
+        let corner_line =
+            matches!(self.kind, Kind::SketchModify(crate::sketch_modify_ui::Mod::Corner { .. })) && matches!(sel, Sel::SketchCurve { .. });
         let Some(inp) = self.inputs.get_mut(self.active) else { return };
         if is_fillet {
             self.chain_applied = chain;
@@ -1388,7 +1390,18 @@ impl Dialog {
                 }
             }
         }
-        inp.toggle(picked);
+        if corner_line {
+            // A side can belong to two corners. Completed pairs stay selected while the
+            // next pair is collected; clicking its pending first side again cancels it.
+            let lines = inp.items.iter().filter(|x| matches!(x, Sel::SketchCurve { .. })).count();
+            if lines % 2 == 1 && inp.items.last().is_some_and(|x| selection::same_item(x, &sel)) {
+                inp.items.pop();
+            } else {
+                inp.items.push(sel);
+            }
+        } else {
+            inp.toggle(picked);
+        }
         self.focus = true;
         // A measurement is between two items: a third pick starts over from the last one.
         if matches!(self.kind, Kind::Measure { .. }) && inp.items.len() > 2 {

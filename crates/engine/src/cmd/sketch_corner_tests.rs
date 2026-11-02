@@ -36,6 +36,26 @@ fn area(s: &Session) -> f64 {
 }
 
 #[test]
+fn chamfer_batch_refuses_invalid_later_corner_without_partial_edits() {
+    for command in ["sketch.chamfer.equal_distance", "sketch.chamfer.two_distance", "sketch.chamfer.distance_angle"] {
+        let mut s = new_sketch();
+        let r = run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]}));
+        let c = curves(&r);
+        let before = s.doc.to_json();
+        let undo = s.undo.len();
+        let mut params = json!({"distance":3,"distance2":2,"angle":45,"corners":[{"a":c[0],"b":c[1]},{"a":c[0],"b":c[2]}]});
+        assert!(s.execute(command, &params).is_err(), "{command}");
+        assert_eq!(s.doc.to_json(), before);
+        assert_eq!(s.undo.len(), undo);
+        params["corners"][1] = json!({"a":c[2],"b":c[3]});
+        let result = run(&mut s, command, params);
+        assert_eq!(curves(&result).len(), 2);
+        assert!(solved(&s));
+        assert_eq!(s.undo.len(), undo + 1);
+    }
+}
+
+#[test]
 fn fillet_and_chamfer_corners() {
     use std::f64::consts::PI;
     // A constrained 40 × 20 rectangle: a fillet r5 on one corner keeps it solved and closed,

@@ -171,9 +171,8 @@ fn inputs(k: &Mod) -> Vec<SelInput> {
         ],
         // The centre is required: `sketch.pattern.circular` has no default for it.
         Mod::PatternCirc { .. } => vec![SelInput::new("Entities", CURVES | SKETCH_POINTS, true), SelInput::new("Center", SKETCH_POINTS, false)],
-        // A fillet rounds any number of corners to one radius (`points`). Each chamfer command
-        // cuts one corner: its point, or its two lines. Two lines name the corner between them
-        // where more lines meet at its point (#1824), for both.
+        // Corner points or successive pairs of curves, sharing one size. Two lines name
+        // the corner between them even where more lines meet at its point.
         Mod::Corner { chamfer: false, .. } => vec![SelInput::new("Corners", SKETCH_POINTS | CURVES, true)],
         Mod::Corner { .. } => vec![SelInput::new("Corner", SKETCH_POINTS | CURVES, true)],
     }
@@ -330,7 +329,7 @@ pub(crate) fn command(k: &Mod) -> &'static str {
 
 /// Repeatable operations offer Apply for another selection, with the same typed values.
 pub(crate) fn repeatable(k: &Mod) -> bool {
-    matches!(k, Mod::Offset { .. } | Mod::Mirror | Mod::PatternRect { .. } | Mod::PatternCirc { .. })
+    matches!(k, Mod::Offset { .. } | Mod::Mirror | Mod::PatternRect { .. } | Mod::PatternCirc { .. } | Mod::Corner { .. })
 }
 
 /// A labelled value row. The value carries its own unit text ("2 mm", "45 deg").
@@ -845,13 +844,13 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
         }
         Mod::Corner { ctype, size, distance2, angle, flip, .. } => {
             let flipped = *flip && *ctype > 0;
-            let mut p = match (corner_ids(app, inputs, 0).as_slice(), line_ids(inputs, 0).as_slice()) {
-                ([point], []) => corner_ref(app, point, flipped)?,
-                // Flip swaps the lines, so `distance` applies to the other leg.
-                ([], [a, b]) if flipped => json!({"a": b, "b": a}),
-                ([], [a, b]) => json!({"a": a, "b": b}),
-                ([], []) => return Err("select the corner to cut first".into()),
-                _ => return Err("select one corner point, or the two lines of one corner".into()),
+            let mut corners = corner_ids(app, inputs, 0).iter().map(|point| corner_ref(app, point, flipped)).collect::<Result<Vec<_>, _>>()?;
+            let lines = line_ids(inputs, 0);
+            corners.extend(lines.as_chunks::<2>().0.iter().map(|[a, b]| if flipped { json!({"a": b, "b": a}) } else { json!({"a": a, "b": b}) }));
+            let mut p = match corners.as_slice() {
+                [] => return Err("select a corner point, or the two lines of a corner".into()),
+                [corner] => corner.clone(),
+                _ => json!({"corners": corners}),
             };
             p["distance"] = json!(corner_size(app, size_label(true, *ctype), size, ValueKind::Length)?);
             match ctype {

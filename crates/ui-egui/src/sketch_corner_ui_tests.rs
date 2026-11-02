@@ -461,6 +461,64 @@ fn an_impossible_size_keeps_the_window_open_with_its_reason() {
 
 /// A fillet rounds every picked corner to one radius, as one undo entry.
 #[test]
+fn repeated_line_pairs_keep_completed_corner_previews_and_round_all_four_corners() {
+    for command in ["sketch.fillet", "sketch.chamfer.equal_distance", "sketch.chamfer.two_distance", "sketch.chamfer.distance_angle"] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]})).unwrap();
+        h.settle();
+        let before = h.app.session.doc.to_json();
+        let undo = h.app.session.undo.len();
+        h.step(&json!({"start":command})).unwrap();
+        set_size(&mut h.app, "3");
+        h.app.fit_view();
+        h.settle();
+        // Each corner is picked as two lines, reusing each side at its other end.
+        for (i, point) in [[20, 0, 0], [40, 15, 0], [40, 15, 0], [20, 30, 0], [20, 30, 0], [0, 15, 0], [0, 15, 0], [20, 0, 0]].into_iter().enumerate()
+        {
+            h.step(&json!({"click":{"world":point}})).unwrap();
+            h.settle();
+            if i >= 1 {
+                let d = h.app.dialog.as_ref().unwrap();
+                let commands = crate::sketch_modify_ui::commands(
+                    &h.app,
+                    match &d.kind {
+                        crate::dialogs::Kind::SketchModify(k) => k,
+                        _ => panic!("corner dialog"),
+                    },
+                    &d.inputs,
+                    &d.extra,
+                )
+                .unwrap();
+                let preview = crate::preview::compute(&h.app.session, &commands, crate::preview::Colors::from_tokens(&crate::theme::Tokens::get()));
+                let preview = preview.unwrap_or_else(|error| panic!("{command}, pick {}: {error}", i + 1));
+                let added = preview
+                    .sketches
+                    .iter()
+                    .flat_map(|s| s.curves.iter().filter_map(|i| s.sketch.sketch.curves.get(*i)))
+                    .filter(|c| !matches!(c.kind, CurveKind::Line { .. }) || command != "sketch.fillet")
+                    .count();
+                assert!(added >= i.div_ceil(2), "{command}: completed previews disappeared at pick {}", i + 1);
+            }
+            assert_eq!(h.app.session.doc.to_json(), before, "preview must not edit the sketch");
+        }
+        apply(&mut h);
+        assert!(h.app.dialog.is_none(), "{command}: {:?}", h.app.status);
+        assert_eq!(h.app.session.undo.len(), undo + 1);
+        let sid = h.app.session.active_sketch.unwrap();
+        let st = h.app.session.world_state();
+        let ss = st.sketch(sid).unwrap();
+        assert_eq!(ss.sketch.curves.len(), 8, "{command}");
+        assert_eq!(ss.profiles.len(), 1, "{command}");
+        if command == "sketch.fillet" {
+            assert_eq!(ss.sketch.curves.iter().filter(|c| matches!(c.kind, CurveKind::Arc { .. })).count(), 4);
+        }
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(h.app.session.doc.to_json(), before, "one undo restores every corner: {command}");
+    }
+}
+
+#[test]
 fn a_fillet_rounds_every_picked_corner_to_one_radius() {
     let mut h = crate::scenario::Harness::new();
     h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();

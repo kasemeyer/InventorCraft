@@ -103,7 +103,16 @@ fn create_sketch_uses_card_and_still_starts_immediately_on_plane_pick() {
 
 #[test]
 fn apply_commits_once_keeps_values_and_waits_for_new_selection_ok_closes() {
-    for command in ["sketch.offset", "sketch.mirror", "sketch.pattern.rectangular", "sketch.pattern.circular"] {
+    for command in [
+        "sketch.offset",
+        "sketch.mirror",
+        "sketch.pattern.rectangular",
+        "sketch.pattern.circular",
+        "sketch.fillet",
+        "sketch.chamfer.equal_distance",
+        "sketch.chamfer.two_distance",
+        "sketch.chamfer.distance_angle",
+    ] {
         let mut h = fixture();
         h.app.dialog = Some(picked(&h, command));
         h.settle();
@@ -116,11 +125,20 @@ fn apply_commits_once_keeps_values_and_waits_for_new_selection_ok_closes() {
         let d = h.app.dialog.as_ref().unwrap();
         assert!(d.inputs.iter().all(|i| i.items.is_empty()));
         assert_eq!(d.active, 0);
-        // Repick the original input; the numeric values are unchanged.
+        // Pick again; a trimmed corner's point is gone, so the next corner has a new id.
         let next = picked(&h, command);
         h.app.dialog.as_mut().unwrap().inputs = next.inputs;
         let after = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
-        assert_eq!(before, after);
+        let values = |mut commands: Vec<(String, Value)>| {
+            for (_, params) in &mut commands {
+                if let Some(params) = params.as_object_mut() {
+                    params.remove("point");
+                    params.remove("points");
+                }
+            }
+            commands
+        };
+        assert_eq!(values(before), values(after));
         h.settle();
         h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
         h.settle();
