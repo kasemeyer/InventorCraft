@@ -471,32 +471,49 @@ mod tests {
     }
 
     #[test]
-    fn source_edit_subassembly_external_face_constraints_are_refused_without_changing_the_draft() {
+    fn source_edit_subassembly_preserves_external_face_constraints_as_nested_paths() {
         let dir = std::env::temp_dir().join(format!("solidcraft-source-graph-boundary-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("Sub.tciasm");
         let mut source = Session::default();
         run(&mut source, "document.new_assembly", json!({}));
-        run(&mut source, "component.create", json!({"name":"Block"}));
+        let block = run(&mut source, "component.create", json!({"name":"Block"}));
         run(&mut source, "solid.box", json!({"length":20,"width":10,"height":5}));
         run(&mut source, "component.finish_edit", json!({}));
+        run(&mut source, "occurrence.copy", json!({"occurrence":block["occurrence"],"translate":[30,0,0]}));
         run(&mut source, "file.save", json!({"path":file}));
         let mut s = Session::default();
         run(&mut s, "document.new_assembly", json!({}));
         let sub = run(&mut s, "component.insert_design", json!({"path":file}));
+        let placed = run(&mut s, "occurrence.copy", json!({"occurrence":sub["occurrence"],"translate":[100,0,0]}));
         let other = run(&mut s, "component.create", json!({"name":"Other"}));
         run(&mut s, "solid.box", json!({"length":20,"width":10,"height":5,"corner":[60,0,0]}));
         run(&mut s, "component.finish_edit", json!({}));
         run(
             &mut s,
             "constraint.create",
-            json!({"type":"mate","solution":"flush","a":{"occurrence":sub["occurrence"],"face":[10,5,5]},"b":{"occurrence":other["occurrence"],"face":[70,5,5]}}),
+            json!({"type":"mate","solution":"flush","a":{"occurrence":placed["occurrence"],"face":[140,5,5]},"b":{"occurrence":other["occurrence"],"face":[70,5,5]}}),
         );
-        let before = s.doc.clone();
+        let before = solidcraft_doc::constraints::resolve_world(&s.doc, &s.model.state(), &s.doc.assembly.constraints[0].picks[0]).unwrap();
         let bytes = std::fs::read(&file).unwrap();
-        let error = s.execute("component.edit_source", &json!({"component":sub["component"]})).unwrap_err().to_string();
-        assert!(error.contains("external face relationships"), "{error}");
-        assert_eq!(*s.doc, *before);
+        run(&mut s, "component.edit_source", json!({"component":sub["component"]}));
+        let pick = &s.doc.assembly.constraints[0].picks[0];
+        assert_eq!(pick.occurrence, placed["occurrence"].as_u64().unwrap());
+        assert_eq!(pick.path.len(), 2);
+        assert_eq!(solidcraft_doc::constraints::resolve_world(&s.doc, &s.model.state(), pick).unwrap(), before);
+        assert!(
+            s.constraint_report.rows.iter().all(|r| matches!(
+                r.status,
+                solidcraft_doc::constraints::ConstraintStatus::Ok | solidcraft_doc::constraints::ConstraintStatus::Redundant
+            )),
+            "{:?}",
+            s.constraint_report
+        );
+        let outer = dir.join("Outer.tciasm");
+        run(&mut s, "file.save", json!({"path":outer}));
+        run(&mut s, "doc.open", json!({"path":outer}));
+        assert_eq!(s.doc.assembly.constraints[0].picks[0].path.len(), 2);
+        assert!(solidcraft_doc::constraints::resolve_world(&s.doc, &s.model.state(), &s.doc.assembly.constraints[0].picks[0]).is_ok());
         assert_eq!(std::fs::read(&file).unwrap(), bytes);
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -528,6 +545,12 @@ mod tests {
         let made = run(&mut s, "component.insert_design", json!({"path":inner}));
         let c = made["component"].as_u64().unwrap();
         let second = run(&mut s, "occurrence.copy", json!({"occurrence":made["occurrence"],"translate":[0,60,0]}));
+        run(
+            &mut s,
+            "constraint.create",
+            json!({"type":"mate","solution":"flush","name":"Outer Flush","predict":true,
+            "a":{"occurrence":second["occurrence"],"face":[50,65,5]},"b":{"origin":"xy"}}),
+        );
         let bytes = std::fs::read(&inner).unwrap();
         run(&mut s, "component.activate", json!({"component":c,"occurrence":second["occurrence"],"path":[second["occurrence"]],"source_edit":true}));
         assert_eq!(s.world_state().bodies.len(), 4);
@@ -538,6 +561,12 @@ mod tests {
             &mut s,
             "component.activate",
             json!({"component":child,"occurrence":child_occ,"path":[second["occurrence"],child_occ],"source_edit":true}),
+        );
+        let parent_pick = &s.doc.assembly.constraints.iter().find(|x| x.name == "Outer Flush").unwrap().picks[0];
+        assert_eq!(parent_pick.path, vec![second["occurrence"].as_u64().unwrap(), child_occ]);
+        assert!(
+            solidcraft_doc::constraints::resolve_world(&s.doc, &s.model.state(), parent_pick).is_ok(),
+            "nested leaf Edit preserves the parent face relationship"
         );
         run(&mut s, "solid.box", json!({"length":3,"width":3,"height":3,"corner":[25,0,0]}));
         assert_eq!(s.world_state().bodies.len(), 8);
@@ -586,6 +615,11 @@ mod tests {
         run(&mut s, "doc.open", json!({"path":outer}));
         run(&mut s, "component.update_links", json!({}));
         assert_eq!(s.world_state().bodies.len(), 10);
+        let parent_pick = &s.doc.assembly.constraints.iter().find(|x| x.name == "Outer Flush").unwrap().picks[0];
+        assert!(
+            solidcraft_doc::constraints::resolve_world(&s.doc, &s.model.state(), parent_pick).is_ok(),
+            "parent relationship survives nested saves and reopen"
+        );
         let state = run(&mut s, "component.source_status", json!({}));
         assert!(state["sources"].as_array().unwrap().iter().all(|r| r["dirty"] == false), "{state}");
         let mut fresh = Session::default();
@@ -593,6 +627,72 @@ mod tests {
         let inserted = run(&mut fresh, "component.insert_design", json!({"path":inner}));
         run(&mut fresh, "component.activate", json!({"component":inserted["component"],"source_edit":true}));
         assert_eq!(fresh.world_state().bodies.len(), 5);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn source_edit_refuses_ambiguous_coincident_descendants_without_changing_files() {
+        let dir = std::env::temp_dir().join(format!("source-ambiguous-descendants-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("Sub.tciasm");
+        let mut source = Session::default();
+        run(&mut source, "document.new_assembly", json!({}));
+        let child = run(&mut source, "component.create", json!({"name":"Coincident"}));
+        run(&mut source, "solid.box", json!({"length":20,"width":10,"height":5}));
+        run(&mut source, "component.finish_edit", json!({}));
+        run(&mut source, "occurrence.copy", json!({"occurrence":child["occurrence"],"translate":[0,0,0]}));
+        run(&mut source, "file.save", json!({"path":file}));
+        let bytes = std::fs::read(&file).unwrap();
+        let mut s = Session::default();
+        run(&mut s, "document.new_assembly", json!({}));
+        let inserted = run(&mut s, "component.insert_design", json!({"path":file}));
+        run(
+            &mut s,
+            "constraint.create",
+            json!({"type":"mate","solution":"flush","predict":true,
+            "a":{"occurrence":inserted["occurrence"],"face":[10,5,5]},"b":{"origin":"xy"}}),
+        );
+        let before = s.doc.clone();
+        let error = s.execute("component.edit_source", &json!({"component":inserted["component"]})).unwrap_err().to_string();
+        assert!(error.contains("uniquely matched"), "{error}");
+        assert_eq!(*s.doc, *before);
+        assert_eq!(std::fs::read(&file).unwrap(), bytes);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn source_edit_recovers_older_subassembly_local_features_as_pending_source_edits() {
+        let dir = std::env::temp_dir().join(format!("source-subassembly-local-recovery-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("Sub.tciasm");
+        let mut source = Session::default();
+        run(&mut source, "document.new_assembly", json!({}));
+        run(&mut source, "component.create", json!({"name":"Child"}));
+        run(&mut source, "solid.box", json!({"length":20,"width":10,"height":5}));
+        run(&mut source, "component.finish_edit", json!({}));
+        run(&mut source, "file.save", json!({"path":file}));
+        let bytes = std::fs::read(&file).unwrap();
+        let mut s = Session::default();
+        run(&mut s, "document.new_assembly", json!({}));
+        let inserted = run(&mut s, "component.insert_design", json!({"path":file}));
+        let c = inserted["component"].as_u64().unwrap();
+        run(&mut s, "occurrence.copy", json!({"occurrence":inserted["occurrence"],"translate":[100,0,0]}));
+        run(&mut s, "component.activate", json!({"component":c}));
+        run(&mut s, "solid.box", json!({"length":3,"width":3,"height":3,"corner":[0,20,0]}));
+        run(&mut s, "component.finish_edit", json!({}));
+        assert_eq!(s.world_state().bodies.len(), 4);
+        let local = s.doc.features.last().unwrap().id;
+        run(&mut s, "component.edit_source", json!({"component":c}));
+        assert!(s.doc.feature(local).is_some());
+        assert_eq!(s.world_state().bodies.len(), 4);
+        assert_eq!(run(&mut s, "component.source_status", json!({}))["sources"][0]["dirty"], true);
+        assert_eq!(std::fs::read(&file).unwrap(), bytes);
+        run(&mut s, "component.save_source", json!({"component":c}));
+        run(&mut source, "doc.open", json!({"path":file}));
+        assert_eq!(source.world_state().bodies.len(), 2);
+        assert_eq!(source.doc.components.len(), 1);
+        assert_eq!(source.doc.features.len(), 2);
+        assert_eq!(run(&mut s, "component.source_status", json!({}))["sources"][0]["dirty"], false);
         let _ = std::fs::remove_dir_all(dir);
     }
 

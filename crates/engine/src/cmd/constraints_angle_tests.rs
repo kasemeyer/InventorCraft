@@ -188,7 +188,7 @@ fn angle_equations_obey_caps() {
     for o in doc.occurrences.iter_mut() {
         o.grounded = false;
     }
-    let plane = |occurrence: u64| GeoRef { occurrence, geo: Geo::Origin { item: OriginItem::Xz } };
+    let plane = |occurrence: u64| GeoRef { path: Vec::new(), occurrence, geo: Geo::Origin { item: OriginItem::Xz } };
     for (i, w) in occs.windows(2).enumerate() {
         let id = doc.allocate_id().unwrap();
         let c = Constraint {

@@ -192,6 +192,10 @@ impl ConstraintExprs {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct GeoRef {
     pub occurrence: u64,
+    /// Exact geometry placement from the document root. `occurrence` remains the rigid owner
+    /// moved by the constraint; descendants supply geometry in that owner's coordinates.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub path: Vec<u64>,
     pub geo: Geo,
 }
 
@@ -357,6 +361,9 @@ impl Constraint {
             return bad("the axis is not finite".into());
         }
         for p in &self.picks {
+            if p.path.len() > crate::MAX_PLACEMENT_DEPTH + 1 || p.path.contains(&0) {
+                return bad("a geometry occurrence path is invalid or too deep".into());
+            }
             if let Geo::Face { pick, .. } | Geo::Edge { pick, .. } | Geo::Vertex { pick, .. } = &p.geo
                 && !pick.is_finite()
             {

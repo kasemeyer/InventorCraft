@@ -252,6 +252,7 @@ pub(super) fn carried_constraint(
 ) -> Option<Constraint> {
     let mut out = c.clone();
     for g in &mut out.picks {
+        g.path = g.path.iter().map(|o| occurrences.get(o).copied()).collect::<Option<Vec<_>>>()?;
         if g.occurrence == 0 {
             return None;
         }

@@ -355,7 +355,7 @@ fn accepts_follows_the_types() {
     let s = blocks();
     let rim = pick(&s, "Plate", PickWhat::Edge, v(200.0, 0.0, 10.0));
     assert_eq!(classify(&s, &rim), Some(Circle));
-    let gone = GeoRef { occurrence: occ(&s, "B"), geo: Geo::Face { name: "Nowhere:1".into(), pick: Vec3::ZERO } };
+    let gone = GeoRef { path: Vec::new(), occurrence: occ(&s, "B"), geo: Geo::Face { name: "Nowhere:1".into(), pick: Vec3::ZERO } };
     assert_eq!(classify(&s, &gone), None);
 }
 

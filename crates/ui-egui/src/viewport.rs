@@ -1283,8 +1283,18 @@ pub fn origin_plane_target(app: &SolveApp, proj: &Proj, name: &str) -> Option<Ve
 /// `occurrence:<id>:<item>` → (occurrence id, item), the key of a placed component's shown
 /// origin plane or axis (R216).
 pub fn occurrence_origin_key(key: &str) -> Option<(u64, &str)> {
-    let (id, item) = key.strip_prefix("occurrence:")?.split_once(':')?;
-    Some((id.parse().ok()?, item))
+    let (path, item) = solidcraft_engine::doc::constraints::geo::origin_path_key(key)?;
+    Some((*path.last()?, item))
+}
+
+fn occurrence_origin_matrix(app: &SolveApp, mut path: Vec<u64>) -> Option<solidcraft_engine::doc::Mat> {
+    if path.len() == 1 {
+        let id = *path.first()?;
+        let occurrence = app.session.doc.occurrences.iter().find(|o| o.id == id)?;
+        path = app.session.doc.first_path(occurrence.parent);
+        path.push(id);
+    }
+    app.session.occurrence_placement(&path).ok().map(|p| p.world)
 }
 
 fn mat_point(m: &solidcraft_engine::doc::Mat, p: Vec3) -> Vec3 {
@@ -1308,8 +1318,8 @@ pub fn occurrence_origin_planes(app: &SolveApp) -> Vec<(String, Vec3, [Vec3; 4])
     let size = origin_extent(app);
     let mut out = Vec::new();
     for key in &app.session.visibility.shown_occurrence_origin {
-        let Some((id, item)) = occurrence_origin_key(key) else { continue };
-        let m = solidcraft_engine::doc::joints::occurrence_world(&app.session.doc, id);
+        let Some((path, item)) = solidcraft_engine::doc::constraints::geo::origin_path_key(key) else { continue };
+        let Some(m) = occurrence_origin_matrix(app, path) else { continue };
         for (name, n, q) in origin_quads(size) {
             if name == item {
                 out.push((key.clone(), mat_dir(&m, n), q.map(|p| mat_point(&m, p))));
@@ -1323,17 +1333,33 @@ pub fn occurrence_origin_planes(app: &SolveApp) -> Vec<(String, Vec3, [Vec3; 4])
 pub fn occurrence_origin_axes(app: &SolveApp) -> Vec<(String, Vec3, Vec3)> {
     let mut out = Vec::new();
     for key in &app.session.visibility.shown_occurrence_origin {
-        let Some((id, item)) = occurrence_origin_key(key) else { continue };
+        let Some((path, item)) = solidcraft_engine::doc::constraints::geo::origin_path_key(key) else { continue };
         let dir = match item {
             "X" => Vec3::X,
             "Y" => Vec3::Y,
             "Z" => Vec3::Z,
             _ => continue,
         };
-        let m = solidcraft_engine::doc::joints::occurrence_world(&app.session.doc, id);
+        let Some(m) = occurrence_origin_matrix(app, path) else { continue };
         out.push((key.clone(), mat_point(&m, Vec3::ZERO), mat_dir(&m, dir)));
     }
     out
+}
+
+pub fn occurrence_origin_points(app: &SolveApp) -> Vec<(String, Vec3)> {
+    app.session
+        .visibility
+        .shown_occurrence_origin
+        .iter()
+        .filter_map(|key| {
+            let (path, item) = solidcraft_engine::doc::constraints::geo::origin_path_key(key)?;
+            if item != "O" {
+                return None;
+            }
+            let frame = occurrence_origin_matrix(app, path)?;
+            Some((key.clone(), mat_point(&frame, Vec3::ZERO)))
+        })
+        .collect()
 }
 
 pub fn origin_axes(app: &SolveApp) -> Vec<(&'static str, Vec3)> {
@@ -1549,6 +1575,7 @@ pub(crate) fn pick_cached(app: &mut SolveApp, proj: &Proj, pos: Pos2) -> Vec<Hit
     crate::drag_snap::suppressed().hash(&mut h);
     app.session.visibility.hidden_bodies.hash(&mut h);
     app.session.visibility.hidden_occurrences.hash(&mut h);
+    app.session.visibility.shown_occurrence_origin.hash(&mut h);
     origin_point_shown(app).hash(&mut h);
     app.perspective_view().hash(&mut h);
     (proj.rect.width().to_bits(), proj.rect.height().to_bits()).hash(&mut h);
@@ -1834,6 +1861,16 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
         let dd = sp.distance(pos);
         if dd < 7.0 && bestv.wants(dd) {
             bestv.offer(dd, Hit::Vertex { body: String::new(), point: Vec3::ZERO });
+        }
+    }
+    if app.dialog.as_ref().and_then(|d| d.active_input()).is_some_and(|i| i.accept & crate::selection::ORIGIN != 0) {
+        for (name, point) in occurrence_origin_points(app) {
+            if let Some(sp) = proj.to_screen(point) {
+                let distance = sp.distance(pos);
+                if distance < 7.0 && bestv.wants(distance) {
+                    bestv.offer(distance, Hit::Vertex { body: name, point });
+                }
+            }
         }
     }
     hits.extend(bestv.hits());
@@ -4432,6 +4469,11 @@ fn points_2d(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         && let Some(o) = proj.to_screen(Vec3::ZERO)
     {
         painter.circle(o, 4.5, t.origin_point, Stroke::new(1.0, Color32::from_gray(110)));
+    }
+    for (_, point) in occurrence_origin_points(app) {
+        if let Some(p) = proj.to_screen(point) {
+            painter.circle(p, 4.5, t.origin_point, Stroke::new(1.0, Color32::from_gray(110)));
+        }
     }
     for x in app.highlighted() {
         if let Sel::Vertex { point, .. } = x

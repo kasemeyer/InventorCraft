@@ -105,9 +105,22 @@ fn point(v: &Value, cmd: &str, what: &str, key: &str) -> Result<Vec3> {
 /// A pick parameter (`what` names it in errors), checked to resolve.
 fn pick(s: &Session, v: Option<&Value>, what: &str, cmd: &str) -> Result<GeoRef> {
     let Some(v) = v.filter(|v| v.is_object()) else { return Err(bad(cmd, format!("`{what}` must be a pick: {PICK}"))) };
+    let path = match v.get("path") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(value) => value
+            .as_array()
+            .filter(|a| !a.is_empty() && a.len() <= solidcraft_doc::MAX_PLACEMENT_DEPTH + 1)
+            .and_then(|a| a.iter().map(|v| v.as_u64().filter(|id| *id != 0)).collect::<Option<Vec<_>>>())
+            .ok_or_else(|| bad(cmd, format!("`{what}`: path must be a bounded occurrence path")))?,
+    };
+    if !path.is_empty() && s.doc.path_placement(&path).is_none() {
+        return Err(bad(cmd, format!("`{what}`: occurrence path no longer exists")));
+    }
+    let path_owner = path.first().map(|o| json!(o));
+    let owner = v.get("occurrence").or(path_owner.as_ref());
     let st = s.model.state();
-    let g = if let Some(o) = v.get("origin").filter(|o| !o.is_null()) {
-        let occurrence = match v.get("occurrence") {
+    let mut g = if let Some(o) = v.get("origin").filter(|o| !o.is_null()) {
+        let occurrence = match owner {
             None | Some(Value::Null) => 0,
             x => occurrence_id(s, x, cmd)?,
         };
@@ -115,9 +128,9 @@ fn pick(s: &Session, v: Option<&Value>, what: &str, cmd: &str) -> Result<GeoRef>
             .as_str()
             .and_then(|t| serde_json::from_value(Value::String(t.trim().to_ascii_lowercase())).ok())
             .ok_or_else(|| bad(cmd, format!("`{what}`: origin must be xy, xz, yz, x, y, z or center")))?;
-        GeoRef { occurrence, geo: Geo::Origin { item } }
+        GeoRef { path: Vec::new(), occurrence, geo: Geo::Origin { item } }
     } else {
-        let occurrence = occurrence_id(s, v.get("occurrence"), cmd)?;
+        let occurrence = occurrence_id(s, owner, cmd)?;
         let kinds = [("face", PickWhat::Face), ("edge", PickWhat::Edge), ("vertex", PickWhat::Vertex)];
         let Some((key, kind)) = kinds.into_iter().find(|(k, _)| v.get(*k).is_some_and(|x| !x.is_null())) else {
             return Err(bad(cmd, format!("`{what}` needs a face, edge, vertex or origin: {PICK}")));
@@ -149,15 +162,21 @@ fn pick(s: &Session, v: Option<&Value>, what: &str, cmd: &str) -> Result<GeoRef>
                         Geo::Vertex { edge: name, end, pick }
                     }
                 };
-                GeoRef { occurrence, geo }
+                GeoRef { path: Vec::new(), occurrence, geo }
             }
             Some(x) => {
                 let p = point(x, cmd, what, key)?;
-                geo_at(&s.doc, &st, occurrence, kind, p).map_err(|e| bad(cmd, format!("`{what}`: {e}")))?
+                if path.is_empty() {
+                    geo_at(&s.doc, &st, occurrence, kind, p)
+                } else {
+                    solidcraft_doc::constraints::geo::geo_at_path(&s.doc, &st, occurrence, &path, kind, p)
+                }
+                .map_err(|e| bad(cmd, format!("`{what}`: {e}")))?
             }
             None => return Err(bad(cmd, format!("`{what}` needs a face, edge, vertex or origin"))),
         }
     };
+    g.path = path;
     resolve(&s.doc, &st, &g).map_err(|e| bad(cmd, format!("`{what}`: {e}")))?;
     Ok(g)
 }

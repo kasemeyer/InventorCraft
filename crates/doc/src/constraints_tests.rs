@@ -8,11 +8,11 @@ use crate::Document;
 use crate::joints::{Assembly, Joint};
 
 fn face(occurrence: u64, name: &str) -> GeoRef {
-    GeoRef { occurrence, geo: Geo::Face { name: name.into(), pick: Vec3::new(1.0, 2.0, 3.0) } }
+    GeoRef { path: Vec::new(), occurrence, geo: Geo::Face { name: name.into(), pick: Vec3::new(1.0, 2.0, 3.0) } }
 }
 
 fn origin(occurrence: u64, item: OriginItem) -> GeoRef {
-    GeoRef { occurrence, geo: Geo::Origin { item } }
+    GeoRef { path: Vec::new(), occurrence, geo: Geo::Origin { item } }
 }
 
 fn record(id: u64, name: &str, kind: ConstraintKind, picks: Vec<GeoRef>) -> Constraint {

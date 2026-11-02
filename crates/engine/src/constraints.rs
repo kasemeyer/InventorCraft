@@ -200,13 +200,17 @@ fn xyz(v: Vec3) -> Value {
 /// (near in the component's coordinates) | `{occurrence, vertex: "<edge name>", end, near}` |
 /// `{occurrence, origin}`.
 pub fn pick_json(g: &GeoRef) -> Value {
-    match &g.geo {
+    let mut value = match &g.geo {
         Geo::Face { name, pick } => json!({"occurrence": g.occurrence, "face": name, "near": xyz(*pick)}),
         Geo::Edge { name, pick } => json!({"occurrence": g.occurrence, "edge": name, "near": xyz(*pick)}),
         Geo::Vertex { edge, end, pick } => json!({"occurrence": g.occurrence, "vertex": edge,
             "end": if *end == EdgeEnd::Start { "start" } else { "end" }, "near": xyz(*pick)}),
         Geo::Origin { item } => json!({"occurrence": g.occurrence, "origin": item}),
+    };
+    if !g.path.is_empty() {
+        value["path"] = json!(g.path);
     }
+    value
 }
 
 /// A primitive as `constraint.inspect` gives it: `{kind, p|c, n|d|axis, r?}`.

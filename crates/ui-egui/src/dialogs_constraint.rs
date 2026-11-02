@@ -420,20 +420,47 @@ fn origin_item(name: &str) -> Option<OriginItem> {
 /// A viewport selection as a pick (spec §6.3): a face, edge or vertex through `geo_at` at its world
 /// point on the occurrence its body belongs to; an origin plane, axis or the origin point as the
 /// assembly's own origin item (occurrence 0). With the pick resolved in the world.
+fn rigid_owner(s: &Session, path: &[u64]) -> u64 {
+    let depth = s.active_occurrence_path.as_ref().filter(|active| path.starts_with(active)).map_or(0, Vec::len);
+    path.get(depth).or_else(|| path.last()).copied().unwrap_or(0)
+}
+
+fn body_owner(s: &Session, body: &str) -> Option<u64> {
+    let path = crate::dialogs_assembly::occurrence_path_of_body(s, body)?;
+    Some(rigid_owner(s, &path))
+}
+
 fn resolve_sel(s: &Session, sel: &Sel) -> Option<(GeoRef, Prim)> {
     let on = |body: &str, what: PickWhat, at: Vec3| {
-        let occurrence = crate::dialogs_assembly::occurrence_of_body(s, body)?;
-        geo_at(&s.doc, &s.model.state(), occurrence, what, at).ok()
+        let path = crate::dialogs_assembly::occurrence_path_of_body(s, body)?;
+        let owner = rigid_owner(s, &path);
+        if path.len() <= 1 {
+            geo_at(&s.doc, &s.model.state(), owner, what, at).ok()
+        } else {
+            solidcraft_engine::doc::constraints::geo::geo_at_path(&s.doc, &s.model.state(), owner, &path, what, at).ok()
+        }
     };
     let g = match sel {
+        Sel::Vertex { body, .. } if solidcraft_engine::doc::constraints::geo::origin_path_key(body).is_some() => {
+            let (path, item) = solidcraft_engine::doc::constraints::geo::origin_path_key(body)?;
+            GeoRef {
+                occurrence: rigid_owner(s, &path),
+                path: if path.len() > 1 { path } else { Vec::new() },
+                geo: Geo::Origin { item: origin_item(item)? },
+            }
+        }
         Sel::Face { body, point, .. } => on(body, PickWhat::Face, *point)?,
         Sel::Edge { body, point, .. } => on(body, PickWhat::Edge, *point)?,
         Sel::Vertex { body, point } if !body.is_empty() => on(body, PickWhat::Vertex, *point)?,
-        Sel::Vertex { .. } => GeoRef { occurrence: 0, geo: Geo::Origin { item: OriginItem::Center } },
-        Sel::Plane { name } | Sel::Axis { name } => match crate::viewport::occurrence_origin_key(name) {
+        Sel::Vertex { .. } => GeoRef { path: Vec::new(), occurrence: 0, geo: Geo::Origin { item: OriginItem::Center } },
+        Sel::Plane { name } | Sel::Axis { name } => match solidcraft_engine::doc::constraints::geo::origin_path_key(name) {
             // A placed component's shown origin plane or axis, picked in the view (R216).
-            Some((occurrence, item)) => GeoRef { occurrence, geo: Geo::Origin { item: origin_item(item)? } },
-            None => GeoRef { occurrence: 0, geo: Geo::Origin { item: origin_item(name)? } },
+            Some((path, item)) => GeoRef {
+                occurrence: rigid_owner(s, &path),
+                path: if path.len() > 1 { path } else { Vec::new() },
+                geo: Geo::Origin { item: origin_item(item)? },
+            },
+            None => GeoRef { path: Vec::new(), occurrence: 0, geo: Geo::Origin { item: origin_item(name)? } },
         },
         _ => return None,
     };
@@ -498,7 +525,7 @@ pub fn candidate(app: &SolveApp, f: &ConstraintForm, sel: &Sel) -> Option<(GeoRe
 /// component; otherwise a legal [`candidate`].
 pub(crate) fn takes(s: &Session, f: &ConstraintForm, sel: &Sel) -> bool {
     if f.wants_part() {
-        return crate::dialogs_assembly::body_of(sel).and_then(|b| crate::dialogs_assembly::occurrence_of_body(s, b)).is_some_and(|o| o != 0);
+        return crate::dialogs_assembly::body_of(sel).and_then(|b| body_owner(s, b)).is_some_and(|o| o != 0);
     }
     candidate_prim(s, f, sel).is_some()
 }
@@ -507,7 +534,7 @@ pub(crate) fn takes(s: &Session, f: &ConstraintForm, sel: &Sel) -> bool {
 /// into the armed slot and the next empty one is armed.
 pub(crate) fn take(s: &Session, f: &mut ConstraintForm, sel: &Sel) {
     if f.wants_part() {
-        f.part = crate::dialogs_assembly::body_of(sel).and_then(|b| crate::dialogs_assembly::occurrence_of_body(s, b)).filter(|o| *o != 0);
+        f.part = crate::dialogs_assembly::body_of(sel).and_then(|b| body_owner(s, b)).filter(|o| *o != 0);
         f.hover = None;
         return;
     }
@@ -529,9 +556,18 @@ pub(crate) fn root_note(before: &[Option<GeoRef>; 3], f: &ConstraintForm) -> Opt
 /// A browser pick of an occurrence's origin item (`occurrence` 0: the assembly's).
 pub fn pick_origin(app: &mut SolveApp, occurrence: u64, key: &str) {
     let Some(item) = origin_item(key) else { return };
+    fill_origin(app, GeoRef { path: Vec::new(), occurrence, geo: Geo::Origin { item } });
+}
+
+pub(crate) fn pick_origin_path(app: &mut SolveApp, path: &[u64], key: &str) {
+    let Some(item) = origin_item(key) else { return };
+    let occurrence = rigid_owner(&app.session, path);
+    fill_origin(app, GeoRef { occurrence, path: if path.len() > 1 { path.to_vec() } else { Vec::new() }, geo: Geo::Origin { item } });
+}
+
+fn fill_origin(app: &mut SolveApp, g: GeoRef) {
     let Some(mut d) = app.dialog.take() else { return };
     if let Kind::Assembly(Asm::Constraint(f)) = &mut d.kind {
-        let g = GeoRef { occurrence, geo: Geo::Origin { item } };
         let s = &app.session;
         if let Ok(prim) = resolve_world(&s.doc, &s.model.state(), &g)
             && !f.wants_part()

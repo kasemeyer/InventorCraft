@@ -154,6 +154,11 @@ fn lost(what: &str, name: &str) -> DocError {
 /// Lost) when the name no longer resolves, or the face is a kind v1 does not take (cone, torus,
 /// free-form).
 pub fn resolve(doc: &Document, st: &ModelState, g: &GeoRef) -> Result<Prim> {
+    if let Some(leaf) = g.path.last() {
+        let (_, _, relative) = geometry_frame(doc, g)?;
+        let local = GeoRef { occurrence: *leaf, path: Vec::new(), geo: g.geo.clone() };
+        return Ok(resolve(doc, st, &local)?.moved(&relative));
+    }
     let comp = component_of(doc, g.occurrence)?;
     match &g.geo {
         Geo::Origin { item } => Ok(origin(*item)),
@@ -266,8 +271,56 @@ fn vertex(b: &ModelBody, i: usize, offset: &Mat, end: EdgeEnd, pick: Vec3, name:
 /// The same in the world (occurrence 0 and origin items included).
 pub fn resolve_world(doc: &Document, st: &ModelState, g: &GeoRef) -> Result<Prim> {
     let prim = resolve(doc, st, g)?;
-    let m = occurrence_world(doc, g.occurrence);
+    let (_, m, _) = geometry_frame(doc, g)?;
     Ok(if m == IDENTITY { prim } else { prim.moved(&m) })
+}
+
+/// Geometry component, rigid owner's selected world frame and leaf-to-owner transform.
+/// A path must actually traverse its owner; missing/deleted paths never fall back to a sibling.
+pub fn geometry_frame(doc: &Document, g: &GeoRef) -> Result<(u64, Mat, Mat)> {
+    if g.path.is_empty() {
+        return Ok((component_of(doc, g.occurrence)?, occurrence_world(doc, g.occurrence), IDENTITY));
+    }
+    let (component, world) = doc.path_placement(&g.path).ok_or_else(|| DocError::Invalid("geometry occurrence path no longer exists".into()))?;
+    let owner = if g.occurrence == 0 {
+        IDENTITY
+    } else {
+        let at = g
+            .path
+            .iter()
+            .position(|o| *o == g.occurrence)
+            .ok_or_else(|| DocError::Invalid("geometry path does not traverse its rigid owner".into()))?;
+        doc.path_placement(&g.path[..=at]).ok_or_else(|| DocError::Invalid("geometry owner no longer exists".into()))?.1
+    };
+    let inverse = mat_inverse(&owner).ok_or_else(|| DocError::Invalid("geometry owner placement is degenerate".into()))?;
+    Ok((component, owner, crate::mat_mul(&inverse, &world)))
+}
+
+/// Visibility/selection key of an exact placed Origin item. Single-ID keys remain readable.
+pub fn origin_path_key(key: &str) -> Option<(Vec<u64>, &str)> {
+    let (ids, item) = key.strip_prefix("occurrence:")?.split_once(':')?;
+    if ids.len() > (crate::MAX_PLACEMENT_DEPTH + 1) * 21 {
+        return None;
+    }
+    let path: Vec<u64> = ids.split('/').map(|id| id.parse().ok().filter(|id| *id != 0)).collect::<Option<_>>()?;
+    if path.is_empty() || path.len() > crate::MAX_PLACEMENT_DEPTH + 1 {
+        return None;
+    }
+    Some((path, item))
+}
+
+/// Pick exact nested geometry while retaining the enclosing rigid occurrence as constraint owner.
+pub fn geo_at_path(doc: &Document, st: &ModelState, owner: u64, path: &[u64], what: PickWhat, world: Vec3) -> Result<GeoRef> {
+    let leaf = *path.last().ok_or_else(|| DocError::Invalid("geometry path is empty".into()))?;
+    let (_, frame) = doc.path_placement(path).ok_or_else(|| DocError::Invalid("geometry occurrence path no longer exists".into()))?;
+    let inverse = mat_inverse(&frame).ok_or_else(|| DocError::Invalid("geometry placement is degenerate".into()))?;
+    let local = apply_point(&inverse, world);
+    let legacy = apply_point(&occurrence_world(doc, leaf), local);
+    let mut g = geo_at(doc, st, leaf, what, legacy)?;
+    g.occurrence = owner;
+    g.path = path.to_vec();
+    geometry_frame(doc, &g)?;
+    Ok(g)
 }
 
 /// A pick by a world point on an occurrence: the nearest face / edge / vertex there, by
@@ -295,7 +348,7 @@ pub fn geo_at(doc: &Document, st: &ModelState, occurrence: u64, what: PickWhat, 
             Geo::Vertex { edge: name.ok_or_else(|| DocError::Invalid("that vertex's edge has no name".into()))?, end, pick: at }
         }
     };
-    Ok(GeoRef { occurrence, geo })
+    Ok(GeoRef { path: Vec::new(), occurrence, geo })
 }
 
 /// An origin item: fixed in its occurrence's coordinates.

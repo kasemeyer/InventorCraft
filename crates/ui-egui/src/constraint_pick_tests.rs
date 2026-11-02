@@ -344,12 +344,56 @@ fn origin_picks_from_the_browser() {
     assert!(crate::browser::is_open(&h.app, "origin", false), "the document's Origin opened");
     h.step(&json!({"click": {"handle": format!("row:occurrence_origin:{b}:XY")}})).unwrap();
     h.frames(3);
-    assert_eq!(form(&h).picks[0], Some(GeoRef { occurrence: b, geo: Geo::Origin { item: OriginItem::Xy } }));
+    assert_eq!(form(&h).picks[0], Some(GeoRef { path: Vec::new(), occurrence: b, geo: Geo::Origin { item: OriginItem::Xy } }));
     form_mut(&mut h).armed = 0;
     h.frames(2);
     h.step(&json!({"click": {"handle": format!("row:occurrence_origin:{b}:O")}})).unwrap();
     h.frames(3);
-    assert_eq!(form(&h).picks[0], Some(GeoRef { occurrence: b, geo: Geo::Origin { item: OriginItem::Center } }));
+    assert_eq!(form(&h).picks[0], Some(GeoRef { path: Vec::new(), occurrence: b, geo: Geo::Origin { item: OriginItem::Center } }));
+}
+
+#[test]
+fn nested_origin_visibility_and_constraint_pick_keep_the_selected_parent_path() {
+    let mut h = inventor(Assembly);
+    let parent = h.app.run("component.create", json!({"name":"Sub"})).unwrap();
+    let child = h.app.run("component.create", json!({"name":"Child"})).unwrap();
+    h.app.run("solid.box", json!({"length":20,"width":10,"height":5})).unwrap();
+    h.app.run("component.finish_edit", json!({})).unwrap();
+    h.app.run("component.finish_edit", json!({})).unwrap();
+    let parent = parent["occurrence"].as_u64().unwrap();
+    let child = child["occurrence"].as_u64().unwrap();
+    let second = h.app.run("occurrence.copy", json!({"occurrence":parent,"translate":[100,0,0]})).unwrap()["occurrence"].as_u64().unwrap();
+    let first_key = format!("occurrence:{parent}/{child}:XY");
+    let second_key = format!("occurrence:{second}/{child}:XY");
+    h.app.run("browser.visibility", json!({"items":[second_key],"visible":true})).unwrap();
+    assert!(!h.app.session.visibility.shown_occurrence_origin.contains(&first_key));
+    let planes = crate::viewport::occurrence_origin_planes(&h.app);
+    assert_eq!(planes.len(), 1);
+    assert_eq!(planes[0].0, second_key);
+    assert!((planes[0].2[0].x - 100.0).abs() < 1e-6);
+    alias(&mut h, "C");
+    super::pick_origin_path(&mut h.app, &[second, child], "XY");
+    let pick = form(&h).picks[0].as_ref().unwrap();
+    assert_eq!(pick.occurrence, second);
+    assert_eq!(pick.path, vec![second, child]);
+    assert_eq!(form(&h).draft().params()["a"]["path"], json!([second, child]));
+    let point_key = format!("occurrence:{second}/{child}:O");
+    h.app.run("browser.visibility", json!({"items":[point_key],"visible":true})).unwrap();
+    let points = crate::viewport::occurrence_origin_points(&h.app);
+    assert_eq!(points.len(), 1);
+    let selected = solidcraft_engine::Sel::Vertex { body: point_key, point: points[0].1 };
+    let (point_pick, primitive) = super::resolve_sel(&h.app.session, &selected).unwrap();
+    assert_eq!(point_pick.path, vec![second, child]);
+    assert_eq!(primitive.point().unwrap(), solidcraft_engine::geom::Vec3::new(100.0, 0.0, 0.0));
+    h.app.run("browser.visibility", json!({"items":[first_key],"visible":true})).unwrap();
+    h.app.run("browser.visibility", json!({"items":[second_key],"visible":false})).unwrap();
+    let planes = crate::viewport::occurrence_origin_planes(&h.app);
+    assert_eq!(planes.len(), 1);
+    assert_eq!(planes[0].0, first_key);
+    let mut broken = h.app.session.doc.clone();
+    std::sync::Arc::make_mut(&mut broken).occurrences.retain(|o| o.id != child);
+    h.app.session.doc = broken;
+    assert!(crate::viewport::occurrence_origin_planes(&h.app).is_empty(), "deleted paths do not draw at a sibling or the world origin");
 }
 
 #[test]

@@ -198,11 +198,13 @@ fn is_construction(k: &FeatureKind) -> bool {
 }
 
 fn shown_item(s: &Session, key: &str) -> Option<Shown> {
-    if let Some(rest) = key.strip_prefix("occurrence:") {
-        let (id, item) = rest.split_once(':')?;
-        let id: u64 = id.parse().ok()?;
+    if key.starts_with("occurrence:") {
+        let (path, item) = solidcraft_doc::constraints::geo::origin_path_key(key)?;
         let item = ORIGIN.iter().find(|o| o.eq_ignore_ascii_case(item))?;
-        return s.doc.occurrences.iter().any(|o| o.id == id).then(|| Shown::OccurrenceOrigin(format!("occurrence:{id}:{item}")));
+        let valid =
+            if path.len() == 1 { s.doc.occurrences.iter().any(|o| Some(&o.id) == path.first()) } else { s.doc.path_placement(&path).is_some() };
+        return valid
+            .then(|| Shown::OccurrenceOrigin(format!("occurrence:{}:{item}", path.iter().map(u64::to_string).collect::<Vec<_>>().join("/"))));
     }
     if let Some(f) = s.doc.find_feature(key) {
         if matches!(f.kind, FeatureKind::Sketch { .. }) {

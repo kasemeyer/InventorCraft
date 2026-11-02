@@ -11,6 +11,48 @@ use crate::test_support::{at, blocks, occ, run};
 
 const TOL: f64 = 1e-9;
 
+#[test]
+fn nested_geometry_uses_exact_parent_path_and_moves_its_rigid_owner() {
+    use solidcraft_doc::constraints::geo::geo_at_path;
+    let mut s = Session::default();
+    let parent = run(&mut s, "component.create", json!({"name":"Sub"}));
+    let child = run(&mut s, "component.create", json!({"name":"Child"}));
+    run(&mut s, "solid.box", json!({"length":20,"width":10,"height":5}));
+    run(&mut s, "component.finish_edit", json!({}));
+    run(&mut s, "component.finish_edit", json!({}));
+    let outer = parent["occurrence"].as_u64().unwrap();
+    let leaf = child["occurrence"].as_u64().unwrap();
+    let second = run(&mut s, "occurrence.copy", json!({"occurrence":outer,"translate":[100,0,0]}))["occurrence"].as_u64().unwrap();
+    let path = vec![second, leaf];
+    let g = geo_at_path(&s.doc, &s.model.state(), second, &path, PickWhat::Face, v(110., 5., 5.)).unwrap();
+    assert_eq!(g.occurrence, second);
+    assert_eq!(g.path, path);
+    assert!(matches!(resolve_world(&s.doc, &s.model.state(), &g).unwrap(), Prim::Plane {p,..} if (p.x-110.).abs()<TOL));
+    let indexed = s.pick_cache.picks(&s.doc, &s.model.state()).resolve_world(&g).unwrap();
+    assert_eq!(indexed, resolve_world(&s.doc, &s.model.state(), &g).unwrap());
+    let made = run(
+        &mut s,
+        "constraint.create",
+        json!({"type":"mate","solution":"flush",
+        "a":{"path":path,"face":[110,5,5]},"b":{"origin":"xy"},"offset":"15 mm"}),
+    );
+    let record = s.doc.assembly.constraints.iter().find(|c| c.id == made["id"].as_u64().unwrap()).unwrap();
+    assert_eq!(record.picks[0].occurrence, second);
+    assert_eq!(record.picks[0].path, vec![second, leaf]);
+    assert!(s.doc.path_placement(&[outer, leaf]).unwrap().1[3][2].abs() < 1e-6, "other parent placement stays put");
+    assert!(s.doc.path_placement(&[second, leaf]).unwrap().1[3][2].abs() > 1.0, "constraint moves the selected enclosing subassembly");
+    let copy = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    assert_eq!(copy.assembly.constraints[0].picks[0].path, vec![second, leaf]);
+    let mut missing = g;
+    missing.path = vec![outer, u64::MAX];
+    assert!(resolve_world(&s.doc, &s.model.state(), &missing).is_err());
+    let mut rotated = (*s.doc).clone();
+    rotated.occurrences.iter_mut().find(|o| o.id == second).unwrap().transform =
+        [[0., 1., 0., 0.], [-1., 0., 0., 0.], [0., 0., 1., 0.], [100., 0., 0., 1.]];
+    let axis = GeoRef { occurrence: second, path: vec![second, leaf], geo: Geo::Origin { item: OriginItem::X } };
+    assert_eq!(resolve_world(&rotated, &s.model.state(), &axis).unwrap(), Prim::Line { p: v(100., 0., 0.), d: Vec3::Y });
+}
+
 fn v(x: f64, y: f64, z: f64) -> Vec3 {
     Vec3::new(x, y, z)
 }
@@ -89,7 +131,7 @@ fn vertices_and_origin_items_resolve() {
     assert!(corner.point().is_some_and(|p| close(p, v(100.0, 50.0, 20.0), TOL)), "corner {corner:?}");
 
     let st = s.model.state();
-    let origin = |o: u64, item: OriginItem| GeoRef { occurrence: o, geo: Geo::Origin { item } };
+    let origin = |o: u64, item: OriginItem| GeoRef { path: Vec::new(), occurrence: o, geo: Geo::Origin { item } };
     let b = occ(&s, "B");
     let xz = resolve_world(&s.doc, &st, &origin(b, OriginItem::Xz)).unwrap();
     assert_eq!(xz, Prim::Plane { p: at(&s, "B", Vec3::ZERO), n: v(0.0, 1.0, 0.0) });
@@ -122,10 +164,10 @@ fn a_moved_occurrence_resolves_in_the_world() {
 fn lost_picks_say_which() {
     let mut s = blocks();
     let a = occ(&s, "A");
-    let gone = GeoRef { occurrence: a, geo: Geo::Face { name: "nope".into(), pick: v(50.0, 25.0, 20.0) } };
+    let gone = GeoRef { path: Vec::new(), occurrence: a, geo: Geo::Face { name: "nope".into(), pick: v(50.0, 25.0, 20.0) } };
     let e = resolve(&s.doc, &s.model.state(), &gone).unwrap_err().to_string();
     assert!(e.contains("no longer exists") && e.contains("`nope`"), "{e}");
-    let edge = GeoRef { occurrence: a, geo: Geo::Edge { name: "nope".into(), pick: v(50.0, 0.0, 20.0) } };
+    let edge = GeoRef { path: Vec::new(), occurrence: a, geo: Geo::Edge { name: "nope".into(), pick: v(50.0, 0.0, 20.0) } };
     let e = resolve(&s.doc, &s.model.state(), &edge).unwrap_err().to_string();
     assert!(e.contains("the edge `nope` no longer exists"), "{e}");
 
@@ -146,7 +188,7 @@ fn a_face_resolves_on_its_own_occurrence_only() {
     let s = blocks();
     let (a_top, _) = pick(&s, "A", PickWhat::Face, v(50.0, 25.0, 20.0));
     let Geo::Face { name, .. } = a_top.geo else { panic!("{a_top:?}") };
-    let on_b = GeoRef { occurrence: occ(&s, "B"), geo: Geo::Face { name: name.clone(), pick: v(50.0, 25.0, 20.0) } };
+    let on_b = GeoRef { path: Vec::new(), occurrence: occ(&s, "B"), geo: Geo::Face { name: name.clone(), pick: v(50.0, 25.0, 20.0) } };
     let e = resolve(&s.doc, &s.model.state(), &on_b).unwrap_err().to_string();
     assert!(e.contains("no longer exists") && e.contains(&name), "{e}");
 }
@@ -162,7 +204,7 @@ fn a_reversed_edge_keeps_the_picked_vertex() {
         solidcraft_doc::constraints::EdgeEnd::Start => solidcraft_doc::constraints::EdgeEnd::End,
         solidcraft_doc::constraints::EdgeEnd::End => solidcraft_doc::constraints::EdgeEnd::Start,
     };
-    let reversed = GeoRef { occurrence: g.occurrence, geo: Geo::Vertex { edge, end: other, pick: at } };
+    let reversed = GeoRef { path: Vec::new(), occurrence: g.occurrence, geo: Geo::Vertex { edge, end: other, pick: at } };
     let p = resolve(&s.doc, &s.model.state(), &reversed).unwrap();
     assert!(p.point().is_some_and(|p| close(p, v(100.0, 50.0, 20.0), TOL)), "reversed end {p:?}");
 }
@@ -206,7 +248,7 @@ fn a_two_body_component_resolves_through_the_search() {
     twice.bodies.push(again);
     let tops = |b| solidcraft_doc::naming::face_names(b).iter().filter(|n| *n == "F22:+z").count();
     assert_eq!(twice.bodies.iter().filter(|b| b.component == first.component).map(tops).sum::<usize>(), 2);
-    let top = GeoRef { occurrence: twin, geo: Geo::Face { name: "F22:+z".into(), pick: v(5.0, 305.0, 10.0) } };
+    let top = GeoRef { path: Vec::new(), occurrence: twin, geo: Geo::Face { name: "F22:+z".into(), pick: v(5.0, 305.0, 10.0) } };
     let found = cache.picks(&s.doc, &twice).resolve(&top).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(found, resolve(&s.doc, &twice, &top).unwrap());
     match found {

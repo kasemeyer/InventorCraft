@@ -125,9 +125,6 @@ pub(crate) fn begin(s: &mut Session, c: u64) -> Result<()> {
         graph: None,
     };
     if !source.doc.components.is_empty() || !source.doc.links.is_empty() {
-        if has_local {
-            return Err(bad(CMD, "older assembly-local additions on a linked subassembly require separate reference repair"));
-        }
         return graph::begin(s, c, &source, edit);
     }
     if has_local { migrate_local(s, c, &source, edit) } else { materialize(s, c, &source, edit, true) }
@@ -416,7 +413,9 @@ fn rebind_relationships(next: &mut Session, old: &Session, c: u64) -> Result<()>
     };
     let mut assembly = next.doc.assembly.clone();
     for constraint in &mut assembly.constraints {
-        for pick in constraint.picks.iter_mut().filter(|p| own.contains(&p.occurrence)) {
+        for pick in constraint.picks.iter_mut().filter(|p| {
+            own.contains(&p.occurrence) || (!p.path.is_empty() && next.doc.path_placement(&p.path).is_some_and(|(component, _)| component == c))
+        }) {
             match &mut pick.geo {
                 Geo::Face { name, .. } | Geo::Edge { name, .. } | Geo::Vertex { edge: name, .. } => rename(name)?,
                 Geo::Origin { .. } => {}

@@ -193,7 +193,7 @@ fn sheet_named_picks_are_not_cached() {
     let st = s.model.state();
     let cache = PickCache::default();
     let a = occ(&s, "A");
-    let sheet = GeoRef { occurrence: a, geo: Geo::Face { name: "sheet:Body1:base:top".into(), pick: v(50.0, 25.0, 20.0) } };
+    let sheet = GeoRef { path: Vec::new(), occurrence: a, geo: Geo::Face { name: "sheet:Body1:base:top".into(), pick: v(50.0, 25.0, 20.0) } };
     let _ = cache.picks(&s.doc, &st).resolve(&sheet);
     assert_eq!((cache.len(), cache.misses()), (0, 0), "a sheet-named pick is not kept");
     let plain = geo_at(&s.doc, &st, a, PickWhat::Face, v(50.0, 25.0, 20.0)).unwrap();

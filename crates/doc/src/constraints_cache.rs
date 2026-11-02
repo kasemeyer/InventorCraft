@@ -22,7 +22,6 @@ use std::sync::{Arc, Mutex};
 
 use super::geo::{NameIndex, Prim, resolve, resolve_indexed};
 use super::{EdgeEnd, Geo, GeoRef};
-use crate::joints::occurrence_world;
 use crate::{Document, IDENTITY, ModelState, Result};
 
 /// Entries the cache keeps at most; it starts over when full.
@@ -190,6 +189,9 @@ impl Picks<'_> {
     /// sheet face name, whose plane is read from the model's sheet bodies, which the geometry key
     /// does not cover; those are resolved every time).
     fn slot(&self, g: &GeoRef) -> Option<(PickKey, u64, u64)> {
+        if !g.path.is_empty() {
+            return None;
+        }
         let layout = self.layout();
         let comp = match g.occurrence {
             0 => 0,
@@ -249,6 +251,11 @@ impl Picks<'_> {
     /// [`resolve`] (component coordinates), from the cache when the component's geometry is as
     /// it was.
     pub fn resolve(&self, g: &GeoRef) -> Result<Prim> {
+        if let Some(leaf) = g.path.last() {
+            let (_, _, relative) = super::geo::geometry_frame(self.doc, g)?;
+            let local = GeoRef { occurrence: *leaf, path: Vec::new(), geo: g.geo.clone() };
+            return Ok(self.resolve(&local)?.moved(&relative));
+        }
         // An unknown occurrence, an origin pick, an unkeyed component: as `resolve` says it.
         let Some((key, comp, geometry)) = self.slot(g) else { return resolve(self.doc, self.st, g) };
         if let Some((at, prim)) = self.cache.lock().prims.get(&key)
@@ -270,7 +277,7 @@ impl Picks<'_> {
     /// The same in the world: the component's primitive moved by the occurrence's placement now.
     pub fn resolve_world(&self, g: &GeoRef) -> Result<Prim> {
         let prim = self.resolve(g)?;
-        let m = occurrence_world(self.doc, g.occurrence);
+        let (_, m, _) = super::geo::geometry_frame(self.doc, g)?;
         Ok(if m == IDENTITY { prim } else { prim.moved(&m) })
     }
 }

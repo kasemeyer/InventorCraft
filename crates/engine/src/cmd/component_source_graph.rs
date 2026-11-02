@@ -242,6 +242,9 @@ fn remap(doc: &Document, maps: &Maps, from: Option<&str>, to: &str, depth: usize
         c.id = id(&maps.constraints, c.id)?;
         c.name = maps.constraint_names.get(&c.name).cloned().unwrap_or_else(|| c.name.clone());
         for p in &mut c.picks {
+            if !p.path.is_empty() {
+                p.path = path(&p.path, maps)?;
+            }
             p.occurrence = if maps.strip.contains(&p.occurrence) { 0 } else { id(&maps.occurrences, p.occurrence)? };
             use solidcraft_doc::constraints::Geo;
             match &mut p.geo {
@@ -316,16 +319,19 @@ pub(super) fn begin(s: &mut Session, c: u64, source: &Session, mut edit: SourceE
     let root_path = s.doc.first_path(c);
     let root_occ = *root_path.last().ok_or_else(|| bad(CMD, "linked subassembly has no occurrence"))?;
     let own: BTreeSet<_> = s.doc.occurrences.iter().filter(|o| o.component == c).map(|o| o.id).collect();
-    if s.doc
-        .assembly
-        .constraints
-        .iter()
-        .any(|x| x.picks.iter().any(|p| own.contains(&p.occurrence) && !matches!(p.geo, solidcraft_doc::constraints::Geo::Origin { .. })))
-        || s.doc.assembly.joints.iter().any(|j| own.contains(&j.a.occurrence) || own.contains(&j.b.occurrence))
-    {
-        return Err(bad(CMD, "subassembly has external face relationships; use Open until nested path references are supported"));
+    if s.doc.assembly.joints.iter().any(|j| own.contains(&j.a.occurrence) || own.contains(&j.b.occurrence)) {
+        return Err(bad(CMD, "subassembly has joint relationships; use Open for this source"));
     }
     let previous = edit.graph.clone();
+    if previous.is_none() && s.doc.components.iter().any(|d| d.id != c && s.doc.component_within(d.id, c)) {
+        return Err(bad(CMD, "older snapshot-local component trees require separate reference repair"));
+    }
+    let snapshot_id = s.doc.links.get(&c).ok_or_else(|| bad(CMD, "missing source link"))?.feature;
+    let local_features: BTreeSet<_> = if previous.is_none() {
+        s.doc.features.iter().filter(|f| f.component == c && f.id != snapshot_id).map(|f| f.id).collect()
+    } else {
+        BTreeSet::new()
+    };
     let mut next = s.doc.next_item_id()?;
     let mut components = previous.as_ref().map(|g| g.components.clone()).unwrap_or_else(|| BTreeMap::from([(0, c)]));
     let mut occurrences = previous.as_ref().map(|g| g.occurrences.clone()).unwrap_or_else(|| BTreeMap::from([(0, root_occ)]));
@@ -383,6 +389,7 @@ pub(super) fn begin(s: &mut Session, c: u64, source: &Session, mut edit: SourceE
     let file = super::file(s, c)?;
     let to = s.path.clone().unwrap_or_else(|| std::path::absolute("Untitled.tciasm").unwrap_or_default().to_string_lossy().into_owned());
     let projected = remap(&projected, &maps, Some(&file.to_string_lossy()), &to, 0)?;
+    let source_parameters: BTreeSet<_> = projected.params.iter().map(|p| p.name.clone()).collect();
     let mut scratch = s.scratch();
     scratch.path.clone_from(&s.path);
     let link = s.doc.links.get(&c).ok_or_else(|| bad(CMD, "missing source link"))?;
@@ -412,14 +419,84 @@ pub(super) fn begin(s: &mut Session, c: u64, source: &Session, mut edit: SourceE
     )? {
         return Err(bad(CMD, "linked subassembly changed since insertion; update its link before editing"));
     }
+    rebind_external(&mut scratch, s, c, &own)?;
     edit.graph =
         Some(SourceGraph { components, occurrences, constraints, constraint_names: maps.constraint_names, baseline: Box::new(Document::default()) });
-    let baseline = scope(&scratch.doc, c, &edit).ok_or_else(|| bad(CMD, "subassembly references leave its source"))?;
+    let mut baseline = scope(&scratch.doc, c, &edit).ok_or_else(|| bad(CMD, "subassembly references leave its source"))?;
+    if !local_features.is_empty() {
+        baseline.features.retain(|f| !local_features.contains(&f.id));
+        baseline.params.retain(|p| source_parameters.contains(&p.name));
+    }
     if let Some(g) = &mut edit.graph {
         *g.baseline = baseline;
     }
     scratch.doc_mut().source_edits.insert(c, edit);
     s.accept_computed(scratch);
+    Ok(())
+}
+
+/// Bind a snapshot's parent relationships to exact descendants before replacing its history.
+/// Ambiguous or unmatched geometry is refused transactionally instead of choosing a sibling.
+fn rebind_external(next: &mut Session, old: &Session, component: u64, owners: &BTreeSet<u64>) -> Result<()> {
+    use solidcraft_doc::constraints::{Geo, PickWhat, geo};
+    let before = old.model.state();
+    let mut snapshot = (*before).clone();
+    snapshot.bodies.retain(|b| old.doc.model_body_component(b) == component);
+    let after = next.model.state();
+    let placements = next.doc.placements();
+    let mut constraints = next.doc.assembly.constraints.clone();
+    let mut attempts = 0usize;
+    for constraint in &mut constraints {
+        for pick in constraint.picks.iter_mut().filter(|p| owners.contains(&p.occurrence) && p.path.is_empty()) {
+            let (point, what) = match &pick.geo {
+                Geo::Origin { .. } => continue,
+                Geo::Face { name, pick } => (solidcraft_doc::naming::point_on_face(&snapshot, name, *pick).map(|x| x.0), PickWhat::Face),
+                Geo::Edge { name, pick } => {
+                    (snapshot.bodies.iter().find_map(|b| solidcraft_doc::naming::find_edge(b, name, *pick).ok().map(|x| x.0)), PickWhat::Edge)
+                }
+                Geo::Vertex { pick, .. } => (Some(*pick), PickWhat::Vertex),
+            };
+            let point = point.ok_or_else(|| bad(CMD, "an existing subassembly relationship has lost its geometry"))?;
+            let owner = next.doc.occurrences.iter().find(|o| o.id == pick.occurrence).ok_or_else(|| bad(CMD, "relationship owner is missing"))?;
+            let mut prefix = next.doc.first_path(owner.parent);
+            prefix.push(owner.id);
+            let (_, frame) = next.doc.path_placement(&prefix).ok_or_else(|| bad(CMD, "relationship placement is missing"))?;
+            let world = solidcraft_doc::apply_point(&frame, point);
+            let mut matches = Vec::new();
+            for (_, path, _) in placements.iter().filter(|(c, path, _)| next.doc.component_within(*c, component) && path.starts_with(&prefix)) {
+                attempts += 1;
+                if attempts > 100_000 {
+                    return Err(bad(CMD, "subassembly relationship matching exceeds its processing budget"));
+                }
+                if let Ok(candidate) = geo::geo_at_path(&next.doc, &after, pick.occurrence, path, what, world) {
+                    let (_, _, relative) = geo::geometry_frame(&next.doc, &candidate)?;
+                    let inverse = solidcraft_doc::mat_inverse(&relative).ok_or_else(|| bad(CMD, "descendant placement is degenerate"))?;
+                    let local = solidcraft_doc::apply_point(&inverse, point);
+                    let (leaf, _) = next.doc.path_placement(path).ok_or_else(|| bad(CMD, "descendant is missing"))?;
+                    // Picking an edge by proximity alone can select a remote collinear edge.
+                    let exact = after.bodies.iter().filter(|b| next.doc.model_body_component(b) == leaf).any(|b| match &candidate.geo {
+                        Geo::Face { .. } => solidcraft_doc::appearance::face_index_at(b, local).is_some(),
+                        Geo::Edge { name, .. } | Geo::Vertex { edge: name, .. } => {
+                            solidcraft_doc::naming::find_edge(b, name, local).is_ok_and(|(p, _)| p.dist(local) < 1e-5)
+                        }
+                        Geo::Origin { .. } => false,
+                    });
+                    if exact {
+                        matches.push(candidate);
+                        if matches.len() > 1 {
+                            return Err(bad(CMD, "a constrained subassembly face or edge cannot be uniquely matched to its source placement"));
+                        }
+                    }
+                }
+            }
+            if matches.len() != 1 {
+                return Err(bad(CMD, "a constrained subassembly face or edge cannot be uniquely matched to its source placement"));
+            }
+            *pick = matches.pop().ok_or_else(|| bad(CMD, "missing relationship match"))?;
+        }
+    }
+    next.doc_mut().assembly.constraints = constraints;
+    crate::cmd::joints::resolve(next);
     Ok(())
 }
 

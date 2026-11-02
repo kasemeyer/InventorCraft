@@ -1421,7 +1421,7 @@ fn occurrence_rows(app: &mut SolveApp, ui: &mut egui::Ui, path: Vec<u64>, depth:
         occurrence_folder_rows(app, ui, placement.component, &path, folder, depth + 1, acts);
     }
     if app.session.doc.kind == solidcraft_engine::doc::DocumentKind::Assembly {
-        occurrence_origin_rows(app, ui, placement.occurrence, &path, depth + 1);
+        occurrence_origin_rows(app, ui, &path, depth + 1);
     }
     features::rows(app, ui, placement.component, &path, depth + 1, acts);
     // Its constraints, after its own folders (spec §6.4).
@@ -1600,7 +1600,7 @@ fn origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &Actio
 
 /// An assembly component's own Origin folder (spec §6.3: its planes, axes and centre are picks of
 /// the Constrain panel, as a canvas pick would be).
-fn occurrence_origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, occurrence: u64, path: &[u64], depth: usize) {
+fn occurrence_origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], depth: usize) {
     let identity = path.iter().map(u64::to_string).collect::<Vec<_>>().join("/");
     let key = format!("oo:{identity}");
     let open = is_open(app, &key, false);
@@ -1620,7 +1620,7 @@ fn occurrence_origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, occurrence: u64
     for (k, label, icon, _) in origin_entries(app) {
         let handle = format!("occurrence_origin:{identity}:{k}");
         // Shown in the view at the component's pose (R216): the eye toggles it.
-        let item = format!("occurrence:{occurrence}:{k}");
+        let item = format!("occurrence:{identity}:{k}");
         let shown = app.session.visibility.shown_occurrence_origin.contains(&item);
         let r = draw_row(
             ui,
@@ -1630,7 +1630,7 @@ fn occurrence_origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, occurrence: u64
         if r.eye {
             let _ = app.run("browser.visibility", json!({ "items": [item], "visible": !shown }));
         } else if r.clicked {
-            crate::dialogs_constraint::pick_origin(app, occurrence, k);
+            crate::dialogs_constraint::pick_origin_path(app, path, k);
         }
     }
 }
