@@ -519,6 +519,46 @@ fn repeated_line_pairs_keep_completed_corner_previews_and_round_all_four_corners
 }
 
 #[test]
+fn leading_dot_radius_recovers_from_its_incomplete_preview_error() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("document.units", json!({"units":"in"})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[101.6,63.5]})).unwrap();
+    h.settle();
+    h.step(&json!({"start":"sketch.fillet"})).unwrap();
+    h.app.fit_view();
+    h.settle();
+    for corner in [[101.6, 0.0, 0.0], [101.6, 63.5, 0.0]] {
+        h.step(&json!({"click":{"world":corner}})).unwrap();
+    }
+    h.step(&json!({"click":{"handle":"dialog:Radius"}})).unwrap();
+    h.step(&json!({"key":"A","ctrl":true})).unwrap();
+    h.step(&json!({"text":"."})).unwrap();
+    for _ in 0..100 {
+        h.frames(1);
+        if h.app.dialog.as_ref().is_some_and(|d| d.error.is_some()) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(h.app.dialog.as_ref().unwrap().error.is_some(), "the incomplete decimal must reach live validation");
+    h.step(&json!({"text":"5"})).unwrap();
+    for _ in 0..100 {
+        h.frames(1);
+        if h.app.dialog.as_ref().is_some_and(|d| d.error.is_none()) && !h.app.preview.busy {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(h.app.dialog.as_ref().unwrap().error.is_none(), "{:?}", h.app.dialog.as_ref().unwrap().error);
+    apply(&mut h);
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.status);
+    let st = h.app.session.world_state();
+    let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    assert_eq!(sk.curves.iter().filter(|c| matches!(c.kind, CurveKind::Arc { .. })).count(), 2);
+}
+
+#[test]
 fn a_fillet_rounds_every_picked_corner_to_one_radius() {
     let mut h = crate::scenario::Harness::new();
     h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();

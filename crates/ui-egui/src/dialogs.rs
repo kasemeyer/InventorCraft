@@ -2285,8 +2285,11 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
     }
     // For Corner dialogs (fillet/chamfer), propagate preview errors to `d.error`
     // so impossible sizes still show a refusal message and tests can check it.
-    if matches!(d.kind, Kind::SketchModify(crate::sketch_modify_ui::Mod::Corner { .. })) && app.preview.error.is_some() && d.error.is_none() {
-        d.error = app.preview.error.clone();
+    if matches!(d.kind, Kind::SketchModify(crate::sketch_modify_ui::Mod::Corner { .. }))
+        && d.error.is_none()
+        && let Some(error) = app.preview.error.clone()
+    {
+        d.refuse(app, error);
     }
     if let Some(error) = d.error.as_ref().or(app.preview.error.as_ref()).cloned() {
         // "Select the curves to offset first" is not a failure: nothing is picked yet. The header hint
