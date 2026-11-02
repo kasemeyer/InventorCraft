@@ -479,6 +479,9 @@ fn remove(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(b) = bodies.iter().find(|b| st.body(b).is_none()) {
         return Err(bad(cmd, format!("no body `{b}`")));
     }
+    if bodies.iter().filter_map(|name| st.body(name)).any(|body| s.doc.model_body_component(body) != s.active_component) {
+        return Err(bad(cmd, "Remove changes a part's shared body. Use Delete to remove a placement, or edit the part before removing its body"));
+    }
     add_feature(s, p, FeatureKind::Remove { bodies: bodies.into_iter().map(BodyName).collect() })
 }
 

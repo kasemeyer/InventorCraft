@@ -614,6 +614,34 @@ fn check_body_offset(auto: bool) {
 }
 
 #[test]
+fn remove_refuses_shared_component_bodies_outside_their_edit_context() {
+    let mut s = Session::default();
+    run(&mut s, "document.new_assembly", json!({}));
+    let part = run(&mut s, "component.create", json!({"name":"Bracket"}));
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"BracketBody"}));
+    run(&mut s, "component.activate", json!({"component":0}));
+    for x in [30, 60] {
+        run(&mut s, "occurrence.copy", json!({"occurrence":part["occurrence"],"translate":[x,0,0]}));
+    }
+    run(&mut s, "solid.box", json!({"length":5,"width":5,"height":5,"body_name":"RootBody","corner":[100,0,0]}));
+    let before = s.doc.to_json();
+    let undo = s.undo.len();
+    let placed = s.world_state().bodies.len();
+    for bodies in [json!(["BracketBody"]), json!(["RootBody", "BracketBody"])] {
+        let error = s.execute("solid.remove", &json!({"bodies":bodies})).unwrap_err().to_string();
+        assert!(error.contains("Use Delete"), "{error}");
+        assert_eq!(s.doc.to_json(), before);
+        assert_eq!(s.undo.len(), undo);
+        assert_eq!(s.world_state().bodies.len(), placed);
+    }
+    run(&mut s, "solid.remove", json!({"bodies":["RootBody"]}));
+    assert!(s.model.state().body("BracketBody").is_some());
+    run(&mut s, "component.activate", json!({"component":part["component"]}));
+    run(&mut s, "solid.remove", json!({"bodies":["BracketBody"]}));
+    assert!(s.model.state().body("BracketBody").is_none(), "explicit definition edit still works");
+}
+
+#[test]
 fn replace_face_align_remove() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "A"}));

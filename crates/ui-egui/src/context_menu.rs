@@ -748,6 +748,9 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
     let all_hidden = bodies.iter().all(|b| app.session.visibility.hidden_bodies.contains(b));
     let one = bodies.len() == 1;
     let locked = bodies.iter().all(|b| app.session.visibility.locked_bodies.contains(b));
+    let state = app.session.world_state();
+    let owns_bodies =
+        bodies.iter().all(|name| state.body(name).is_some_and(|body| app.session.doc.model_body_component(body) == app.session.active_component));
     let items = json!(bodies.iter().map(|b| json!({"type": "body", "name": b})).collect::<Vec<_>>());
     let mut v = vec![
         act("ui.moveBodies", "Move/Copy", "move").key("M").with(json!({ "bodies": names })).on(!locked),
@@ -761,7 +764,7 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
         act("ui.export", "Export…", "export").with(json!({ "bodies": names })),
         Item::sep(),
         act("ui.delete", "Delete", "delete").key("Del").with(json!({ "items": items })).on(!locked),
-        cmd(app, "solid.remove", "Remove").with(json!({ "bodies": names })).on(!locked),
+        cmd(app, "solid.remove", "Remove").with(json!({ "bodies": names })).on(!locked && owns_bodies),
         act("ui.rename", "Rename", "rename").with(json!({ "body": bodies.first() })).on(one),
         Item::sep(),
         act(if all_hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": names })),

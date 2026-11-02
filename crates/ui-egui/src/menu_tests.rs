@@ -177,6 +177,28 @@ fn face_menu_hides_and_finds_the_body() {
 }
 
 #[test]
+fn remove_is_disabled_for_placed_bodies_but_available_in_their_part_edit() {
+    let mut app = sample_app();
+    app.run("document.new_assembly", json!({})).unwrap();
+    let part = app.run("component.create", json!({"name":"Bracket"})).unwrap();
+    app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"BracketBody"})).unwrap();
+    app.run("component.activate", json!({"component":0})).unwrap();
+    for x in [30, 60] {
+        app.run("occurrence.copy", json!({"occurrence":part["occurrence"],"translate":[x,0,0]})).unwrap();
+    }
+    for name in app.session.world_state().bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>() {
+        let menu = context_menu::items(&app, &Target::Body { name });
+        assert!(!find(&menu, "Remove").enabled);
+        assert!(find(&menu, "Delete").enabled);
+    }
+    assert!(app.run("solid.remove", json!({"bodies":["BracketBody"]})).is_err());
+    assert_eq!(app.session.world_state().bodies.len(), 3);
+    app.run("component.activate", json!({"component":part["component"]})).unwrap();
+    let menu = context_menu::items(&app, &Target::Body { name: "BracketBody".into() });
+    assert!(find(&menu, "Remove").enabled);
+}
+
+#[test]
 fn body_menu_isolates_renames_locks_and_deletes() {
     let mut app = sample_app();
     app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [200, 0, 0]})).unwrap();
