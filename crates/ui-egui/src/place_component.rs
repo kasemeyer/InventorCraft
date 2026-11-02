@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use egui::Pos2;
-use serde_json::{Value, json};
+use serde_json::json;
 use solidcraft_engine::Session;
 use solidcraft_engine::doc::{IDENTITY, Mat, mat_inverse, mat_mul};
 use solidcraft_engine::geom::{Aabb3, Mesh};
@@ -52,6 +52,9 @@ pub(crate) fn ghost(app: &SolveApp) -> Option<Mat> {
 /// ghost follows the pointer.
 pub(crate) fn begin(app: &mut SolveApp, path: String) {
     end(app);
+    if crate::source_work::begin(app, crate::source_work::Action::Place(path.clone())) {
+        return;
+    }
     if !app.session.doc.occurrences.iter().any(|o| o.parent == 0) {
         if app.run("component.insert_design", json!({ "path": path })).is_err() {
             return;
@@ -89,10 +92,18 @@ fn frame(app: &SolveApp) -> Mat {
 /// The design's bodies as a fresh insert into a scratch copy of the session puts them.
 fn design_meshes(s: &Session, path: &str) -> Option<Vec<Arc<Mesh>>> {
     let mut scratch = s.scratch();
-    let out = scratch.execute("component.insert_design", &json!({ "path": path })).ok()?;
+    let out = scratch.execute("component.insert_design", &json!({ "path": path, "reuse": true, "at": [0, 0, 0] })).ok()?;
+    let mut placed = s.active_occurrence_path.clone().unwrap_or_else(|| s.doc.first_path(s.active_component));
+    placed.push(out.get("occurrence")?.as_u64()?);
+    let component = scratch.occurrence_placement(&placed).ok()?.component;
+    let model = scratch.model.state();
     let st = scratch.world_state();
-    let meshes: Vec<Arc<Mesh>> =
-        out.get("bodies")?.as_array()?.iter().filter_map(Value::as_str).filter_map(|n| st.body(n).map(|b| b.mesh())).collect();
+    let meshes: Vec<Arc<Mesh>> = model
+        .bodies
+        .iter()
+        .filter(|b| scratch.doc.model_body_component(b) == component)
+        .filter_map(|b| st.body(&scratch.doc.world_body_name(&model, &b.name, component, &placed)).map(|b| b.mesh()))
+        .collect();
     (!meshes.is_empty()).then_some(meshes)
 }
 

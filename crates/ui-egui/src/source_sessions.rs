@@ -39,6 +39,7 @@ struct Revision {
     label: String,
 }
 
+#[derive(Clone)]
 pub(crate) struct Checkpoint {
     doc: std::sync::Weak<Document>,
     saved: std::sync::Weak<Document>,
@@ -64,6 +65,7 @@ impl Checkpoint {
             && self.visibility == s.visibility
     }
 }
+#[derive(Clone)]
 pub(crate) struct FileCheck {
     doc: std::sync::Weak<Document>,
     stamp: (u64, std::time::SystemTime),
@@ -127,9 +129,7 @@ pub(crate) fn forget_unused(app: &mut SolveApp) {
 }
 
 pub(crate) fn synchronize(app: &mut SolveApp) -> Result<(), String> {
-    if app.docs.source_checked.len() == app.docs.count()
-        && app.docs.source_checked.iter().enumerate().all(|(i, c)| documents::session_at(app, i).is_some_and(|s| c.matches(s)))
-    {
+    if unchanged(app) {
         return Ok(());
     }
     app.docs.source_checked.clear();
@@ -231,6 +231,11 @@ pub(crate) fn synchronize(app: &mut SolveApp) -> Result<(), String> {
     }
     app.docs.source_checked = (0..app.docs.count()).filter_map(|i| documents::session_at(app, i).map(Checkpoint::new)).collect();
     Ok(())
+}
+
+pub(crate) fn unchanged(app: &SolveApp) -> bool {
+    app.docs.source_checked.len() == app.docs.count()
+        && app.docs.source_checked.iter().enumerate().all(|(i, c)| documents::session_at(app, i).is_some_and(|s| c.matches(s)))
 }
 
 pub(crate) fn validate_source_save(app: &SolveApp) -> Result<(), String> {

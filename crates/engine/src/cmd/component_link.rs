@@ -130,7 +130,7 @@ pub(super) fn rebased(doc: &Document, from: Option<&str>, to: &str) -> std::coll
 type Linked = (String, solidcraft_io::StepFeature, Vec<Vec<String>>);
 
 /// The solid bodies of the design at `file`, evaluated, as an Import feature.
-fn linked_bodies(file: &Path, own: Option<&str>) -> Result<Linked> {
+fn linked_bodies(s: &Session, file: &Path, own: Option<&str>) -> Result<Linked> {
     let shown = file.display().to_string();
     if own.is_some_and(|o| absolute(Path::new(o)) == absolute(file)) {
         return Err(EngineError::Other(format!("{shown}: a design can't be linked into itself")));
@@ -138,9 +138,7 @@ fn linked_bodies(file: &Path, own: Option<&str>) -> Result<Linked> {
     // A linked design is saved with the evaluated geometry the viewport shows. Use it when it
     // still matches the document, just as opening the design does; rebuilding the full history
     // here made even an unchanged link pay for every boolean in its source part.
-    let (doc, saved) =
-        solidcraft_io::read_design_file(&shown, None::<fn(solidcraft_io::DesignPreview)>).map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
-    session_bodies(&Session::opened(doc, saved.as_ref()), &shown)
+    session_bodies(&s.read_source(file)?, &shown)
 }
 
 /// The solid bodies of `part`, the design saved as `shown`, as an Import feature.
@@ -219,7 +217,7 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
             return Ok(out);
         }
     }
-    let (design_name, sf, faces) = linked_bodies(&file, s.path.as_deref())?;
+    let (design_name, sf, faces) = linked_bodies(s, &file, s.path.as_deref())?;
     let name = str_(p, "name").filter(|n| !n.trim().is_empty()).map(str::to_string).unwrap_or(design_name);
     let mut create = json!({"name": name, "activate": false});
     // A paste (reuse) starts free beside other parts; into an empty assembly it is grounded
@@ -290,7 +288,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         };
         let old = old.clone();
         let file = resolve(s.path.as_deref(), &link.path);
-        let (_, sf, faces) = linked_bodies(&file, s.path.as_deref()).map_err(|e| bad(cmd, format!("{cname}: {e}")))?;
+        let (_, sf, faces) = linked_bodies(s, &file, s.path.as_deref()).map_err(|e| bad(cmd, format!("{cname}: {e}")))?;
         warnings.extend(sf.warnings.iter().cloned());
         let same = matches!(&sf.kind, FeatureKind::Import { step, .. } if *step == old);
         let kept = s.doc.feature(link.feature).map(|f| &f.link_faces);
@@ -377,7 +375,7 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // Read/evaluate the candidate before changing anything. Session::execute owns the single
     // undo step and restores both the document and evaluated state on any later failure.
-    let (_, sf, faces) = linked_bodies(&file, s.path.as_deref()).map_err(|e| bad(cmd, e.to_string()))?;
+    let (_, sf, faces) = linked_bodies(s, &file, s.path.as_deref()).map_err(|e| bad(cmd, e.to_string()))?;
     let geometry_changed = match (s.doc.feature(link.feature).map(|f| &f.kind), &sf.kind) {
         (Some(FeatureKind::Import { step: old, .. }), FeatureKind::Import { step, .. }) => old != step,
         _ => true,

@@ -3308,6 +3308,44 @@ fn dirty_comparison_cache_tracks_mutations_saves_and_visibility() {
 }
 
 #[test]
+fn explicit_source_output_names_reuse_geometry_and_reject_changed_inputs() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":10,"width":20,"height":30}));
+    let original = s.doc.clone();
+    let mut doc = (*s.doc).clone();
+    let mut model = s.model.clone();
+    let body = model.state().bodies[0].body.clone();
+    assert!(model.explicit_output_names(&mut doc));
+    assert!(!doc.features[0].body_names.is_empty());
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 0);
+    assert!(model.state().bodies[0].body.same(&body));
+    let mut changed = (*original).clone();
+    changed.features[0].name = "Changed input".into();
+    assert!(!s.model.explicit_output_names(&mut changed));
+    assert!(changed.features[0].body_names.is_empty());
+}
+
+#[test]
+fn source_read_cache_reuses_scratch_evaluations_but_checks_file_contents() {
+    let path = std::env::temp_dir().join(format!("source-read-cache-{}.tcipart", std::process::id()));
+    let mut part = Session::default();
+    run(&mut part, "document.new_part", json!({}));
+    run(&mut part, "solid.box", json!({"length":10,"width":20,"height":30}));
+    run(&mut part, "file.save", json!({"path":path}));
+    let session = Session::default();
+    let first = session.scratch().read_source(&path).unwrap();
+    let second = session.read_source(&path).unwrap();
+    assert!(first.model.state().bodies[0].body.same(&second.model.state().bodies[0].body));
+    run(&mut part, "solid.box", json!({"length":5,"width":5,"height":5,"corner":[40,0,0]}));
+    run(&mut part, "file.save", json!({}));
+    let changed = session.read_source(&path).unwrap();
+    assert_eq!(changed.model.state().bodies.len(), 2);
+    assert_eq!(second.model.state().bodies.len(), 1);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
 fn computed_import_preserves_file_and_earlier_undo_history() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));

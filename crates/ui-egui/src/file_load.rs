@@ -355,6 +355,7 @@ fn start(app: &mut SolveApp) {
     let (command, params) = request.command();
     let scope = request.scope.clone();
     let thumbnail = request.kind == Kind::Open;
+    let refresh_links = request.kind == Kind::Open && crate::profile::active(app).workflow.update_links_on_open;
     // While a design rebuilds, a picture of what is built so far (a large design takes a while).
     let finished = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let partial_rx = (command == "doc.open" || command == "doc.recover").then(|| {
@@ -414,7 +415,25 @@ fn start(app: &mut SolveApp) {
             }));
         }
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            compute(scratch, command, &params, scope, thumbnail, &worker_phase, &worker_progress)
+            let mut made = compute(scratch, command, &params, scope.clone(), thumbnail, &worker_phase, &worker_progress)?;
+            if refresh_links && made.session.doc.kind == solidcraft_engine::doc::DocumentKind::Assembly && !made.session.doc.links.is_empty() {
+                let updated = solidcraft_engine::io::vfs::scoped(scope, || {
+                    solidcraft_engine::doc::progress::watch(worker_progress.clone(), || made.session.execute("component.update_links", &json!({})))
+                });
+                if worker_progress.is_cancelled() {
+                    return Err("file operation cancelled".into());
+                }
+                if let Err(e) = updated {
+                    made.session.echo(format!("Update Links: {e}"));
+                    let warnings = made.result.as_object_mut().map(|o| o.entry("warnings").or_insert_with(|| json!([])));
+                    if let Some(warnings) = warnings.and_then(Value::as_array_mut) {
+                        warnings.push(json!(format!("Update Links: {e}")));
+                    }
+                }
+                // Link updates can replace the loaded geometry. Prepare it here too.
+                made.session.world_state().warm_display();
+            }
+            Ok(made)
         }))
         .unwrap_or_else(|_| Err("the file operation failed; the current design is unchanged".into()));
         worker_finished.store(true, Ordering::Relaxed);
@@ -829,6 +848,7 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                 if (request.kind == Kind::Open || request.insert()) && !request.options.contains_key("up") {
                     crate::stand_up::offer(app, &request.path, &running.before, Some(&made.result));
                 }
+                #[cfg(target_arch = "wasm32")]
                 if request.kind == Kind::Open {
                     app.update_links_on_open();
                 }

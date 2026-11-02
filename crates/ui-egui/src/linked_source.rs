@@ -32,6 +32,9 @@ pub(crate) fn open(app: &mut SolveApp, component: u64) {
     if app.file_picker_busy() || app.file_load.busy() {
         return;
     }
+    if app.session.doc.source_edits.contains_key(&component) && crate::source_work::begin(app, crate::source_work::Action::Open(component)) {
+        return;
+    }
     if let Err(error) = crate::source_sessions::prepare_local(&mut app.session, Some(component)) {
         app.set_status(error, true);
         return;
@@ -63,7 +66,7 @@ pub(crate) fn open(app: &mut SolveApp, component: u64) {
             let baseline = serde_json::from_value(value["baseline"].clone()).map_err(|e| e.to_string())?;
             let doc = serde_json::from_value(value["document"].clone()).map_err(|e| e.to_string())?;
             let comparison_baseline = serde_json::from_value(value["comparison_baseline"].clone()).map_err(|e| e.to_string())?;
-            let mut source = solidcraft_engine::Session::source_draft(doc, baseline, comparison_baseline);
+            let mut source = app.session.source_draft_from(component, doc, baseline, comparison_baseline);
             source.path = Some(path.to_string_lossy().into_owned());
             crate::documents::open_tab(app, source)
         });

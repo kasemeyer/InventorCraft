@@ -264,6 +264,7 @@ pub mod smart_extrude;
 mod smart_extrude_ui_tests;
 mod source_save;
 mod source_sessions;
+mod source_work;
 pub mod space_mouse;
 pub mod space_mouse_calibration;
 pub mod space_mouse_model;
@@ -583,6 +584,8 @@ pub struct SolveApp {
     /// The 3D mouse: which device, its reading, and the calibration window.
     pub space_mouse: space_mouse::Input,
     pub file_load: file_load::FileLoad,
+    pub(crate) source_work: Option<source_work::Work>,
+    pub(crate) source_background: bool,
     /// An opened design's bodies still being meshed, off the UI thread.
     pub(crate) open_meshing: Option<open_meshing::Meshing>,
     /// A design is being put in the window and will be meshed after it: framing it uses outlines.
@@ -703,6 +706,8 @@ impl SolveApp {
             home: home::HomeState::default(),
             space_mouse: Default::default(),
             file_load: file_load::FileLoad::default(),
+            source_work: None,
+            source_background: !cfg!(any(test, target_arch = "wasm32")),
             open_meshing: None,
             open_meshing_next: false,
             frame_watch: Default::default(),
@@ -879,10 +884,16 @@ impl SolveApp {
 
     /// Run a command programmatically (JSON parameters, no dialogs).
     pub fn run(&mut self, id: &str, mut params: Value) -> Result<Value, String> {
-        if self.file_load.busy() || self.file_picker.is_some() || self.saving.is_some() {
+        if self.file_load.busy() || self.file_picker_busy() {
             return Err("a file operation is in progress".into());
         }
         let t0 = now_ms();
+        if id == "component.activate" && source_work::begin(self, source_work::Action::Edit(params.clone())) {
+            return Ok(Value::Null);
+        }
+        if matches!(id, "parameters.change" | "timeline.edit") && source_work::begin(self, source_work::Action::Command(id.into(), params.clone())) {
+            return Ok(Value::Null);
+        }
         if id == "component.activate" && profile::active(self).workflow.component_edit_environment {
             if let Err(error) = source_sessions::synchronize(self) {
                 self.set_status(error.clone(), true);
@@ -1379,6 +1390,9 @@ impl SolveApp {
     /// Edit a feature: sketches open in sketch mode; other features roll the
     /// timeline back to just before themselves and reopen their dialog, filled in.
     pub fn edit_feature(&mut self, id: u64) {
+        if source_work::after(self, source_work::Followup::Feature(id)) {
+            return;
+        }
         use solidcraft_engine::doc::FeatureKind;
         let Some(f) = self.session.doc.feature(id) else { return };
         if matches!(f.kind, FeatureKind::Sketch { .. }) {
@@ -1407,6 +1421,9 @@ impl SolveApp {
     /// it, and remember the marker so Finish Sketch puts it back. Editing the sketch that is already open does nothing; editing another one
     /// finishes the current sketch first, so edit sessions never nest.
     pub fn edit_sketch(&mut self, id: u64) {
+        if source_work::after(self, source_work::Followup::Sketch(id)) {
+            return;
+        }
         if let solidcraft_engine::doc::FaceAttachmentStatus::Lost { message, .. } =
             self.session.placed_document().sketch_face_attachment(id, &self.session.model)
         {
@@ -1886,6 +1903,7 @@ impl SolveApp {
         render_workspace::sync_backend(self);
         render_workspace::tick(self, ctx);
         file_load::tick(self, ctx);
+        source_work::tick(self, ctx);
         save_job::tick(self, false);
         if self.saving.is_some() {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
@@ -2035,6 +2053,7 @@ impl SolveApp {
         toolbar::app_bar(self, ui);
         issue_report::CadInput::block(self, ui, report_input);
         file_load::show(self, ui.ctx());
+        source_work::show(self, ui.ctx());
         open_meshing::show(self, ui.ctx());
         documents::prompt(self, ui.ctx());
         source_save::show(self, ui.ctx());
@@ -2208,7 +2227,7 @@ impl SolveApp {
             // A file loading, an agent's design change computing, or the agent cursor acting one
             // out: commands that change the design wait their turn (the window, inspection and
             // screenshots still answer, #1989).
-            let waits = self.file_load.busy() || self.file_picker.is_some() || self.control_job.is_some() || self.agent.busy();
+            let waits = self.file_load.busy() || self.file_picker_busy() || self.control_job.is_some() || self.agent.busy();
             // A screenshot waiting for an opened design to be meshed holds what came after it.
             let shot_waits = open_meshing::active(self) && self.control_held.front().is_some_and(|r| r.method == "ui.screenshot");
             // Held requests go first, in order, once nothing makes them wait.

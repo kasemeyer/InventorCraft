@@ -1848,6 +1848,32 @@ impl Model {
         })
     }
 
+    /// Make implicit output labels explicit without changing geometry. Only accepts the exact
+    /// evaluated document; callers cannot use this to acknowledge changed feature inputs.
+    pub fn explicit_output_names(&mut self, doc: &mut Document) -> bool {
+        if !self.is_current(doc) || self.results.iter().any(|r| r.error.is_some() || r.unkept) {
+            return false;
+        }
+        for (f, r) in doc.features.iter_mut().zip(&self.results) {
+            if f.body_names.is_empty() {
+                f.body_names = r.state.bodies.iter().filter(|b| b.feature == f.id).map(|b| b.name.clone()).collect();
+            }
+        }
+        let vals = evaluation_values(doc).0;
+        let steps = StepDigests::of(doc, &self.step_digests);
+        let marker = doc.marker.unwrap_or(usize::MAX);
+        let mut prev = 0;
+        let mut before = self.empty.clone();
+        for (i, (f, r)) in doc.features.iter().zip(&mut self.results).enumerate() {
+            prev = chain_fingerprint(doc, &vals, f, prev, i >= marker, &steps, Some(&before));
+            r.fingerprint = prev;
+            if !r.skipped {
+                before = r.state.clone();
+            }
+        }
+        true
+    }
+
     /// Take the results `ahead` (a copy of this model, evaluated off this thread for the same
     /// commands) computed: until [`Model::unprime`], `evaluate` reuses each one whose feature
     /// has the same inputs here, instead of evaluating it again. Results that don't match are

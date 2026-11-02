@@ -41,7 +41,7 @@ struct DocView {
 }
 
 impl DocSlot {
-    fn new(session: Session) -> DocSlot {
+    pub(crate) fn new(session: Session) -> DocSlot {
         DocSlot {
             session,
             autosave: None,
@@ -63,7 +63,7 @@ pub struct Documents {
     pub(crate) source_shared: std::collections::BTreeMap<std::path::PathBuf, solidcraft_engine::doc::Document>,
     pub(crate) source_checked: Vec<crate::source_sessions::Checkpoint>,
     pub(crate) source_files: std::collections::BTreeMap<std::path::PathBuf, Vec<crate::source_sessions::FileCheck>>,
-    slots: Vec<Option<DocSlot>>,
+    pub(crate) slots: Vec<Option<DocSlot>>,
     pub active: usize,
     /// A tab waiting for the answer to "save changes?".
     pub closing: Option<usize>,
@@ -250,6 +250,9 @@ pub fn switch(app: &mut SolveApp, i: usize) {
     }
     app.home.open = false;
     if i == app.docs.active || i >= app.docs.slots.len() {
+        return;
+    }
+    if crate::source_work::begin(app, crate::source_work::Action::Switch(i)) {
         return;
     }
     if let Err(error) = crate::source_sessions::synchronize(app) {

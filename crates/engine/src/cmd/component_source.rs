@@ -44,10 +44,8 @@ fn file(s: &Session, c: u64) -> Result<std::path::PathBuf> {
     let link = s.doc.links.get(&c).ok_or_else(|| bad(CMD, "component has no source file"))?;
     Ok(super::component_link::resolve(s.path.as_deref(), &link.path))
 }
-fn read(path: &std::path::Path) -> Result<Session> {
-    let (doc, cache) =
-        solidcraft_io::read_design_file(&path.to_string_lossy(), None::<fn(solidcraft_io::DesignPreview)>).map_err(|e| bad(CMD, e.to_string()))?;
-    Ok(Session::opened(doc, cache.as_ref()))
+fn read(s: &Session, path: &std::path::Path) -> Result<Session> {
+    s.read_source(path)
 }
 fn unique(base: &str, used: &mut BTreeSet<String>) -> String {
     let mut name = base.to_string();
@@ -106,7 +104,7 @@ pub(crate) fn begin(s: &mut Session, c: u64) -> Result<()> {
     {
         return Err(bad(CMD, "cyclic source dependency: this file is already an ancestor of the selected component"));
     }
-    let source = read(&path)?;
+    let source = read(s, &path)?;
     if source.doc.drawing.is_some() || !source.doc.configs.columns.is_empty() {
         return Err(bad(CMD, "in-place source editing currently requires a leaf part without configurations; use Open for this source"));
     }
@@ -370,6 +368,8 @@ fn adopt(s: &mut Session, c: u64, doc: Document, saved: bool) -> Result<()> {
     let mut source = Session::new(Document::default());
     *source.doc_mut() = doc.clone();
     source.model = s.source_models.get(&c).cloned().unwrap_or_default();
+    let mut normalized = (*edit.source).clone();
+    source.model.explicit_output_names(&mut normalized);
     source.model.evaluate(&source.doc);
     if saved {
         edit.source = Box::new(doc);
@@ -574,7 +574,7 @@ fn save(s: &mut Session, p: &Value) -> Result<Value> {
     let c = component(p)?;
     let path = file(s, c)?;
     let (doc, mut edit) = draft(s, c)?;
-    let current = read(&path)?;
+    let current = read(s, &path)?;
     if *current.doc != *edit.source {
         return Err(bad("component.save_source", "source file changed outside this edit session; no file was overwritten"));
     }
@@ -598,7 +598,7 @@ fn save(s: &mut Session, p: &Value) -> Result<Value> {
 
 pub(crate) fn refresh(s: &mut Session, c: u64) -> Result<bool> {
     let path = file(s, c)?;
-    let current = read(&path)?;
+    let current = read(s, &path)?;
     let edit = s.doc.source_edits.get(&c).ok_or_else(|| bad(CMD, "missing source edit"))?;
     if *current.doc == *edit.source {
         return Ok(false);

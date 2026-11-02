@@ -41,7 +41,7 @@ pub(crate) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, sketch: u64, depth: us
         let selected = active && !curves.is_empty() && curves.iter().all(|curve| app.session.selection.contains(curve));
         let response = draw_row(
             ui,
-            ui.id().with(("sketch_pattern", sketch, &pattern.id)),
+            ui.id().with(("sketch_pattern", scope, occurrence, sketch, &pattern.id)),
             &Row { depth, icon, label: &label, name: true, selected, dim, ..Default::default() },
         );
         if let Some(rect) = response.rect {
@@ -50,6 +50,9 @@ pub(crate) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, sketch: u64, depth: us
         if response.double {
             if let Some((component, path)) = occurrence {
                 let _ = app.run("component.activate", json!({"component":component,"occurrence":path.last(),"path":path}));
+            }
+            if crate::source_work::after(app, crate::source_work::Followup::Pattern(sketch, pattern.id.clone())) {
+                continue;
             }
             app.edit_sketch(sketch);
             if app.session.active_sketch == Some(sketch) {

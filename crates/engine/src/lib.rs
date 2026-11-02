@@ -274,6 +274,7 @@ pub struct Session {
     dirty_cache: std::sync::Mutex<Option<DirtyCache>>,
     saved_outputs: std::collections::BTreeMap<u64, Vec<String>>,
     pub(crate) source_models: Arc<std::collections::BTreeMap<u64, Model>>,
+    source_reads: Arc<std::sync::Mutex<Vec<SourceRead>>>,
     /// Messages for the command line / log.
     pub log: Vec<String>,
     /// Increments on every document change (views use it to refresh).
@@ -387,6 +388,12 @@ struct DirtyCache {
     dirty: bool,
 }
 
+struct SourceRead {
+    path: std::path::PathBuf,
+    doc: Arc<Document>,
+    model: Model,
+}
+
 /// A sketch changed by one frame of an interactive gesture (`live: true`).
 #[derive(Clone, Debug)]
 pub struct LiveEdit {
@@ -489,10 +496,15 @@ impl Session {
             model.evaluate(&doc);
             model
         });
+        Self::with_model(doc, visibility, model)
+    }
+
+    fn with_model(doc: Arc<Document>, visibility: Visibility, model: Model) -> Self {
         Session {
             saved: doc.clone(),
             dirty_cache: std::sync::Mutex::new(None),
             source_models: Arc::new(std::collections::BTreeMap::new()),
+            source_reads: Arc::default(),
             saved_outputs: model
                 .results
                 .iter()
@@ -641,6 +653,55 @@ impl Session {
         session.saved = Arc::new(baseline);
         session.saved_outputs = comparison_baseline.features.into_iter().map(|f| (f.id, f.body_names)).collect();
         session
+    }
+
+    /// Open an edited leaf with its existing standalone evaluation, including explicit output labels.
+    pub fn source_draft_from(&self, component: u64, mut doc: Document, baseline: Document, comparison_baseline: Document) -> Self {
+        let Some(mut model) = self.source_models.get(&component).cloned() else {
+            return Self::source_draft(doc, baseline, comparison_baseline);
+        };
+        let mut normalized = baseline.clone();
+        model.explicit_output_names(&mut normalized);
+        let visibility = std::mem::take(&mut doc.visibility);
+        model.evaluate(&doc);
+        let mut source = Self::with_model(Arc::new(doc), visibility, model);
+        source.saved = Arc::new(baseline);
+        source.saved_outputs = comparison_baseline.features.into_iter().map(|f| (f.id, f.body_names)).collect();
+        source.source_reads = self.source_reads.clone();
+        source
+    }
+
+    /// Read and verify the actual file, reusing a recent evaluation only for identical contents.
+    /// Shared by preview/scratch sessions; bounded to four sources and never keyed just by mtime.
+    pub(crate) fn read_source(&self, path: &std::path::Path) -> Result<Self> {
+        let (mut doc, saved) = solidcraft_io::read_design_file(&path.to_string_lossy(), None::<fn(solidcraft_io::DesignPreview)>)
+            .map_err(|e| EngineError::Other(e.to_string()))?;
+        let visibility = std::mem::take(&mut doc.visibility);
+        let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        let cached = solidcraft_geom::env::var_os("NO_MODEL_CACHE")
+            .is_none()
+            .then(|| {
+                self.source_reads
+                    .lock()
+                    .ok()
+                    .and_then(|reads| reads.iter().find(|r| r.path == path && *r.doc == doc).map(|r| (r.doc.clone(), r.model.clone())))
+            })
+            .flatten();
+        let mut source = if let Some((doc, model)) = cached {
+            Self::with_model(doc, visibility, model)
+        } else {
+            doc.visibility = visibility;
+            Self::opened(doc, saved.as_ref())
+        };
+        source.source_reads = self.source_reads.clone();
+        if let Ok(mut reads) = self.source_reads.lock() {
+            reads.retain(|r| r.path != path);
+            if reads.len() >= 4 {
+                reads.remove(0);
+            }
+            reads.push(SourceRead { path, doc: source.doc.clone(), model: source.model.clone() });
+        }
+        Ok(source)
     }
 
     pub fn render_backend(&self) -> render::BackendDescriptor {
@@ -1250,6 +1311,7 @@ impl Session {
             saved: self.saved.clone(),
             dirty_cache: std::sync::Mutex::new(None),
             source_models: self.source_models.clone(),
+            source_reads: self.source_reads.clone(),
             saved_outputs: self.saved_outputs.clone(),
             log: Vec::new(),
             revision: self.revision,
@@ -1346,6 +1408,14 @@ impl Session {
         for message in computed.log {
             self.echo(message);
         }
+    }
+
+    /// Commit a source-workflow scratch result, including synchronized save acknowledgements.
+    pub fn accept_source_computed(&mut self, computed: Session) {
+        self.saved = computed.saved.clone();
+        self.saved_outputs = computed.saved_outputs.clone();
+        self.saved_visibility = computed.saved_visibility.clone();
+        self.accept_computed(computed);
     }
 
     /// Live preview: run `commands` (id, parameters) on a scratch copy and return the model
