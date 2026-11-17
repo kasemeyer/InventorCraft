@@ -242,7 +242,7 @@ fn finish_exit_label_and_its_button_are_centred() {
     h.app.home.open = false;
     h.app.run("sketch.create", json!({"plane":"xy"})).unwrap();
     h.frames(2);
-    let label = scenario::handles("panel:SKETCH:FINISH SKETCH")[0].1;
+    let label = scenario::handles("panel:SKETCH:EXIT")[0].1;
     // Finish and Cancel Sketch (#3838) sit side by side, the pair centred over the label.
     let finish = scenario::handles("button:sketch.finish")[0].1;
     let cancel = scenario::handles("button:sketch.cancel")[0].1;

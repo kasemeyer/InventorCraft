@@ -50,6 +50,24 @@
 
 *A Raspberry Pi 4 case from an empty design: a sketch dimensioned with the board's parameters, extrude, fillet, shell, the rim rounded in one pick, an M2.5 standoff patterned on the 58 × 49 mm hole rectangle, port cut-outs, vent slots, "Pi 4" engraved in DejaVu Sans Bold and a PETG material defined in the design, with its mass in Properties, then height 24 → 32 mm in Parameters and it all rebuilds. 9× playback. [Full video](https://github.com/tangency-labs/solidcraft/raw/refs/heads/main/docs/screenshots/demo-0.8.mp4), recorded with the [demo script](examples/demo/record_ui.sh).*
 
+## InventorCraft: this fork
+
+This is a fork of [SolidCraft](https://github.com/tangency-labs/solidcraft) that reworks the user
+interface in the style of Autodesk Inventor while keeping SolidCraft's kernel, engine, sketch solver
+and file formats untouched, so upstream fixes keep merging. What changes:
+
+- **Ribbon:** Inventor's tabs and panels. 3D Model (Sketch, Primitives, Create, Modify, Explore, Work
+  Features, Pattern, Surface, Plastic Part, Convert, Parameters, Measure, Insert), Sketch, Assemble,
+  Inspect, Manage, View and Sheet Metal; see [docs/ribbon-layout.md](docs/ribbon-layout.md).
+- **Browser:** Inventor's names (XY Plane, X Axis, Center Point, Solid Bodies, Work Features) with the
+  feature history stacked under the browser instead of a timeline strip along the bottom.
+- **Defaults:** docked panels, the Inventor mouse navigation scheme, and two original theme files,
+  Inventor Light and Inventor Dark, in the spirit of a classic MCAD workspace.
+
+The fork contains no Autodesk iconography, artwork, fonts or help text, and none will be added: the
+[attribution policy](ATTRIBUTION.md) is unchanged. "Inventor" is a trademark of Autodesk, Inc.;
+this project is not affiliated with or endorsed by Autodesk.
+
 ## Download
 
 - **Windows:** the [installer][windows-msi], or `winget install bherbruck.SolidCraft`.

@@ -161,6 +161,8 @@ Editable drawing code, native projects and shipped exports are collected under `
 | assets/styles/ui/themes/gruvbox-light-soft.json | SolidCraft contributors | original SolidCraft theme file mapping SolidCraft's UI colours to the Gruvbox palette's colour values (Gruvbox by Pavel Pertsev, https://github.com/morhetz/gruvbox, MIT) | MIT OR Apache-2.0 |
 | assets/styles/ui/themes/solidcraft-95.json | SolidCraft contributors | original SolidCraft theme file | MIT OR Apache-2.0 |
 | assets/styles/ui/themes/platinum-9.json | SolidCraft contributors | original SolidCraft theme file | MIT OR Apache-2.0 |
+| assets/styles/ui/themes/inventor-light.json | SolidCraft contributors | original SolidCraft theme file: a light grey ribbon, blue accent and light gradient scene in the spirit of a classic MCAD workspace; original colour values, no Autodesk assets | MIT OR Apache-2.0 |
+| assets/styles/ui/themes/inventor-dark.json | SolidCraft contributors | original SolidCraft theme file: the dark counterpart of inventor-light; original colour values, no Autodesk assets | MIT OR Apache-2.0 |
 | assets/styles/ui/themes/cupertino.json | SolidCraft contributors | original SolidCraft theme file | MIT OR Apache-2.0 |
 | assets/styles/ui/themes/green-phosphor.json | SolidCraft contributors | original SolidCraft theme file | MIT OR Apache-2.0 |
 | assets/styles/ui/themes/amber-phosphor.json | SolidCraft contributors | original SolidCraft theme file | MIT OR Apache-2.0 |

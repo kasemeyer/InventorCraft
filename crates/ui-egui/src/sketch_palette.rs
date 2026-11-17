@@ -598,7 +598,7 @@ mod tests {
         let mut h = crate::scenario::Harness::new();
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         h.settle();
-        assert!(crate::scenario::rect_of("ribbon:section:SKETCH:FINISH SKETCH").is_some());
+        assert!(crate::scenario::rect_of("ribbon:section:SKETCH:EXIT").is_some());
         let at = crate::scenario::handle_at("button:sketch.finish").unwrap();
         h.call("ui.click", json!({"x":at.x,"y":at.y}));
         assert!(h.app.session.active_sketch.is_none());

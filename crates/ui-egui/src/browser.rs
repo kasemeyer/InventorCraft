@@ -1317,7 +1317,9 @@ fn origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &Actio
         return;
     }
     for (k, icon, thing) in items {
-        let label = k;
+        // Inventor's names: "XY Plane", "X Axis", "Center Point". The key stays the short name
+        // that visibility, selection and scenarios use.
+        let label = origin_label(k);
         let visible = !app.session.visibility.hidden_origin.iter().any(|h| h == k);
         let sel = match icon {
             "plane" => Some(Sel::Plane { name: k.into() }),
@@ -1819,9 +1821,23 @@ fn set_visible(app: &mut SolveApp, folder: &str, items: &[&Entry], on: bool) {
 
 fn folder_label(folder: &str) -> &'static str {
     match folder {
-        "bodies" => "Bodies",
+        "bodies" => "Solid Bodies",
         "sketches" => "Sketches",
-        _ => "Construction",
+        _ => "Work Features",
+    }
+}
+
+/// The browser name of an origin item, from its short key.
+fn origin_label(key: &str) -> &'static str {
+    match key {
+        "O" => "Center Point",
+        "X" => "X Axis",
+        "Y" => "Y Axis",
+        "Z" => "Z Axis",
+        "XY" => "XY Plane",
+        "XZ" => "XZ Plane",
+        "YZ" => "YZ Plane",
+        _ => "Origin",
     }
 }
 

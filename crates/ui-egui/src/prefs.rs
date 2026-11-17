@@ -449,7 +449,7 @@ preference_settings! {
     /// Units of new designs.
     default_units: String = "mm".into(), PAGE_DESIGN;
     /// Mouse mapping: `fusion`, `solidworks` or `inventor`.
-    nav: String = "fusion".into(), PAGE_NAVIGATION;
+    nav: String = "inventor".into(), PAGE_NAVIGATION;
     /// Opt in to rotation through both poles with roll, without the Shift axis-snap spring.
     /// Independent of mouse bindings; false also preserves existing saved presets' behavior.
     free_orbit: bool = false, PAGE_NAVIGATION => check_tr("nav.free_orbit.label");
@@ -533,13 +533,13 @@ preference_settings! {
     angle_decimals: u8 = 1, PAGE_DESIGN;
     /// `dark`, `light` or `system` (follow the operating system), or a theme file's id: a
     /// built-in one (`gruvbox-dark`, …) or one of `custom_themes` (#2255).
-    theme: String = "dark".into(), PAGE_INTERFACE;
+    theme: String = "inventor-light".into(), PAGE_INTERFACE;
     /// Imported theme files (`theme_files`), kept here so they also work in the browser.
     custom_themes: Vec<crate::theme_files::ThemeFile> = Vec::new();
     /// Interface language (a registered locale ID).
     language: String = "en".into(), 0;
     /// Shared workspace composition; system windows and popups retain their purpose.
-    layout: crate::shell::LayoutMode = Default::default(), PAGE_INTERFACE;
+    layout: crate::shell::LayoutMode = crate::shell::LayoutMode::Docked, PAGE_INTERFACE;
     /// Show command names beneath ribbon icons, independently of workspace layout.
     ribbon_labels: bool = true, PAGE_INTERFACE;
     /// Interface scale (1 = 100 %).
@@ -548,11 +548,11 @@ preference_settings! {
     /// (#1290). Menus, dialogs and labels use it; glyphs it lacks fall back as before.
     ui_font: String = String::new(), PAGE_INTERFACE;
     /// Put the feature history to the left of the browser instead of below the viewport.
-    timeline_left: bool = false, PAGE_INTERFACE;
+    timeline_left: bool = true, PAGE_INTERFACE;
     /// Measured outer width; the contents react to this width without a names mode.
     timeline_left_width: f32 = 130.0, PAGE_INTERFACE;
     /// Share the browser column, vertically, instead of a separate left column.
-    timeline_under_browser: bool = false, PAGE_INTERFACE;
+    timeline_under_browser: bool = true, PAGE_INTERFACE;
     /// Fold the shared-column history to its header.
     timeline_collapsed: bool = false, PAGE_INTERFACE;
     /// Whether the browser beside the vertical history is collapsed to its rail.

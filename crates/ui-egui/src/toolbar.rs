@@ -864,9 +864,13 @@ fn ribbon_button_galley(painter: &egui::Painter, label: &str, width: f32, color:
 /// Ribbon headings use the translated labels, with normal word casing instead of registry caps.
 fn ribbon_label(app: &SolveApp, label: &str) -> String {
     let label = app
-        .tr_label(label)
+        .tr_label(crate::workspace::tab_label(label))
         .split_whitespace()
         .map(|word| {
+            // "3D" in "3D Model" keeps its capital; only all-letter registry words are recased.
+            if word.chars().any(|c| c.is_ascii_digit()) {
+                return word.to_string();
+            }
             let lower = word.to_lowercase();
             let mut chars = lower.chars();
             chars.next().map(|c| c.to_uppercase().collect::<String>() + chars.as_str()).unwrap_or_default()
@@ -975,8 +979,7 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) {
                         crate::scenario::publish_target(&format!("tab:{tab}"), tr);
                         crate::scenario::publish_rect(&format!("toolbar_tab:{tab}"), tr);
                         let aliases: &[&str] = match tab {
-                            "MODEL" => &["SOLID", "PLASTIC"],
-                            "SURFACE" => &["MESH"],
+                            "MODEL" => &["SOLID", "PLASTIC", "SURFACE", "MESH", "INSERT"],
                             "MANAGE" => &["UTILITIES"],
                             _ => &[],
                         };
@@ -1171,7 +1174,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             let collapsed = plan.fit == Fit::Collapsed;
             let trimmed = plan.shown < plan.widths.len();
-            let finish = tab == "SKETCH" && *panel == "FINISH SKETCH";
+            let finish = tab == "SKETCH" && *panel == "EXIT";
             let width = if finish { finish_width } else { plan.width() };
             if finish && finish_right {
                 px = right - finish_width;
@@ -2712,9 +2715,9 @@ mod dropdown_tests {
             h.frames(4);
             (menu, rows)
         };
-        let (short, short_rows) = open(&mut h, "MANAGE", "RULES");
+        let (short, short_rows) = open(&mut h, "MANAGE", "UPDATE");
         let (menu, rows) = open(&mut h, "MODEL", "MODIFY");
-        assert!(rows.len() > short_rows.len(), "MODEL MODIFY lists more than MANAGE RULES: {rows:?} vs {short_rows:?}");
+        assert!(rows.len() > short_rows.len(), "MODEL MODIFY lists more than MANAGE UPDATE: {rows:?} vs {short_rows:?}");
         assert!(menu.height() > short.height(), "the longer list is taller: {menu:?} vs {short:?}");
         for (id, at) in &rows {
             assert!(menu.contains(*at), "{id} at {at:?} is cut off by the drop-down {menu:?}");
@@ -3070,7 +3073,7 @@ mod fill_width_tests {
                 h.frames(3);
                 let at = format!("{tab} at {w}");
                 let bar = crate::scenario::rect_of("toolbar").unwrap();
-                let finish = crate::scenario::rect_of("panel:SKETCH:FINISH SKETCH");
+                let finish = crate::scenario::rect_of("panel:SKETCH:EXIT");
                 // The room for the other panels: the bar less the Finish group kept for it.
                 let right = bar.right() - 4.0 - finish.map_or(0.0, |f| f.width() + 4.0);
                 let count = |name: &str| crate::scenario::count_of(name).unwrap_or(-1.0);
@@ -3081,7 +3084,7 @@ mod fill_width_tests {
                 for (panel, cmds, promote) in &lists {
                     let Some(rect) = crate::scenario::rect_of(&format!("panel:{tab}:{panel}")) else { continue };
                     on_bar += 1;
-                    if *panel != "FINISH SKETCH" {
+                    if *panel != "EXIT" {
                         end = end.max(rect.right() + PANEL_GAP);
                     }
                     if crate::toolbar_custom::buttons(&h.app, tab, panel, cmds, *promote).is_empty() {
@@ -3157,7 +3160,7 @@ mod sketch_return_tab_tests {
     /// #3250: finishing a sketch goes back to the tab it was started from, not always to MODEL.
     #[test]
     fn finishing_a_sketch_returns_to_the_tab_it_started_from() {
-        for start in ["MODEL", "SURFACE", "ASSEMBLE", "INSERT", "INSPECT", "MANAGE", "VIEW"] {
+        for start in ["MODEL", "ASSEMBLE", "INSPECT", "MANAGE", "VIEW"] {
             let mut h = crate::scenario::Harness::new();
             h.app.home.open = false;
             h.app.ui.tab = start.into();
@@ -3175,7 +3178,7 @@ mod sketch_return_tab_tests {
     fn sketch_return_tab_follows_each_sketch_and_falls_back_to_model() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
-        for start in ["SURFACE", "INSPECT"] {
+        for start in ["ASSEMBLE", "INSPECT"] {
             h.app.ui.tab = start.into();
             h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
             h.app.run("sketch.finish", json!({})).unwrap();

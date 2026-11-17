@@ -1,10 +1,26 @@
 //! Ribbon structure is UI data; command registrations retain their original placements.
 //! Explicit ids override the old placement table and can also share a command across sections.
+//!
+//! InventorCraft arranges the ribbon the way Autodesk Inventor's part and assembly
+//! environments do: a 3D Model tab with Sketch, Primitives, Create, Modify, Explore, Work
+//! Features, Pattern, Surface, Plastic Part, Convert, Parameters, Measure and Insert panels;
+//! Sketch, Assemble, Inspect, Manage, View and Sheet Metal tabs. Tab ids stay the short
+//! upper-case keys (`MODEL`, `SKETCH`, …) that preferences, scenarios and tests use;
+//! [`tab_label`] gives the names painted on the ribbon.
 
 use solidcraft_engine::CommandSpec;
 use solidcraft_engine::doc::FeatureKind;
 
-pub const TABS: &[&str] = &["MODEL", "SURFACE", "ASSEMBLE", "INSERT", "INSPECT", "MANAGE", "VIEW"];
+pub const TABS: &[&str] = &["MODEL", "ASSEMBLE", "INSPECT", "MANAGE", "VIEW"];
+
+/// The name painted on a tab. Panel ids are already their names (word-cased by the ribbon).
+pub fn tab_label(tab: &str) -> &str {
+    match tab {
+        "MODEL" => "3D Model",
+        "SHEET METAL" => "Sheet Metal",
+        other => other,
+    }
+}
 
 /// Reading order of the compact, three-column constraint gallery. Icons come from each spec.
 pub const CONSTRAINT_GALLERY: &[&str] = &[
@@ -25,13 +41,82 @@ pub struct CommandGroup {
 pub fn groups(tab: &str, panel: &str) -> &'static [CommandGroup] {
     match (tab, panel) {
         ("MODEL", "MODIFY") => &[
-            CommandGroup { label: "Edges", ids: &["solid.fillet", "solid.chamfer"] },
             CommandGroup {
-                label: "Faces",
-                ids: &["solid.press_pull", "solid.draft", "solid.offset_face", "solid.replace_face", "solid.split_face", "face.delete"],
+                label: "Placed features",
+                ids: &["solid.hole", "solid.fillet", "solid.chamfer", "solid.shell", "solid.draft", "solid.thread"],
             },
-            CommandGroup { label: "Bodies", ids: &["solid.shell", "solid.combine", "solid.split_body", "solid.scale", "solid.remove"] },
-            CommandGroup { label: "Specialise", ids: &["sheet.convert"] },
+            CommandGroup {
+                label: "Bodies",
+                ids: &["solid.combine", "surface.thicken", "solid.split_body", "solid.scale", "solid.move", "solid.remove"],
+            },
+            CommandGroup { label: "Faces", ids: &["solid.press_pull", "solid.offset_face", "solid.replace_face", "solid.split_face", "face.delete"] },
+        ],
+        ("MODEL", "WORK FEATURES") => &[
+            CommandGroup {
+                label: "Plane",
+                ids: &[
+                    "construct.plane.offset",
+                    "construct.plane.at_angle",
+                    "construct.plane.midplane",
+                    "construct.plane.two_edges",
+                    "construct.plane.three_points",
+                    "construct.plane.tangent",
+                    "construct.plane.along_path",
+                    "construct.plane.perpendicular",
+                ],
+            },
+            CommandGroup {
+                label: "Axis",
+                ids: &[
+                    "construct.axis.through_cylinder",
+                    "construct.axis.normal_to_face",
+                    "construct.axis.two_planes",
+                    "construct.axis.two_points",
+                    "construct.axis.edge",
+                ],
+            },
+            CommandGroup {
+                label: "Point",
+                ids: &[
+                    "construct.point.vertex",
+                    "construct.point.two_edges",
+                    "construct.point.three_planes",
+                    "construct.point.center",
+                    "construct.point.edge_plane",
+                    "construct.point.along_path",
+                ],
+            },
+        ],
+        ("MODEL", "SURFACE") => &[
+            CommandGroup {
+                label: "Create",
+                ids: &[
+                    "surface.extrude",
+                    "surface.revolve",
+                    "surface.sweep",
+                    "surface.loft",
+                    "surface.boundary",
+                    "surface.patch",
+                    "surface.offset",
+                    "surface.ruled",
+                    "surface.blend",
+                ],
+            },
+            CommandGroup {
+                label: "Edit",
+                ids: &[
+                    "surface.stitch",
+                    "surface.unstitch",
+                    "surface.trim",
+                    "surface.untrim",
+                    "surface.extend",
+                    "surface.reverse_normal",
+                    "surface.fair",
+                    "surface.fillet",
+                    "surface.match",
+                ],
+            },
+            CommandGroup { label: "Convert", ids: &["surface.thicken", "mesh.convert"] },
         ],
         _ => &[],
     }
@@ -60,9 +145,9 @@ pub struct Section {
     pub ids: &'static [&'static str],
 }
 
-/// Parameters and Configurations stay on every design tab they were on before the ribbon
-/// redesign (MODEL and SHEET METAL), on SKETCH while editing a sketch, and in MANAGE, their
-/// canonical home.
+/// Inventor keeps `fx` Parameters one click away in every environment: a Parameters panel on
+/// 3D Model and Sheet Metal, and on Sketch while editing (dimensions are driven by them).
+/// Manage is their canonical home.
 const CONFIGURE: &[&str] = &["parameters.change", "config.table", "config.configure"];
 
 /// Commands that stay for agents, MCP and scripts but are not offered to people: the sketch solves
@@ -70,41 +155,106 @@ const CONFIGURE: &[&str] = &["parameters.change", "config.table", "config.config
 pub const AGENT_ONLY: &[&str] = &["sketch.solve"];
 
 pub const SECTIONS: &[Section] = &[
+    // 3D Model: Inventor's part modelling tab, panel for panel.
     Section {
         tab: "MODEL",
         panel: "SKETCH",
         promoted: 1,
         ids: &["sketch.create", "sketch.edit", "sketch.line3d", "sketch.spline3d", "sketch.point3d", "sketch.move3d"],
     },
-    Section { tab: "MODEL", panel: "CREATE", promoted: 3, ids: &["solid.extrude", "solid.revolve", "solid.hole"] },
+    Section { tab: "MODEL", panel: "PRIMITIVES", promoted: 2, ids: &["solid.box", "solid.cylinder", "solid.sphere", "solid.torus"] },
+    Section {
+        tab: "MODEL",
+        panel: "CREATE",
+        promoted: 4,
+        ids: &[
+            "solid.extrude",
+            "solid.revolve",
+            "solid.sweep",
+            "solid.loft",
+            "solid.coil",
+            "solid.emboss",
+            "solid.rib",
+            "solid.web",
+            "solid.pipe",
+            "solid.bounding_solid",
+            "solid.boundary_fill",
+        ],
+    },
     Section {
         tab: "MODEL",
         panel: "MODIFY",
         promoted: 4,
-        ids: &["solid.fillet", "solid.chamfer", "solid.shell", "solid.press_pull", "sheet.convert"],
+        ids: &[
+            "solid.hole",
+            "solid.fillet",
+            "solid.chamfer",
+            "solid.shell",
+            "solid.draft",
+            "solid.thread",
+            "solid.combine",
+            "surface.thicken",
+            "solid.split_body",
+            "solid.press_pull",
+            "face.delete",
+            "solid.move",
+            "solid.offset_face",
+            "solid.replace_face",
+            "solid.split_face",
+            "solid.scale",
+            "solid.align",
+            "solid.remove",
+            "timeline.delete",
+        ],
+    },
+    Section { tab: "MODEL", panel: "EXPLORE", promoted: 1, ids: &["inspect.section"] },
+    Section {
+        tab: "MODEL",
+        panel: "WORK FEATURES",
+        promoted: 3,
+        ids: &["construct.plane.offset", "construct.axis.two_points", "construct.point.vertex"],
     },
     Section {
         tab: "MODEL",
-        panel: "ARRANGE",
+        panel: "PATTERN",
         promoted: 3,
-        ids: &["solid.move", "solid.mirror", "solid.pattern.rectangular", "solid.align", "solid.pattern.circular", "solid.pattern.path"],
+        ids: &["solid.pattern.rectangular", "solid.pattern.circular", "solid.mirror", "solid.pattern.path"],
     },
-    Section { tab: "MODEL", panel: "CONFIGURE", promoted: 2, ids: CONFIGURE },
-    Section { tab: "MODEL", panel: "CONSTRUCT", promoted: 1, ids: &["construct.plane.offset"] },
-    // Sketches drive surfaces too: New Sketch leads the tab, as on MODEL and SHEET METAL.
-    Section { tab: "SURFACE", panel: "SKETCH", promoted: 1, ids: &["sketch.create"] },
-    Section { tab: "SURFACE", panel: "CREATE", promoted: 4, ids: &["surface.extrude", "surface.revolve", "surface.sweep", "surface.loft"] },
-    Section { tab: "SURFACE", panel: "EDIT", promoted: 4, ids: &["surface.trim", "surface.untrim", "surface.extend", "surface.stitch"] },
-    Section { tab: "SURFACE", panel: "CONVERT", promoted: 2, ids: &["surface.thicken", "mesh.convert"] },
+    Section { tab: "MODEL", panel: "SURFACE", promoted: 4, ids: &["surface.stitch", "surface.patch", "surface.trim", "surface.extend"] },
+    Section { tab: "MODEL", panel: "PLASTIC PART", promoted: 4, ids: &["plastic.boss", "plastic.rest", "plastic.snap_fit", "plastic.lip"] },
+    Section { tab: "MODEL", panel: "CONVERT", promoted: 1, ids: &["sheet.convert"] },
+    Section { tab: "MODEL", panel: "PARAMETERS", promoted: 1, ids: CONFIGURE },
+    Section { tab: "MODEL", panel: "MEASURE", promoted: 1, ids: &["inspect.measure"] },
+    Section {
+        tab: "MODEL",
+        panel: "INSERT",
+        promoted: 3,
+        ids: &["file.insert_step", "canvas.decal", "canvas.insert", "file.insert_mesh", "component.insert_design", "canvas.edit", "file.save_mesh"],
+    },
+    // Assemble: Inventor's assembly tab.
     Section {
         tab: "ASSEMBLE",
-        panel: "COMPONENTS",
-        promoted: 4,
-        ids: &["component.create", "component.from_bodies", "component.insert_design", "parts.library"],
+        panel: "COMPONENT",
+        promoted: 3,
+        ids: &[
+            "component.insert_design",
+            "component.create",
+            "component.from_bodies",
+            "parts.library",
+            "parts.fastener",
+            "parts.insert",
+            "parts.resize",
+        ],
     },
     Section {
         tab: "ASSEMBLE",
-        panel: "JOINTS",
+        panel: "POSITION",
+        promoted: 3,
+        ids: &["occurrence.ground", "component.capture_position", "component.revert_position"],
+    },
+    Section {
+        tab: "ASSEMBLE",
+        panel: "RELATIONSHIPS",
         promoted: 4,
         ids: &[
             "joint.create",
@@ -117,99 +267,139 @@ pub const SECTIONS: &[Section] = &[
             "joint.screw",
             "joint.cam",
             "joint.reach",
+            "joint.drive",
+            "joint.motion_link",
         ],
     },
+    Section { tab: "ASSEMBLE", panel: "PATTERN", promoted: 3, ids: &["solid.pattern.rectangular", "solid.pattern.circular", "solid.mirror"] },
     Section {
         tab: "ASSEMBLE",
-        panel: "POSITION",
-        promoted: 3,
-        ids: &["occurrence.ground", "component.capture_position", "component.revert_position"],
-    },
-    Section {
-        tab: "ASSEMBLE",
-        panel: "MOTION",
+        panel: "PRODUCTIVITY",
         promoted: 4,
-        ids: &["joint.drive", "joint.motion_link", "motion.study", "motion.trace", "explode.create"],
+        ids: &[
+            "motion.study",
+            "motion.trace",
+            "explode.create",
+            "contact.enable_sets",
+            "contact.check",
+            "contact.enable_all",
+            "contact.disable_all",
+            "contact.create",
+            "contact.edit",
+            "contact.list",
+        ],
     },
+    Section { tab: "ASSEMBLE", panel: "MANAGE", promoted: 3, ids: &["component.properties", "component.update_links", "component.break_link"] },
     Section {
         tab: "ASSEMBLE",
-        panel: "CONTACT",
-        promoted: 2,
-        ids: &["contact.enable_sets", "contact.check", "contact.enable_all", "contact.disable_all", "contact.create", "contact.edit", "contact.list"],
-    },
-    Section {
-        tab: "INSERT",
-        panel: "FILES",
+        panel: "WORK FEATURES",
         promoted: 3,
-        ids: &["file.insert_step", "file.insert_mesh", "component.insert_design", "file.save_mesh"],
+        ids: &["construct.plane.offset", "construct.axis.two_points", "construct.point.vertex"],
     },
-    Section { tab: "INSERT", panel: "IMAGES", promoted: 3, ids: &["canvas.insert", "canvas.decal", "canvas.edit"] },
-    Section { tab: "INSERT", panel: "2D", promoted: 2, ids: &["sketch.insert_dxf", "sketch.insert_svg"] },
-    Section { tab: "INSERT", panel: "LIBRARY", promoted: 3, ids: &["parts.fastener", "parts.library", "parts.resize", "parts.insert"] },
-    Section { tab: "INSERT", panel: "LINKS", promoted: 2, ids: &["component.update_links", "component.break_link"] },
+    // Inspect: Measure, Interference, Analysis.
     Section { tab: "INSPECT", panel: "MEASURE", promoted: 3, ids: &["inspect.measure", "inspect.center_of_mass", "component.properties"] },
-    Section { tab: "INSPECT", panel: "SECTION", promoted: 1, ids: &["inspect.section"] },
+    Section { tab: "INSPECT", panel: "INTERFERENCE", promoted: 2, ids: &["inspect.interference", "contact.check"] },
     Section {
         tab: "INSPECT",
-        panel: "CHECK",
-        promoted: 4,
-        ids: &["inspect.interference", "inspect.draft", "inspect.accessibility", "contact.check", "inspect.compare"],
-    },
-    Section {
-        tab: "INSPECT",
-        panel: "SURFACE QUALITY",
+        panel: "ANALYSIS",
         promoted: 4,
         ids: &[
             "inspect.zebra",
+            "inspect.draft",
             "inspect.curvature_map",
             "inspect.curvature_comb",
+            "inspect.section",
             "inspect.isocurve",
             "inspect.minimum_radius",
             "inspect.environment_map",
             "inspect.continuity",
+            "inspect.accessibility",
+            "inspect.compare",
+            "timeline.dependents",
+            "document.inspect",
         ],
     },
-    Section { tab: "INSPECT", panel: "HISTORY", promoted: 2, ids: &["timeline.dependents", "document.inspect"] },
+    // Manage: Update, Parameters, Styles and Standards, Insert, Author, Content Center.
+    Section { tab: "MANAGE", panel: "UPDATE", promoted: 1, ids: &["timeline.compute_all", "edit.checkpoint", "edit.restore_checkpoint"] },
     Section {
         tab: "MANAGE",
         panel: "PARAMETERS",
-        promoted: 2,
+        promoted: 1,
         ids: &["parameters.change", "parameters.graph", "parameters.move", "parameters.import", "parameters.export"],
     },
-    Section { tab: "MANAGE", panel: "CONFIGURATIONS", promoted: 2, ids: &["config.table", "config.configure", "config.rules", "config.preview"] },
     Section {
         tab: "MANAGE",
-        panel: "MATERIALS",
-        promoted: 2,
-        ids: &["material.assign", "appearance.assign", "material.properties.validate", "library.inspect", "library.export", "library.apply"],
+        panel: "STYLES AND STANDARDS",
+        promoted: 3,
+        ids: &[
+            "material.assign",
+            "appearance.assign",
+            "document.units",
+            "material.properties.validate",
+            "library.inspect",
+            "library.export",
+            "library.apply",
+            "sheet.manage_rules",
+            "plastic.manage_rules",
+            "plastic.assign_rule",
+        ],
     },
-    Section { tab: "MANAGE", panel: "RULES", promoted: 3, ids: &["sheet.manage_rules", "plastic.manage_rules", "plastic.assign_rule"] },
-    Section {
-        tab: "MANAGE",
-        panel: "DESIGN",
-        promoted: 2,
-        ids: &["document.units", "timeline.compute_all", "edit.checkpoint", "edit.restore_checkpoint"],
-    },
+    Section { tab: "MANAGE", panel: "INSERT", promoted: 2, ids: &["component.insert_design", "file.insert_step", "file.insert_mesh"] },
+    Section { tab: "MANAGE", panel: "AUTHOR", promoted: 2, ids: &["config.table", "config.configure", "config.rules", "config.preview"] },
+    Section { tab: "MANAGE", panel: "CONTENT CENTER", promoted: 2, ids: &["parts.library", "parts.fastener", "parts.resize", "parts.insert"] },
+    // View: Navigate (Inventor's Home/Look At/named views) and the selection filter.
     Section {
         tab: "VIEW",
-        panel: "VIEWS",
+        panel: "NAVIGATE",
         promoted: 2,
         ids: &["view.apply", "view.save", "view.rename", "view.delete", "view.list", "view.navigate"],
     },
     Section { tab: "VIEW", panel: "SELECT", promoted: 0, ids: &[] },
+    // Sketch: Inventor's 2D sketch environment. The Exit panel stays last; the ribbon keeps it
+    // in reach at every width.
     Section {
         tab: "SKETCH",
         panel: "CREATE",
         promoted: 4,
-        ids: &["sketch.line", "sketch.rectangle.two_point", "sketch.circle.center", "sketch.arc.three_point", "sketch.infinite"],
+        ids: &[
+            "sketch.line",
+            "sketch.circle.center",
+            "sketch.arc.three_point",
+            "sketch.rectangle.two_point",
+            "sketch.slot.center_to_center",
+            "sketch.polygon.inscribed",
+            "sketch.spline.fit_point",
+            "sketch.ellipse",
+            "sketch.point",
+            "sketch.text",
+            "sketch.infinite",
+            "sketch.project",
+            "sketch.intersect",
+            "sketch.include_3d",
+            "sketch.project_to_surface",
+            "sketch.intersection_curve",
+            "sketch.spun_profile",
+            "sketch.isoparametric_curve",
+            "sketch.fit_curves_to_section",
+        ],
     },
     Section {
         tab: "SKETCH",
         panel: "MODIFY",
-        promoted: 3,
-        ids: &["sketch.trim", "sketch.offset", "sketch.fillet", "sketch.copy", "sketch.cut", "sketch.paste"],
+        promoted: 4,
+        ids: &[
+            "sketch.move",
+            "sketch.copy",
+            "sketch.trim",
+            "sketch.extend",
+            "sketch.offset",
+            "sketch.scale",
+            "sketch.break",
+            "sketch.cut",
+            "sketch.paste",
+        ],
     },
-    Section { tab: "SKETCH", panel: "PATTERN", promoted: 3, ids: &["sketch.mirror", "sketch.pattern.circular", "sketch.pattern.rectangular"] },
+    Section { tab: "SKETCH", panel: "PATTERN", promoted: 3, ids: &["sketch.pattern.rectangular", "sketch.pattern.circular", "sketch.mirror"] },
     Section {
         tab: "SKETCH",
         panel: "CONSTRAIN",
@@ -222,73 +412,70 @@ pub const SECTIONS: &[Section] = &[
             "sketch.constraint.equal",
             "sketch.constraint.parallel",
             "sketch.constraint.perpendicular",
-            "sketch.construction",
+            "sketch.constraint.collinear",
+            "sketch.constraint.concentric",
+            "sketch.constraint.fix",
+            "sketch.constraint.midpoint",
+            "sketch.constraint.symmetry",
+            "sketch.constraint.curvature",
+            "sketch.constraint.polygon",
             "sketch.constrainer",
+            "sketch.auto_constrain",
+            "sketch.auto_constrain_from_datum",
         ],
     },
-    Section {
-        tab: "SKETCH",
-        panel: "REFERENCE",
-        promoted: 1,
-        ids: &[
-            "sketch.project",
-            "sketch.intersect",
-            "sketch.include_3d",
-            "sketch.project_to_surface",
-            "sketch.intersection_curve",
-            "sketch.spun_profile",
-            "sketch.isoparametric_curve",
-            "sketch.fit_curves_to_section",
-            "sketch.insert_dxf",
-            "sketch.insert_svg",
-            "canvas.insert",
-        ],
-    },
-    // Sketch dimensions are driven by parameters, so they are one click away while sketching.
-    Section { tab: "SKETCH", panel: "CONFIGURE", promoted: 2, ids: CONFIGURE },
-    Section { tab: "SKETCH", panel: "FINISH SKETCH", promoted: 2, ids: &["sketch.finish", "sketch.cancel"] },
-    // New Sketch leads the tab, as on MODEL: a sheet part starts from a sketch (#3250).
+    Section { tab: "SKETCH", panel: "INSERT", promoted: 2, ids: &["canvas.insert", "sketch.insert_dxf", "sketch.insert_svg"] },
+    Section { tab: "SKETCH", panel: "FORMAT", promoted: 2, ids: &["sketch.construction", "sketch.centerline"] },
+    Section { tab: "SKETCH", panel: "PARAMETERS", promoted: 1, ids: CONFIGURE },
+    Section { tab: "SKETCH", panel: "EXIT", promoted: 2, ids: &["sketch.finish", "sketch.cancel"] },
+    // Sheet Metal: Inventor's sheet metal environment.
     Section { tab: "SHEET METAL", panel: "SKETCH", promoted: 1, ids: &["sketch.create"] },
-    Section {
-        tab: "SHEET METAL",
-        panel: "CREATE",
-        promoted: 4,
-        ids: &["sheet.flange", "sheet.hem", "sheet.fold", "sheet.perforate", "sheet.convert"],
-    },
-    Section { tab: "SHEET METAL", panel: "FLAT", promoted: 3, ids: &["sheet.unfold", "sheet.refold", "sheet.flat_pattern"] },
-    Section { tab: "SHEET METAL", panel: "OUTPUT", promoted: 2, ids: &["sheet.export_dxf", "sheet.export_bend_table"] },
-    Section { tab: "SHEET METAL", panel: "RULES", promoted: 1, ids: &["sheet.manage_rules"] },
-    Section { tab: "SHEET METAL", panel: "CONFIGURE", promoted: 2, ids: CONFIGURE },
+    Section { tab: "SHEET METAL", panel: "CREATE", promoted: 4, ids: &["sheet.flange", "sheet.hem", "sheet.fold", "sheet.perforate"] },
+    Section { tab: "SHEET METAL", panel: "MODIFY", promoted: 2, ids: &["sheet.unfold", "sheet.refold", "sheet.convert"] },
+    Section { tab: "SHEET METAL", panel: "FLAT PATTERN", promoted: 3, ids: &["sheet.flat_pattern", "sheet.export_dxf", "sheet.export_bend_table"] },
+    Section { tab: "SHEET METAL", panel: "SETUP", promoted: 1, ids: &["sheet.manage_rules"] },
+    Section { tab: "SHEET METAL", panel: "PARAMETERS", promoted: 1, ids: CONFIGURE },
     Section { tab: "RENDER", panel: "SCENE", promoted: 2, ids: &["render.scene"] },
     Section { tab: "RENDER", panel: "IMAGE", promoted: 1, ids: &["render.start"] },
 ];
 
-/// Compact source labels for painted big buttons only. Menus, search and tooltips
-/// retain the engine label. Route these through `tr_label`, like other UI labels.
+/// Compact source labels for painted big buttons only, in Inventor's words where it has
+/// them. Menus, search and tooltips retain the engine label. Route these through `tr_label`,
+/// like other UI labels.
 pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("appearance.assign", "Appearance"),
+    ("canvas.decal", "Decal"),
+    ("canvas.insert", "Image"),
     ("component.capture_position", "Capture Pos."),
-    ("component.create", "New Comp."),
+    ("component.create", "Create"),
     ("component.from_bodies", "From Bodies"),
-    ("component.insert_design", "Insert"),
-    ("component.properties", "Properties"),
+    ("component.insert_design", "Place"),
+    ("component.properties", "iProperties"),
     ("component.revert_position", "Revert Pos."),
-    ("config.table", "Config Table"),
+    ("config.configure", "iPart Author"),
+    ("config.table", "iPart Table"),
+    ("construct.axis.two_points", "Axis"),
+    ("construct.plane.offset", "Plane"),
+    ("construct.point.vertex", "Point"),
     ("contact.check", "Contact"),
     ("contact.enable_sets", "Contact Sets"),
     ("document.inspect", "Inspect"),
     ("document.units", "Units"),
+    ("edit.checkpoint", "Checkpoint"),
+    ("file.insert_step", "Import"),
     ("inspect.accessibility", "Access"),
     ("inspect.center_of_mass", "Mass Center"),
-    ("inspect.curvature_comb", "Curv. Comb"),
-    ("inspect.curvature_map", "Curvature"),
+    ("inspect.curvature_comb", "Curvature"),
+    ("inspect.curvature_map", "Surface"),
     ("inspect.draft", "Draft"),
     ("inspect.interference", "Interference"),
     ("inspect.isocurve", "Isocurve"),
-    ("inspect.section", "Section"),
+    ("inspect.section", "Section View"),
     ("inspect.zebra", "Zebra"),
     ("joint.as_built", "As-Built"),
+    ("joint.create", "Joint"),
     ("material.assign", "Material"),
+    ("occurrence.ground", "Ground"),
     ("parameters.change", "Parameters"),
     ("parameters.graph", "Param. Graph"),
     ("parts.fastener", "Fastener"),
@@ -297,6 +484,7 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("plastic.assign_rule", "Assign Rule"),
     ("plastic.manage_rules", "Plastic Rules"),
     ("render.scene", "Scene"),
+    ("sheet.convert", "Sheet Metal"),
     ("sheet.export_bend_table", "Bend Table"),
     ("sheet.export_dxf", "Export DXF"),
     ("sheet.flat_pattern", "Flat Pattern"),
@@ -305,19 +493,32 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("sketch.circle.center", "Circle"),
     ("sketch.constraint.coincident", "Coincident"),
     ("sketch.constraint.horizontal_vertical", "Horiz./Vert."),
-    ("sketch.create", "New Sketch"),
+    ("sketch.construction", "Construction"),
+    ("sketch.create", "2D Sketch"),
     ("sketch.dimension", "Dimension"),
     ("sketch.finish", "Finish Sketch"),
+    ("sketch.line3d", "3D Sketch"),
     ("sketch.pattern.circular", "Circular"),
     ("sketch.pattern.rectangular", "Rectangular"),
     ("sketch.rectangle.two_point", "Rectangle"),
-    ("solid.move", "Move / Copy"),
-    ("solid.pattern.rectangular", "Pattern"),
+    ("sketch.slot.center_to_center", "Slot"),
+    ("solid.move", "Move Bodies"),
+    ("solid.pattern.circular", "Circular"),
+    ("solid.pattern.rectangular", "Rectangular"),
+    ("solid.press_pull", "Direct"),
+    ("solid.split_body", "Split"),
+    ("surface.extend", "Extend"),
     ("surface.extrude", "Extrude"),
+    ("surface.patch", "Patch"),
     ("surface.revolve", "Revolve"),
+    ("surface.stitch", "Stitch"),
     ("surface.sweep", "Sweep"),
+    ("surface.thicken", "Thicken"),
+    ("surface.trim", "Trim"),
+    ("timeline.compute_all", "Update"),
     ("timeline.dependents", "Dependents"),
-    ("view.apply", "Restore View"),
+    ("view.apply", "Home"),
+    ("view.navigate", "Look At"),
     ("view.save", "Save View"),
 ];
 
@@ -329,27 +530,27 @@ pub fn ribbon_button_label(command: &CommandSpec) -> &str {
 pub const PLACEMENTS: &[(&str, &str, &str, &str)] = &[
     ("SOLID", "CREATE", "MODEL", "CREATE"),
     ("SOLID", "MODIFY", "MODEL", "MODIFY"),
-    ("SOLID", "CONSTRUCT", "MODEL", "CONSTRUCT"),
-    ("SOLID", "ASSEMBLE", "ASSEMBLE", "JOINTS"),
+    ("SOLID", "CONSTRUCT", "MODEL", "WORK FEATURES"),
+    ("SOLID", "ASSEMBLE", "ASSEMBLE", "RELATIONSHIPS"),
     ("SOLID", "POSITION", "ASSEMBLE", "POSITION"),
-    ("SOLID", "CONFIGURE", "MANAGE", "CONFIGURATIONS"),
-    ("SOLID", "INSPECT", "INSPECT", "CHECK"),
-    ("SOLID", "INSERT", "INSERT", "FILES"),
-    ("SURFACE", "CREATE", "SURFACE", "CREATE"),
-    ("SURFACE", "MODIFY", "SURFACE", "EDIT"),
-    ("SURFACE", "INSPECT", "INSPECT", "SURFACE QUALITY"),
+    ("SOLID", "CONFIGURE", "MANAGE", "AUTHOR"),
+    ("SOLID", "INSPECT", "INSPECT", "ANALYSIS"),
+    ("SOLID", "INSERT", "MODEL", "INSERT"),
+    ("SURFACE", "CREATE", "MODEL", "SURFACE"),
+    ("SURFACE", "MODIFY", "MODEL", "SURFACE"),
+    ("SURFACE", "INSPECT", "INSPECT", "ANALYSIS"),
     ("SKETCH", "CREATE", "SKETCH", "CREATE"),
     ("SKETCH", "MODIFY", "SKETCH", "MODIFY"),
     ("SKETCH", "PATTERN", "SKETCH", "PATTERN"),
     ("SKETCH", "CONSTRAINTS", "SKETCH", "CONSTRAIN"),
-    ("SKETCH", "INSERT", "INSERT", "IMAGES"),
-    ("SKETCH", "INSPECT", "INSPECT", "SURFACE QUALITY"),
-    ("SKETCH", "FINISH SKETCH", "SKETCH", "FINISH SKETCH"),
+    ("SKETCH", "INSERT", "SKETCH", "INSERT"),
+    ("SKETCH", "INSPECT", "INSPECT", "ANALYSIS"),
+    ("SKETCH", "FINISH SKETCH", "SKETCH", "EXIT"),
     ("SHEET METAL", "CREATE", "SHEET METAL", "CREATE"),
-    ("SHEET METAL", "MODIFY", "SHEET METAL", "FLAT"),
-    ("PLASTIC", "CREATE", "MODEL", "CREATE"),
-    ("PLASTIC", "SETUP", "MANAGE", "RULES"),
-    ("MESH", "MODIFY", "INSERT", "FILES"),
+    ("SHEET METAL", "MODIFY", "SHEET METAL", "MODIFY"),
+    ("PLASTIC", "CREATE", "MODEL", "PLASTIC PART"),
+    ("PLASTIC", "SETUP", "MANAGE", "STYLES AND STANDARDS"),
+    ("MESH", "MODIFY", "MODEL", "INSERT"),
     ("RENDER", "SCENE", "RENDER", "SCENE"),
     ("RENDER", "IMAGE", "RENDER", "IMAGE"),
 ];
@@ -361,10 +562,21 @@ pub fn panels(tab: &str) -> Vec<&'static str> {
 pub fn destination(c: &CommandSpec) -> Option<(&'static str, &'static str)> {
     // A few shared commands have a canonical home that differs from their first occurrence.
     let primary = match c.id {
-        "sheet.manage_rules" => Some(("MANAGE", "RULES")),
-        "sheet.convert" => Some(("MODEL", "MODIFY")),
+        "sheet.manage_rules" => Some(("SHEET METAL", "SETUP")),
+        "sheet.convert" => Some(("MODEL", "CONVERT")),
         "parameters.change" => Some(("MANAGE", "PARAMETERS")),
-        "config.table" | "config.configure" => Some(("MANAGE", "CONFIGURATIONS")),
+        "config.table" | "config.configure" => Some(("MANAGE", "AUTHOR")),
+        "inspect.measure" => Some(("INSPECT", "MEASURE")),
+        "inspect.section" => Some(("INSPECT", "ANALYSIS")),
+        "component.insert_design" => Some(("ASSEMBLE", "COMPONENT")),
+        "component.properties" => Some(("INSPECT", "MEASURE")),
+        "parts.library" | "parts.fastener" | "parts.resize" | "parts.insert" => Some(("MANAGE", "CONTENT CENTER")),
+        "contact.check" => Some(("INSPECT", "INTERFERENCE")),
+        "solid.pattern.rectangular" | "solid.pattern.circular" | "solid.mirror" => Some(("MODEL", "PATTERN")),
+        "construct.plane.offset" | "construct.axis.two_points" | "construct.point.vertex" => Some(("MODEL", "WORK FEATURES")),
+        "file.insert_step" | "file.insert_mesh" => Some(("MODEL", "INSERT")),
+        "canvas.insert" => Some(("MODEL", "INSERT")),
+        "surface.thicken" => Some(("MODEL", "SURFACE")),
         _ => None,
     };
     primary
@@ -398,13 +610,13 @@ pub fn legacy_panel(tab: &str, panel: &str) -> Option<(&'static str, &'static st
     }
     PLACEMENTS.iter().find(|(t, p, ..)| *t == tab && *p == panel).map(|(_, _, t, p)| (*t, *p)).or(match (tab, panel) {
         ("PLASTIC" | "SHEET METAL", "MODIFY") => Some(("MODEL", "MODIFY")),
-        ("PLASTIC" | "SHEET METAL" | "SURFACE" | "MESH", "ASSEMBLE") => Some(("ASSEMBLE", "JOINTS")),
-        ("PLASTIC" | "SHEET METAL" | "SURFACE" | "MESH", "CONSTRUCT") => Some(("MODEL", "CONSTRUCT")),
-        ("PLASTIC" | "SHEET METAL" | "SURFACE" | "MESH", "INSPECT") => Some(("INSPECT", "CHECK")),
-        ("PLASTIC" | "SHEET METAL" | "SURFACE" | "MESH", "INSERT") => Some(("INSERT", "FILES")),
-        ("MESH", "CREATE" | "PREPARE") => Some(("SURFACE", "CONVERT")),
-        ("UTILITIES", "MAKE" | "ADD-INS" | "UTILITY") => Some(("MANAGE", "DESIGN")),
-        ("UTILITIES", "INSPECT") => Some(("INSPECT", "CHECK")),
+        ("PLASTIC" | "SHEET METAL" | "SURFACE" | "MESH", "ASSEMBLE") => Some(("ASSEMBLE", "RELATIONSHIPS")),
+        ("PLASTIC" | "SHEET METAL" | "SURFACE" | "MESH", "CONSTRUCT") => Some(("MODEL", "WORK FEATURES")),
+        ("PLASTIC" | "SHEET METAL" | "SURFACE" | "MESH", "INSPECT") => Some(("INSPECT", "ANALYSIS")),
+        ("PLASTIC" | "SHEET METAL" | "SURFACE" | "MESH", "INSERT") => Some(("MODEL", "INSERT")),
+        ("MESH", "CREATE" | "PREPARE") => Some(("MODEL", "SURFACE")),
+        ("UTILITIES", "MAKE" | "ADD-INS" | "UTILITY") => Some(("MANAGE", "UPDATE")),
+        ("UTILITIES", "INSPECT") => Some(("INSPECT", "ANALYSIS")),
         _ => None,
     })
 }
@@ -564,29 +776,17 @@ mod tests {
         let specs = solidcraft_engine::command_specs();
         let (commands, _) = layout("MODEL", "MODIFY", &specs).unwrap();
         let grouped = grouped_commands("MODEL", "MODIFY", &commands);
-        assert_eq!(grouped.iter().filter_map(|(h, _)| *h).collect::<Vec<_>>(), ["Edges", "Faces", "Bodies", "Specialise"]);
+        assert_eq!(grouped.iter().filter_map(|(h, _)| *h).collect::<Vec<_>>(), ["Placed features", "Bodies", "Faces"]);
         assert_eq!(grouped.len(), commands.len());
-        assert_eq!(
-            grouped.iter().map(|(_, c)| c.id).collect::<Vec<_>>(),
-            [
-                "solid.fillet",
-                "solid.chamfer",
-                "solid.press_pull",
-                "solid.draft",
-                "solid.offset_face",
-                "solid.replace_face",
-                "solid.split_face",
-                "face.delete",
-                "solid.shell",
-                "solid.combine",
-                "solid.split_body",
-                "solid.scale",
-                "solid.remove",
-                "sheet.convert",
-                "timeline.delete",
-            ]
-        );
-        let plain = grouped_commands("SURFACE", "CREATE", &commands);
+        let ids: Vec<_> = grouped.iter().map(|(_, c)| c.id).collect();
+        assert_eq!(&ids[..6], ["solid.hole", "solid.fillet", "solid.chamfer", "solid.shell", "solid.draft", "solid.thread"]);
+        let groups = groups("MODEL", "MODIFY");
+        let listed: Vec<_> = groups.iter().flat_map(|g| g.ids.iter().copied()).filter(|id| commands.iter().any(|c| c.id == *id)).collect();
+        assert_eq!(&ids[..listed.len()], listed.as_slice(), "grouped commands come first, in group order");
+        let unlisted: Vec<_> = commands.iter().map(|c| c.id).filter(|id| !listed.contains(id)).collect();
+        assert_eq!(&ids[listed.len()..], unlisted.as_slice(), "the rest keep their layout order");
+        let (commands, _) = layout("MODEL", "PRIMITIVES", &specs).unwrap();
+        let plain = grouped_commands("MODEL", "PRIMITIVES", &commands);
         assert!(plain.iter().all(|(h, _)| h.is_none()));
         assert_eq!(plain.iter().map(|(_, c)| c.id).collect::<Vec<_>>(), commands.iter().map(|c| c.id).collect::<Vec<_>>());
     }
@@ -612,7 +812,7 @@ mod tests {
             assert!(label.chars().count() <= 13, "{id}: {label}");
             assert!(english.values().any(|value| value == label), "untranslated ribbon label {label}");
         }
-        assert_eq!(ribbon_button_label(solidcraft_engine::find_command("sketch.create").unwrap()), "New Sketch");
+        assert_eq!(ribbon_button_label(solidcraft_engine::find_command("sketch.create").unwrap()), "2D Sketch");
         assert_eq!(solidcraft_engine::find_command("sketch.create").unwrap().label, "Create Sketch");
     }
 
@@ -638,24 +838,30 @@ mod tests {
         let specs = solidcraft_engine::command_specs();
         for (panel, expected) in [
             ("SKETCH", vec!["sketch.create"]),
-            ("CREATE", vec!["solid.extrude", "solid.revolve", "solid.hole"]),
-            ("MODIFY", vec!["solid.fillet", "solid.chamfer", "solid.shell", "solid.press_pull"]),
-            ("ARRANGE", vec!["solid.move", "solid.mirror", "solid.pattern.rectangular"]),
-            ("CONSTRUCT", vec!["construct.plane.offset"]),
+            ("PRIMITIVES", vec!["solid.box", "solid.cylinder"]),
+            ("CREATE", vec!["solid.extrude", "solid.revolve", "solid.sweep", "solid.loft"]),
+            ("MODIFY", vec!["solid.hole", "solid.fillet", "solid.chamfer", "solid.shell"]),
+            ("PATTERN", vec!["solid.pattern.rectangular", "solid.pattern.circular", "solid.mirror"]),
+            ("WORK FEATURES", vec!["construct.plane.offset", "construct.axis.two_points", "construct.point.vertex"]),
+            ("SURFACE", vec!["surface.stitch", "surface.patch", "surface.trim", "surface.extend"]),
+            ("PARAMETERS", vec!["parameters.change"]),
         ] {
             let (cmds, n) = layout("MODEL", panel, &specs).unwrap();
-            assert_eq!(cmds.iter().take(n).map(|c| c.id).collect::<Vec<_>>(), expected);
+            assert_eq!(cmds.iter().take(n).map(|c| c.id).collect::<Vec<_>>(), expected, "{panel}");
         }
         for (tab, panel, id) in [
-            ("MODEL", "CREATE", "plastic.boss"),
-            ("INSERT", "FILES", "component.insert_design"),
-            ("ASSEMBLE", "COMPONENTS", "component.insert_design"),
-            ("SHEET METAL", "CREATE", "sheet.convert"),
+            ("MODEL", "PLASTIC PART", "plastic.boss"),
+            ("MODEL", "INSERT", "component.insert_design"),
+            ("MODEL", "INSERT", "file.save_mesh"),
+            ("MODEL", "SURFACE", "surface.extrude"),
+            ("MODEL", "SURFACE", "mesh.convert"),
+            ("ASSEMBLE", "COMPONENT", "component.insert_design"),
+            ("SHEET METAL", "MODIFY", "sheet.convert"),
             ("SHEET METAL", "SKETCH", "sketch.create"),
-            ("SURFACE", "SKETCH", "sketch.create"),
-            ("SKETCH", "REFERENCE", "canvas.insert"),
+            ("SKETCH", "INSERT", "canvas.insert"),
+            ("SKETCH", "CREATE", "sketch.project"),
         ] {
-            assert!(layout(tab, panel, &specs).unwrap().0.iter().any(|c| c.id == id));
+            assert!(layout(tab, panel, &specs).unwrap().0.iter().any(|c| c.id == id), "{tab}/{panel}: {id}");
         }
     }
 
@@ -668,8 +874,8 @@ mod tests {
             assert!(!matches!(c.tab, "MESH" | "UTILITIES"), "{} declares the removed {} tab", c.id, c.tab);
         }
         let spec = solidcraft_engine::find_command("file.save_mesh").expect("file.save_mesh is registered");
-        assert_eq!((spec.tab, spec.panel), ("INSERT", "FILES"), "Save As Mesh declares the panel that shows it");
-        assert_eq!(destination(spec), Some(("INSERT", "FILES")));
+        assert_eq!((spec.tab, spec.panel), ("INSERT", "FILES"), "Save As Mesh declares its registry placement");
+        assert_eq!(destination(spec), Some(("MODEL", "INSERT")), "which the ribbon shows on 3D Model's Insert panel");
     }
 
     #[test]
@@ -704,8 +910,9 @@ mod tests {
         assert_eq!(h.app.ui.tab, "SHEET METAL");
     }
 
-    /// Parameters and Configurations are on the design tabs they were on before the redesign, and a
-    /// fresh document reaches Sheet Metal (to flange a sketch or convert a solid) by its tab.
+    /// Parameters (and the configuration commands behind it) are on every design tab, as in
+    /// Inventor, and a fresh document reaches Sheet Metal (to flange a sketch or convert a solid)
+    /// by its tab.
     #[test]
     fn parameters_and_configurations_are_on_model_and_sheet_metal_and_the_sheet_tab_opens_fresh() {
         let specs = solidcraft_engine::command_specs();
@@ -715,8 +922,9 @@ mod tests {
             assert!(ids.contains(&"config.table"), "{tab}: Configurations");
         }
         for tab in ["MODEL", "SHEET METAL", "SKETCH"] {
-            let (commands, n) = layout(tab, "CONFIGURE", &specs).unwrap();
-            assert_eq!(commands.iter().take(n).map(|c| c.id).collect::<Vec<_>>(), ["parameters.change", "config.table"]);
+            let (commands, n) = layout(tab, "PARAMETERS", &specs).unwrap();
+            assert_eq!(commands.iter().take(n).map(|c| c.id).collect::<Vec<_>>(), ["parameters.change"]);
+            assert!(commands.iter().any(|c| c.id == "config.table"), "{tab}: Configurations is in the Parameters menu");
         }
         let mut h = crate::scenario::Harness::new();
         assert!(sheet_body(&h.app).is_none());
@@ -724,9 +932,9 @@ mod tests {
         h.frames(2);
         assert_eq!(h.app.ui.tab, "SHEET METAL");
         let specs = solidcraft_engine::command_specs();
-        let (create, _) = layout("SHEET METAL", "CREATE", &specs).unwrap();
-        assert!(create.iter().any(|c| c.id == "sheet.convert"), "Convert to Sheet Metal is in the Sheet Metal tab's Create panel");
-        for id in ["sheet.flange", "parameters.change", "config.table"] {
+        let (modify, _) = layout("SHEET METAL", "MODIFY", &specs).unwrap();
+        assert!(modify.iter().any(|c| c.id == "sheet.convert"), "Convert to Sheet Metal is in the Sheet Metal tab's Modify panel");
+        for id in ["sheet.flange", "parameters.change"] {
             assert!(crate::scenario::handle_at(&format!("button:{id}")).is_some(), "{id} is a button on the fresh Sheet Metal tab");
         }
         h.step(&json!({"click":{"handle":"button:parameters.change"}})).unwrap();
@@ -736,18 +944,16 @@ mod tests {
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         h.frames(2);
         assert_eq!(h.app.ui.tab, "SKETCH");
-        for id in ["parameters.change", "config.table"] {
-            assert!(crate::scenario::handle_at(&format!("button:{id}")).is_some(), "{id} is a button on the Sketch tab");
-        }
+        assert!(crate::scenario::handle_at("button:parameters.change").is_some(), "Parameters is a button on the Sketch tab");
         h.app.finish_sketch();
-        h.step(&json!({"click":{"handle":"tab:MODEL"}})).unwrap();
+        h.step(&json!({"click":{"handle":"tab:MANAGE"}})).unwrap();
         h.frames(2);
         h.step(&json!({"click":{"handle":"button:config.table"}})).unwrap();
         assert!(matches!(
             h.app.dialog.as_ref().map(|d| &d.kind),
             Some(crate::dialogs::Kind::Motion(crate::dialogs_motion::Mo::Configurations { .. }))
         ));
-        assert_eq!(h.app.ui.tab, "MODEL", "Configurations opens from the Model tab without leaving it");
+        assert_eq!(h.app.ui.tab, "MANAGE", "Configurations opens from the Manage tab without leaving it");
     }
 
     fn panel_ids(tab: &str, specs: &[&CommandSpec]) -> Vec<&'static str> {
@@ -757,10 +963,10 @@ mod tests {
     #[test]
     fn starts_palette_and_control_use_the_new_destinations() {
         let mut h = crate::scenario::Harness::new();
-        // Parameters is also on MODEL, so a start from there stays put; from SURFACE it goes home.
-        h.app.ui.tab = "SURFACE".into();
+        // Parameters is also on MODEL, so a start from there stays put; from INSPECT it goes home.
+        h.app.ui.tab = "INSPECT".into();
         h.frames(2);
-        for (id, tab) in [("parameters.change", "MANAGE"), ("solid.box", "MODEL"), ("surface.patch", "SURFACE")] {
+        for (id, tab) in [("parameters.change", "MANAGE"), ("solid.box", "MODEL"), ("surface.patch", "MODEL")] {
             h.step(&json!({"start":id})).unwrap();
             assert_eq!(h.app.ui.tab, tab, "{id}");
             h.step(&json!({"key":"Escape"})).unwrap();
@@ -783,7 +989,7 @@ mod tests {
         use serde_json::json;
         let mut h = crate::scenario::Harness::new();
         let specs = solidcraft_engine::command_specs();
-        let (commands, _) = layout("MANAGE", "CONFIGURATIONS", &specs).unwrap();
+        let (commands, _) = layout("MANAGE", "AUTHOR", &specs).unwrap();
         assert!(commands.iter().any(|c| c.id == "config.configure"));
         h.step(&json!({"click":{"handle":"tab:MANAGE"}})).unwrap();
         h.step(&json!({"click":{"handle":"button:parameters.change"}})).unwrap();
@@ -817,33 +1023,56 @@ mod tests {
     fn ribbon_sections_keep_shared_commands_reachable() {
         let specs = solidcraft_engine::command_specs();
         let ids = |tab, panel| layout(tab, panel, &specs).unwrap().0.iter().map(|c| c.id).collect::<Vec<_>>();
-        let joints = ids("ASSEMBLE", "JOINTS");
+        let joints = ids("ASSEMBLE", "RELATIONSHIPS");
         assert_eq!(joints.first().copied(), Some("joint.create"));
-        assert!(ids("ASSEMBLE", "MOTION").contains(&"joint.drive"));
-        assert!(ids("ASSEMBLE", "COMPONENTS").contains(&"component.create"));
+        assert!(joints.contains(&"joint.drive"));
+        assert!(ids("ASSEMBLE", "PRODUCTIVITY").contains(&"motion.study"));
+        assert!(ids("ASSEMBLE", "COMPONENT").contains(&"component.create"));
         let sheet = ids("SHEET METAL", "CREATE");
         assert_eq!(sheet.first().copied(), Some("sheet.flange"));
         assert!(ids("MODEL", "CREATE").contains(&"solid.extrude"));
-        assert!(ids("SHEET METAL", "FLAT").contains(&"sheet.flat_pattern"));
-        assert!(ids("SHEET METAL", "FLAT").contains(&"sheet.unfold"));
-        assert!(ids("MANAGE", "RULES").contains(&"plastic.manage_rules"));
-        let create = ids("MODEL", "CREATE");
-        assert!(create.contains(&"plastic.boss") && create.contains(&"solid.rib") && create.contains(&"plastic.lip"));
+        assert!(ids("SHEET METAL", "FLAT PATTERN").contains(&"sheet.flat_pattern"));
+        assert!(ids("SHEET METAL", "MODIFY").contains(&"sheet.unfold"));
+        assert!(ids("MANAGE", "STYLES AND STANDARDS").contains(&"plastic.manage_rules"));
+        let plastic = ids("MODEL", "PLASTIC PART");
+        assert!(plastic.contains(&"plastic.boss") && plastic.contains(&"plastic.lip"));
+        assert!(ids("MODEL", "CREATE").contains(&"solid.rib"));
         assert!(ids("MODEL", "MODIFY").contains(&"solid.shell"));
-        assert_eq!(panels("MANAGE"), ["PARAMETERS", "CONFIGURATIONS", "MATERIALS", "RULES", "DESIGN"]);
-        // The former sketch/solid INSPECT panels now share a global INSPECT tab.
+        assert_eq!(
+            panels("MODEL"),
+            [
+                "SKETCH",
+                "PRIMITIVES",
+                "CREATE",
+                "MODIFY",
+                "EXPLORE",
+                "WORK FEATURES",
+                "PATTERN",
+                "SURFACE",
+                "PLASTIC PART",
+                "CONVERT",
+                "PARAMETERS",
+                "MEASURE",
+                "INSERT"
+            ]
+        );
+        assert_eq!(panels("MANAGE"), ["UPDATE", "PARAMETERS", "STYLES AND STANDARDS", "INSERT", "AUTHOR", "CONTENT CENTER"]);
+        // The former sketch/solid INSPECT panels share a global INSPECT tab.
         for (panel, commands) in [
-            ("CHECK", vec!["inspect.interference", "inspect.draft", "inspect.accessibility"]),
-            ("MEASURE", vec!["inspect.center_of_mass"]),
+            ("INTERFERENCE", vec!["inspect.interference", "contact.check"]),
+            ("MEASURE", vec!["inspect.measure", "inspect.center_of_mass"]),
             (
-                "SURFACE QUALITY",
+                "ANALYSIS",
                 vec![
                     "inspect.zebra",
+                    "inspect.draft",
+                    "inspect.accessibility",
                     "inspect.curvature_map",
                     "inspect.environment_map",
                     "inspect.minimum_radius",
                     "inspect.isocurve",
                     "inspect.curvature_comb",
+                    "inspect.section",
                 ],
             ),
         ] {
@@ -860,7 +1089,7 @@ mod tests {
     fn insert_design_is_on_the_assemble_panel_and_inserts_a_saved_part() {
         use serde_json::json;
         let specs = solidcraft_engine::command_specs();
-        assert!(layout("ASSEMBLE", "COMPONENTS", &specs).unwrap().0.iter().any(|c| c.id == "component.insert_design"));
+        assert!(layout("ASSEMBLE", "COMPONENT", &specs).unwrap().0.iter().any(|c| c.id == "component.insert_design"));
         let mut h = crate::scenario::Harness::new();
         let part = h.dir.join("part1.solidcraft");
         let mut s = solidcraft_engine::Session::default();
@@ -980,19 +1209,21 @@ mod tests {
         assert_eq!(h.app.ui.tab, "SKETCH");
     }
 
-    /// New Sketch is on the SURFACE tab too, and a sketch started there stays on that tab until
-    /// it opens.
+    /// Inventor's Assemble tab has no sketch button: a sketch started there (from the start
+    /// palette) still comes back to that tab when it is finished.
     #[test]
-    fn new_sketch_starts_from_the_surface_tab() {
+    fn new_sketch_started_from_the_assemble_tab_returns_there() {
         let mut h = crate::scenario::Harness::new();
-        h.step(&json!({"click": {"handle": "tab:SURFACE"}})).unwrap();
+        h.step(&json!({"click": {"handle": "tab:ASSEMBLE"}})).unwrap();
         h.frames(2);
-        h.step(&json!({"click": {"handle": "button:sketch.create"}})).unwrap();
-        h.frames(2);
-        assert_eq!(h.app.ui.tab, "SURFACE", "New Sketch is on this tab, so it stays");
+        assert!(crate::scenario::handle_at("button:sketch.create").is_none(), "Assemble has no 2D Sketch button");
+        h.step(&json!({"start": "sketch.create"})).unwrap();
         h.step(&json!({"click": {"plane": "XY"}})).unwrap();
         h.frames(2);
         assert!(h.app.session.active_sketch.is_some());
         assert_eq!(h.app.ui.tab, "SKETCH");
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.ui.tab, "ASSEMBLE");
     }
 }

@@ -1,140 +1,151 @@
 # Ribbon structure
 
-The UI layout in `crates/ui-egui/src/workspace.rs` maps the original engine registry placements into ribbon sections. `docs/features.md` continues to document registry placements; command registrations and ids are unchanged.
+InventorCraft arranges SolidCraft's ribbon the way Autodesk Inventor's part and assembly environments do.
+The layout lives in `crates/ui-egui/src/workspace.rs` and is UI data: command registrations and ids are
+unchanged, and `docs/features.md` continues to document the registry placements.
 
-Always shown, in order: MODEL, SURFACE, ASSEMBLE, INSERT, INSPECT, MANAGE, VIEW, SHEET METAL. SKETCH appears during sketch editing. SHEET METAL is reachable in every document, so a sheet-metal part can start from a sketch or a solid; it takes the contextual style and selects itself when the selected body (or the last body of the active component) has evaluated sheet-metal data. Entering a context selects its tab; the other tabs remain available. RENDER belongs to the Render workspace.
+Tab **ids** stay the short upper-case keys preferences, scenarios and tests use; the **names** painted on
+the ribbon come from `workspace::tab_label` (`MODEL` paints as "3D Model") and panel ids are word-cased
+("WORK FEATURES" paints as "Work Features").
 
-**Bold command ids are default promoted buttons.** Every listed command remains in the section menu. Saved user pins can add buttons, as before.
+Always shown, in order: MODEL (3D Model), ASSEMBLE (Assemble), INSPECT (Inspect), MANAGE (Manage), VIEW (View), then SHEET METAL (Sheet Metal). SKETCH
+appears during sketch editing and takes the contextual style; SHEET METAL takes it while the selected body (or
+the last body of the active component) has evaluated sheet-metal data. RENDER belongs to the Render workspace.
+
+Where Inventor keeps a command on a quick-access bar or a context menu that SolidCraft does not have, the
+command sits on the nearest Inventor panel instead (Appearance and Material on Manage > Styles and Standards,
+the motion-study commands on Assemble > Productivity, the named views on View > Navigate).
+
+**Bold command ids are default promoted buttons.** Every listed command remains in the section menu, and a
+command whose registry placement maps to a section (table below) joins that section's menu after the listed
+ids. Saved user pins can add buttons, as before.
 
 | Tab | Section | Command ids, in menu order |
 |---|---|---|
-| MODEL | SKETCH | **`sketch.create`**, `sketch.edit`, `sketch.line3d`, `sketch.spline3d`, `sketch.point3d`, `sketch.move3d` |
-| MODEL | CREATE | **`solid.extrude`**, **`solid.revolve`**, **`solid.hole`**, `solid.sweep`, `solid.loft`, `solid.box`, `solid.cylinder`, `solid.sphere`, `solid.torus`, `solid.pipe`, `solid.bounding_solid`, `solid.thread`, `solid.boundary_fill`, `solid.coil`, `solid.rib`, `solid.web`, `solid.emboss`, `plastic.boss`, `plastic.lip`, `plastic.snap_fit`, `plastic.rest`, `frame.member` |
-| MODEL | MODIFY | **`solid.fillet`**, **`solid.chamfer`**, **`solid.shell`**, **`solid.press_pull`**, `sheet.convert`, `solid.combine`, `solid.scale`, `solid.offset_face`, `solid.draft`, `solid.split_face`, `solid.split_body`, `solid.replace_face`, `solid.remove`, `timeline.delete`, `face.delete` |
-| MODEL | ARRANGE | **`solid.move`**, **`solid.mirror`**, **`solid.pattern.rectangular`**, `solid.align`, `solid.pattern.circular`, `solid.pattern.path` |
-| MODEL | CONFIGURE | **`parameters.change`**, **`config.table`**, `config.configure` |
-| MODEL | CONSTRUCT | **`construct.plane.offset`**, `construct.plane.at_angle`, `construct.axis.through_cylinder`, `construct.axis.normal_to_face`, `construct.axis.two_planes`, `construct.axis.two_points`, `construct.axis.edge`, `construct.point.vertex`, `construct.point.two_edges`, `construct.point.three_planes`, `construct.point.center`, `construct.point.edge_plane`, `construct.point.along_path`, `construct.plane.midplane`, `construct.plane.two_edges`, `construct.plane.three_points`, `construct.plane.tangent`, `construct.plane.along_path`, `construct.plane.perpendicular` |
-| SURFACE | SKETCH | **`sketch.create`** |
-| SURFACE | CREATE | **`surface.extrude`**, **`surface.revolve`**, **`surface.sweep`**, **`surface.loft`**, `surface.boundary`, `surface.patch`, `surface.offset`, `surface.ruled`, `surface.blend` |
-| SURFACE | EDIT | **`surface.trim`**, **`surface.untrim`**, **`surface.extend`**, **`surface.stitch`**, `surface.unstitch`, `surface.reverse_normal`, `surface.fair`, `surface.fillet`, `surface.match` |
-| SURFACE | CONVERT | **`surface.thicken`**, **`mesh.convert`** |
-| ASSEMBLE | COMPONENTS | **`component.create`**, **`component.from_bodies`**, **`component.insert_design`**, **`parts.library`** |
-| ASSEMBLE | JOINTS | **`joint.create`**, **`joint.as_built`**, **`joint.origin`**, **`joint.rigid_group`**, `joint.limits`, `joint.gear`, `joint.rack_pinion`, `joint.screw`, `joint.cam`, `joint.reach` |
-| ASSEMBLE | POSITION | **`occurrence.ground`**, **`component.capture_position`**, **`component.revert_position`** |
-| ASSEMBLE | MOTION | **`joint.drive`**, **`joint.motion_link`**, **`motion.study`**, **`motion.trace`**, `explode.create` |
-| ASSEMBLE | CONTACT | **`contact.enable_sets`**, **`contact.check`**, `contact.enable_all`, `contact.disable_all`, `contact.create`, `contact.edit`, `contact.list` |
-| INSERT | FILES | **`file.insert_step`**, **`file.insert_mesh`**, **`component.insert_design`**, `file.save_mesh` |
-| INSERT | IMAGES | **`canvas.insert`**, **`canvas.decal`**, **`canvas.edit`** |
-| INSERT | 2D | **`sketch.insert_dxf`**, **`sketch.insert_svg`** |
-| INSERT | LIBRARY | **`parts.fastener`**, **`parts.library`**, **`parts.resize`**, `parts.insert` |
-| INSERT | LINKS | **`component.update_links`**, **`component.break_link`** |
-| INSPECT | MEASURE | **`inspect.measure`**, **`inspect.center_of_mass`**, **`component.properties`** |
-| INSPECT | SECTION | **`inspect.section`** |
-| INSPECT | CHECK | **`inspect.interference`**, **`inspect.draft`**, **`inspect.accessibility`**, **`contact.check`**, `inspect.compare` |
-| INSPECT | SURFACE QUALITY | **`inspect.zebra`**, **`inspect.curvature_map`**, **`inspect.curvature_comb`**, **`inspect.isocurve`**, `inspect.minimum_radius`, `inspect.environment_map`, `inspect.continuity` |
-| INSPECT | HISTORY | **`timeline.dependents`**, **`document.inspect`** |
-| MANAGE | PARAMETERS | **`parameters.change`**, **`parameters.graph`**, `parameters.move`, `parameters.import`, `parameters.export` |
-| MANAGE | CONFIGURATIONS | **`config.table`**, **`config.configure`**, `config.rules`, `config.preview` |
-| MANAGE | MATERIALS | **`material.assign`**, **`appearance.assign`**, `material.properties.validate`, `library.inspect`, `library.export`, `library.apply` |
-| MANAGE | RULES | **`sheet.manage_rules`**, **`plastic.manage_rules`**, **`plastic.assign_rule`** |
-| MANAGE | DESIGN | **`document.units`**, **`timeline.compute_all`**, `edit.checkpoint`, `edit.restore_checkpoint` |
-| VIEW | VIEWS | **`view.apply`**, **`view.save`**, `view.rename`, `view.delete`, `view.list`, `view.navigate` |
-| VIEW | SELECT | Selection-filter controls (existing UI, no command ids) |
-| SKETCH | CREATE | **`sketch.line`**, **`sketch.rectangle.two_point`**, **`sketch.circle.center`**, **`sketch.arc.three_point`**, `sketch.infinite`, `sketch.rectangle.three_point`, `sketch.rectangle.rounded`, `sketch.rectangle.center`, `sketch.circle.two_point`, `sketch.circle.three_point`, `sketch.arc.center_point`, `sketch.polygon.inscribed`, `sketch.polygon.circumscribed`, `sketch.polygon.edge`, `sketch.slot.center_to_center`, `sketch.slot.overall`, `sketch.point`, `sketch.line.midpoint`, `sketch.arc.tangent`, `sketch.circle.two_tangent`, `sketch.circle.three_tangent`, `sketch.slot.center_point`, `sketch.slot.arc_three_point`, `sketch.slot.arc_center`, `sketch.ellipse`, `sketch.spline.fit_point`, `sketch.spline.control_point`, `sketch.spline.control_point_5`, `sketch.conic`, `sketch.centerline`, `sketch.text` |
-| SKETCH | MODIFY | **`sketch.trim`**, **`sketch.offset`**, **`sketch.fillet`**, `sketch.copy`, `sketch.cut`, `sketch.paste`, `sketch.blend_curve`, `sketch.chamfer.equal_distance`, `sketch.chamfer.distance_angle`, `sketch.chamfer.two_distance`, `sketch.extend`, `sketch.break`, `sketch.scale`, `sketch.move` |
-| SKETCH | PATTERN | **`sketch.mirror`**, **`sketch.pattern.circular`**, **`sketch.pattern.rectangular`** |
-| SKETCH | CONSTRAIN | **`sketch.dimension`**, **`sketch.constraint.horizontal_vertical`**, **`sketch.constraint.coincident`**, **`sketch.constraint.tangent`**, **`sketch.constraint.equal`**, **`sketch.constraint.parallel`**, **`sketch.constraint.perpendicular`**, `sketch.construction`, `sketch.constrainer`, `sketch.constraint.fix`, `sketch.constraint.midpoint`, `sketch.constraint.concentric`, `sketch.constraint.collinear`, `sketch.constraint.symmetry`, `sketch.constraint.curvature`, `sketch.constraint.polygon`, `sketch.auto_constrain`, `sketch.auto_constrain_from_datum` |
-| SKETCH | REFERENCE | **`sketch.project`**, `sketch.intersect`, `sketch.include_3d`, `sketch.project_to_surface`, `sketch.intersection_curve`, `sketch.spun_profile`, `sketch.isoparametric_curve`, `sketch.fit_curves_to_section`, `sketch.insert_dxf`, `sketch.insert_svg`, `canvas.insert` |
-| SKETCH | FINISH SKETCH | **`sketch.finish`**, `sketch.finish_auto_constrain` |
-| SHEET METAL | SKETCH | **`sketch.create`** |
-| SHEET METAL | CREATE | **`sheet.flange`**, **`sheet.hem`**, **`sheet.fold`**, **`sheet.perforate`**, `sheet.convert` |
-| SHEET METAL | FLAT | **`sheet.unfold`**, **`sheet.refold`**, **`sheet.flat_pattern`** |
-| SHEET METAL | OUTPUT | **`sheet.export_dxf`**, **`sheet.export_bend_table`** |
-| SHEET METAL | RULES | **`sheet.manage_rules`** |
-| SHEET METAL | CONFIGURE | **`parameters.change`**, **`config.table`**, `config.configure` |
-| SKETCH | CONFIGURE | **`parameters.change`**, **`config.table`**, `config.configure` |
-| RENDER | SCENE | **`render.scene`** |
-| RENDER | IMAGE | **`render.start`** |
+| MODEL (3D Model) | SKETCH | **`sketch.create`**, `sketch.edit`, `sketch.line3d`, `sketch.spline3d`, `sketch.point3d`, `sketch.move3d` |
+| MODEL (3D Model) | PRIMITIVES | **`solid.box`**, **`solid.cylinder`**, `solid.sphere`, `solid.torus` |
+| MODEL (3D Model) | CREATE | **`solid.extrude`**, **`solid.revolve`**, **`solid.sweep`**, **`solid.loft`**, `solid.coil`, `solid.emboss`, `solid.rib`, `solid.web`, `solid.pipe`, `solid.bounding_solid`, `solid.boundary_fill` |
+| MODEL (3D Model) | MODIFY | **`solid.hole`**, **`solid.fillet`**, **`solid.chamfer`**, **`solid.shell`**, `solid.draft`, `solid.thread`, `solid.combine`, `surface.thicken`, `solid.split_body`, `solid.press_pull`, `face.delete`, `solid.move`, `solid.offset_face`, `solid.replace_face`, `solid.split_face`, `solid.scale`, `solid.align`, `solid.remove`, `timeline.delete` |
+| MODEL (3D Model) | EXPLORE | **`inspect.section`** |
+| MODEL (3D Model) | WORK FEATURES | **`construct.plane.offset`**, **`construct.axis.two_points`**, **`construct.point.vertex`** |
+| MODEL (3D Model) | PATTERN | **`solid.pattern.rectangular`**, **`solid.pattern.circular`**, **`solid.mirror`**, `solid.pattern.path` |
+| MODEL (3D Model) | SURFACE | **`surface.stitch`**, **`surface.patch`**, **`surface.trim`**, **`surface.extend`** |
+| MODEL (3D Model) | PLASTIC PART | **`plastic.boss`**, **`plastic.rest`**, **`plastic.snap_fit`**, **`plastic.lip`** |
+| MODEL (3D Model) | CONVERT | **`sheet.convert`** |
+| MODEL (3D Model) | PARAMETERS | **`parameters.change`**, `config.table`, `config.configure` |
+| MODEL (3D Model) | MEASURE | **`inspect.measure`** |
+| MODEL (3D Model) | INSERT | **`file.insert_step`**, **`canvas.decal`**, **`canvas.insert`**, `file.insert_mesh`, `component.insert_design`, `canvas.edit`, `file.save_mesh` |
+| ASSEMBLE (Assemble) | COMPONENT | **`component.insert_design`**, **`component.create`**, **`component.from_bodies`**, `parts.library`, `parts.fastener`, `parts.insert`, `parts.resize` |
+| ASSEMBLE (Assemble) | POSITION | **`occurrence.ground`**, **`component.capture_position`**, **`component.revert_position`** |
+| ASSEMBLE (Assemble) | RELATIONSHIPS | **`joint.create`**, **`joint.as_built`**, **`joint.origin`**, **`joint.rigid_group`**, `joint.limits`, `joint.gear`, `joint.rack_pinion`, `joint.screw`, `joint.cam`, `joint.reach`, `joint.drive`, `joint.motion_link` |
+| ASSEMBLE (Assemble) | PATTERN | **`solid.pattern.rectangular`**, **`solid.pattern.circular`**, **`solid.mirror`** |
+| ASSEMBLE (Assemble) | PRODUCTIVITY | **`motion.study`**, **`motion.trace`**, **`explode.create`**, **`contact.enable_sets`**, `contact.check`, `contact.enable_all`, `contact.disable_all`, `contact.create`, `contact.edit`, `contact.list` |
+| ASSEMBLE (Assemble) | MANAGE | **`component.properties`**, **`component.update_links`**, **`component.break_link`** |
+| ASSEMBLE (Assemble) | WORK FEATURES | **`construct.plane.offset`**, **`construct.axis.two_points`**, **`construct.point.vertex`** |
+| INSPECT (Inspect) | MEASURE | **`inspect.measure`**, **`inspect.center_of_mass`**, **`component.properties`** |
+| INSPECT (Inspect) | INTERFERENCE | **`inspect.interference`**, **`contact.check`** |
+| INSPECT (Inspect) | ANALYSIS | **`inspect.zebra`**, **`inspect.draft`**, **`inspect.curvature_map`**, **`inspect.curvature_comb`**, `inspect.section`, `inspect.isocurve`, `inspect.minimum_radius`, `inspect.environment_map`, `inspect.continuity`, `inspect.accessibility`, `inspect.compare`, `timeline.dependents`, `document.inspect` |
+| MANAGE (Manage) | UPDATE | **`timeline.compute_all`**, `edit.checkpoint`, `edit.restore_checkpoint` |
+| MANAGE (Manage) | PARAMETERS | **`parameters.change`**, `parameters.graph`, `parameters.move`, `parameters.import`, `parameters.export` |
+| MANAGE (Manage) | STYLES AND STANDARDS | **`material.assign`**, **`appearance.assign`**, **`document.units`**, `material.properties.validate`, `library.inspect`, `library.export`, `library.apply`, `sheet.manage_rules`, `plastic.manage_rules`, `plastic.assign_rule` |
+| MANAGE (Manage) | INSERT | **`component.insert_design`**, **`file.insert_step`**, `file.insert_mesh` |
+| MANAGE (Manage) | AUTHOR | **`config.table`**, **`config.configure`**, `config.rules`, `config.preview` |
+| MANAGE (Manage) | CONTENT CENTER | **`parts.library`**, **`parts.fastener`**, `parts.resize`, `parts.insert` |
+| VIEW (View) | NAVIGATE | **`view.apply`**, **`view.save`**, `view.rename`, `view.delete`, `view.list`, `view.navigate` |
+| VIEW (View) | SELECT | Selection-filter controls (existing UI, no command ids) |
+| SKETCH (Sketch) | CREATE | **`sketch.line`**, **`sketch.circle.center`**, **`sketch.arc.three_point`**, **`sketch.rectangle.two_point`**, `sketch.slot.center_to_center`, `sketch.polygon.inscribed`, `sketch.spline.fit_point`, `sketch.ellipse`, `sketch.point`, `sketch.text`, `sketch.infinite`, `sketch.project`, `sketch.intersect`, `sketch.include_3d`, `sketch.project_to_surface`, `sketch.intersection_curve`, `sketch.spun_profile`, `sketch.isoparametric_curve`, `sketch.fit_curves_to_section` |
+| SKETCH (Sketch) | MODIFY | **`sketch.move`**, **`sketch.copy`**, **`sketch.trim`**, **`sketch.extend`**, `sketch.offset`, `sketch.scale`, `sketch.break`, `sketch.cut`, `sketch.paste` |
+| SKETCH (Sketch) | PATTERN | **`sketch.pattern.rectangular`**, **`sketch.pattern.circular`**, **`sketch.mirror`** |
+| SKETCH (Sketch) | CONSTRAIN | **`sketch.dimension`**, **`sketch.constraint.horizontal_vertical`**, **`sketch.constraint.coincident`**, **`sketch.constraint.tangent`**, **`sketch.constraint.equal`**, **`sketch.constraint.parallel`**, **`sketch.constraint.perpendicular`**, `sketch.constraint.collinear`, `sketch.constraint.concentric`, `sketch.constraint.fix`, `sketch.constraint.midpoint`, `sketch.constraint.symmetry`, `sketch.constraint.curvature`, `sketch.constraint.polygon`, `sketch.constrainer`, `sketch.auto_constrain`, `sketch.auto_constrain_from_datum` |
+| SKETCH (Sketch) | INSERT | **`canvas.insert`**, **`sketch.insert_dxf`**, `sketch.insert_svg` |
+| SKETCH (Sketch) | FORMAT | **`sketch.construction`**, **`sketch.centerline`** |
+| SKETCH (Sketch) | PARAMETERS | **`parameters.change`**, `config.table`, `config.configure` |
+| SKETCH (Sketch) | EXIT | **`sketch.finish`**, **`sketch.cancel`** |
+| SHEET METAL (Sheet Metal) | SKETCH | **`sketch.create`** |
+| SHEET METAL (Sheet Metal) | CREATE | **`sheet.flange`**, **`sheet.hem`**, **`sheet.fold`**, **`sheet.perforate`** |
+| SHEET METAL (Sheet Metal) | MODIFY | **`sheet.unfold`**, **`sheet.refold`**, `sheet.convert` |
+| SHEET METAL (Sheet Metal) | FLAT PATTERN | **`sheet.flat_pattern`**, **`sheet.export_dxf`**, **`sheet.export_bend_table`** |
+| SHEET METAL (Sheet Metal) | SETUP | **`sheet.manage_rules`** |
+| SHEET METAL (Sheet Metal) | PARAMETERS | **`parameters.change`**, `config.table`, `config.configure` |
+| RENDER (Render) | SCENE | **`render.scene`** |
+| RENDER (Render) | IMAGE | **`render.start`** |
 
-## Original placements to ribbon destinations
+## Registry placements to ribbon destinations
 
-Explicit command-id lists override the default placement mapping. Shared commands appear in every section that lists them above. This table includes every command with an original toolbar placement.
+A command's registry `tab` / `panel` decides its default section when no id list names it. Explicit id lists
+override this mapping and can share a command across sections; `workspace::destination` also pins a few shared
+commands to a canonical home (Parameters on Manage, Content Center parts on Manage, Measure and Section View
+on Inspect).
 
-| Original tab / panel | New tab / section | Command ids |
-|---|---|---|
-| MESH / MODIFY | INSERT / FILES | `file.save_mesh` |
-| PLASTIC / CREATE | MODEL / CREATE | `plastic.boss`, `plastic.lip`, `plastic.snap_fit`, `plastic.rest` |
-| PLASTIC / SETUP | MANAGE / RULES | `plastic.manage_rules`, `plastic.assign_rule` |
-| RENDER / IMAGE | RENDER / IMAGE | `render.start` |
-| RENDER / SCENE | RENDER / SCENE | `render.scene` |
-| SHEET METAL / CREATE | MODEL / MODIFY | `sheet.convert` |
-| SHEET METAL / CREATE | SHEET METAL / SKETCH | `sketch.create` |
-| SHEET METAL / CREATE | SHEET METAL / CREATE | `sheet.flange`, `sheet.perforate`, `sheet.hem`, `sheet.fold` |
-| SHEET METAL / CREATE | SHEET METAL / FLAT | `sheet.flat_pattern` |
-| SHEET METAL / MODIFY | MANAGE / RULES | `sheet.manage_rules` |
-| SHEET METAL / MODIFY | SHEET METAL / FLAT | `sheet.unfold`, `sheet.refold` |
-| SKETCH / CONSTRAINTS | SKETCH / CONSTRAIN | `sketch.constraint.horizontal_vertical`, `sketch.constraint.coincident`, `sketch.constraint.tangent`, `sketch.constraint.equal`, `sketch.constraint.parallel`, `sketch.constraint.perpendicular`, `sketch.constraint.fix`, `sketch.constraint.midpoint`, `sketch.constraint.concentric`, `sketch.constraint.collinear`, `sketch.constraint.symmetry`, `sketch.constraint.curvature`, `sketch.constraint.polygon`, `sketch.auto_constrain`, `sketch.auto_constrain_from_datum` |
-| SKETCH / CREATE | SKETCH / CONSTRAIN | `sketch.dimension`, `sketch.construction`, `sketch.constrainer` |
-| SKETCH / CREATE | SKETCH / CREATE | `sketch.line`, `sketch.rectangle.two_point`, `sketch.rectangle.three_point`, `sketch.rectangle.rounded`, `sketch.rectangle.center`, `sketch.circle.center`, `sketch.circle.two_point`, `sketch.circle.three_point`, `sketch.arc.three_point`, `sketch.arc.center_point`, `sketch.polygon.inscribed`, `sketch.polygon.circumscribed`, `sketch.polygon.edge`, `sketch.slot.center_to_center`, `sketch.slot.overall`, `sketch.point`, `sketch.line.midpoint`, `sketch.arc.tangent`, `sketch.circle.two_tangent`, `sketch.circle.three_tangent`, `sketch.slot.center_point`, `sketch.slot.arc_three_point`, `sketch.slot.arc_center`, `sketch.ellipse`, `sketch.spline.fit_point`, `sketch.spline.control_point`, `sketch.spline.control_point_5`, `sketch.conic`, `sketch.centerline`, `sketch.text` |
-| SKETCH / CREATE | SKETCH / REFERENCE | `sketch.project`, `sketch.intersect`, `sketch.include_3d`, `sketch.project_to_surface`, `sketch.intersection_curve`, `sketch.spun_profile`, `sketch.isoparametric_curve`, `sketch.fit_curves_to_section` |
-| SKETCH / FINISH SKETCH | SKETCH / FINISH SKETCH | `sketch.finish`, `sketch.finish_auto_constrain` |
-| SKETCH / INSERT | INSERT / 2D | `sketch.insert_dxf`, `sketch.insert_svg` |
-| SKETCH / INSERT | INSERT / IMAGES | `canvas.insert`, `canvas.decal`, `canvas.edit` |
-| SKETCH / INSPECT | INSPECT / CHECK | `inspect.draft`, `inspect.accessibility` |
-| SKETCH / INSPECT | INSPECT / MEASURE | `inspect.center_of_mass` |
-| SKETCH / INSPECT | INSPECT / SURFACE QUALITY | `inspect.curvature_comb`, `inspect.minimum_radius`, `inspect.isocurve`, `inspect.zebra`, `inspect.environment_map`, `inspect.curvature_map` |
-| SKETCH / MODIFY | SKETCH / MODIFY | `sketch.blend_curve`, `sketch.fillet`, `sketch.chamfer.equal_distance`, `sketch.chamfer.distance_angle`, `sketch.chamfer.two_distance`, `sketch.offset`, `sketch.trim`, `sketch.extend`, `sketch.break`, `sketch.scale`, `sketch.move` |
-| SKETCH / PATTERN | SKETCH / PATTERN | `sketch.mirror`, `sketch.pattern.circular`, `sketch.pattern.rectangular` |
-| SOLID / ASSEMBLE | ASSEMBLE / COMPONENTS | `component.create`, `component.insert_design` |
-| SOLID / ASSEMBLE | ASSEMBLE / CONTACT | `contact.enable_sets`, `contact.enable_all`, `contact.disable_all`, `contact.create` |
-| SOLID / ASSEMBLE | ASSEMBLE / JOINTS | `joint.create`, `joint.as_built`, `joint.rigid_group`, `joint.gear`, `joint.rack_pinion`, `joint.screw`, `joint.cam` |
-| SOLID / ASSEMBLE | ASSEMBLE / MOTION | `joint.drive`, `joint.motion_link`, `explode.create`, `motion.study`, `motion.trace` |
-| SOLID / CONFIGURE | MANAGE / CONFIGURATIONS | `config.configure`, `config.table` |
-| SOLID / CONSTRUCT | MODEL / CONSTRUCT | `construct.plane.offset`, `construct.plane.at_angle`, `construct.axis.through_cylinder`, `construct.axis.normal_to_face`, `construct.axis.two_planes`, `construct.axis.two_points`, `construct.axis.edge`, `construct.point.vertex`, `construct.point.two_edges`, `construct.point.three_planes`, `construct.point.center`, `construct.point.edge_plane`, `construct.point.along_path`, `construct.plane.midplane`, `construct.plane.two_edges`, `construct.plane.three_points`, `construct.plane.tangent`, `construct.plane.along_path`, `construct.plane.perpendicular` |
-| SOLID / CREATE | ASSEMBLE / JOINTS | `joint.origin` |
-| SOLID / CREATE | MODEL / ARRANGE | `solid.pattern.rectangular`, `solid.pattern.circular`, `solid.pattern.path`, `solid.mirror` |
-| SOLID / CREATE | MODEL / CREATE | `solid.extrude`, `solid.revolve`, `solid.sweep`, `solid.loft`, `solid.box`, `solid.cylinder`, `solid.sphere`, `solid.torus`, `solid.hole`, `solid.pipe`, `solid.bounding_solid`, `solid.thread`, `solid.boundary_fill`, `solid.coil`, `solid.rib`, `solid.web`, `solid.emboss`, `frame.member` |
-| SOLID / CREATE | MODEL / SKETCH | `sketch.create` |
-| SOLID / INSERT | INSERT / FILES | `file.insert_step`, `file.insert_mesh` |
-| SOLID / INSERT | INSERT / LIBRARY | `parts.fastener` |
-| SOLID / INSPECT | INSPECT / CHECK | `inspect.interference` |
-| SOLID / INSPECT | INSPECT / MEASURE | `inspect.measure` |
-| SOLID / INSPECT | INSPECT / SECTION | `inspect.section` |
-| SOLID / MODIFY | MANAGE / DESIGN | `timeline.compute_all` |
-| SOLID / MODIFY | MANAGE / MATERIALS | `appearance.assign`, `material.assign` |
-| SOLID / MODIFY | MANAGE / PARAMETERS | `parameters.change` |
-| SOLID / MODIFY | MODEL / ARRANGE | `solid.move`, `solid.align` |
-| SOLID / MODIFY | MODEL / MODIFY | `solid.fillet`, `solid.chamfer`, `solid.combine`, `solid.scale`, `solid.offset_face`, `solid.shell`, `solid.draft`, `solid.split_face`, `solid.split_body`, `solid.press_pull`, `solid.replace_face`, `solid.remove`, `timeline.delete`, `face.delete` |
-| SOLID / POSITION | ASSEMBLE / POSITION | `component.capture_position`, `component.revert_position` |
-| SURFACE / CREATE | SURFACE / CONVERT | `surface.thicken` |
-| SURFACE / CREATE | SURFACE / CREATE | `surface.boundary`, `surface.patch`, `surface.extrude`, `surface.revolve`, `surface.sweep`, `surface.loft`, `surface.offset`, `surface.ruled`, `surface.blend` |
-| SURFACE / INSPECT | INSPECT / SURFACE QUALITY | `inspect.continuity` |
-| SURFACE / MODIFY | SURFACE / EDIT | `surface.stitch`, `surface.extend`, `surface.trim`, `surface.untrim`, `surface.unstitch`, `surface.reverse_normal`, `surface.fair`, `surface.fillet`, `surface.match` |
+| Registry tab / panel | Ribbon tab / section |
+|---|---|
+| SOLID / CREATE | MODEL / CREATE |
+| SOLID / MODIFY | MODEL / MODIFY |
+| SOLID / CONSTRUCT | MODEL / WORK FEATURES |
+| SOLID / ASSEMBLE | ASSEMBLE / RELATIONSHIPS |
+| SOLID / POSITION | ASSEMBLE / POSITION |
+| SOLID / CONFIGURE | MANAGE / AUTHOR |
+| SOLID / INSPECT | INSPECT / ANALYSIS |
+| SOLID / INSERT | MODEL / INSERT |
+| SURFACE / CREATE | MODEL / SURFACE |
+| SURFACE / MODIFY | MODEL / SURFACE |
+| SURFACE / INSPECT | INSPECT / ANALYSIS |
+| SKETCH / CREATE | SKETCH / CREATE |
+| SKETCH / MODIFY | SKETCH / MODIFY |
+| SKETCH / PATTERN | SKETCH / PATTERN |
+| SKETCH / CONSTRAINTS | SKETCH / CONSTRAIN |
+| SKETCH / INSERT | SKETCH / INSERT |
+| SKETCH / INSPECT | INSPECT / ANALYSIS |
+| SKETCH / FINISH SKETCH | SKETCH / EXIT |
+| SHEET METAL / CREATE | SHEET METAL / CREATE |
+| SHEET METAL / MODIFY | SHEET METAL / MODIFY |
+| PLASTIC / CREATE | MODEL / PLASTIC PART |
+| PLASTIC / SETUP | MANAGE / STYLES AND STANDARDS |
+| MESH / MODIFY | MODEL / INSERT |
+| RENDER / SCENE | RENDER / SCENE |
+| RENDER / IMAGE | RENDER / IMAGE |
 
-## Placement decisions and missing commands
+## Placement decisions
 
-- Save As Mesh (`file.save_mesh`), previously MESH / MODIFY, is in INSERT / FILES. The existing File menu continues to offer it.
-- The selection filter, previously in SELECT on multiple tabs including UTILITIES, is in VIEW / SELECT. This is a populated control group, although it has no command ids.
-- MODEL’s Pattern button uses the existing `solid.pattern.rectangular` command; Circular and Path stay in its menu. No generic pattern command is registered.
-- There is no separate New 3D Sketch command. MODEL / SKETCH lists the existing 3D line, spline, point and move-point commands. Infinite Line (`sketch.infinite`) is in SKETCH / CREATE.
-- Physical Properties maps to the existing `component.properties` command. Material data checks map to `material.properties.validate`. Calibrate maps to the existing canvas editor (`canvas.edit`).
-- VIEW / VIEWS lists the existing named-view and navigation commands. Display, Show, Agent and Window are omitted: their requested settings have no engine commands. No Fit or Orientation commands were invented.
-- RENDER / IMAGE exposes the already registered `render.start`, which previously had no visible panel. The Render workspace and its existing SCENE command are preserved.
-- Constrain is the gallery exception to the four-promoted-button cap: the large Dimension button is followed by a 3 × 2 icon-only constraint gallery (Horizontal/Vertical, Coincident, Tangent; Equal, Parallel, Perpendicular). Every command remains in the section list and saved pins still apply.
+- 3D Model mirrors Inventor's part tab panel for panel: Sketch, Primitives, Create, Modify, Explore, Work
+  Features, Pattern, Surface, Plastic Part, Convert, Parameters, Measure, Insert. SolidCraft's former SURFACE
+  and INSERT tabs are panels here, as in Inventor.
+- Modify holds Inventor's placed features first (Hole, Fillet, Chamfer, Shell, Draft, Thread), then the body
+  and face edits. Its menu is grouped: Placed features, Bodies, Faces.
+- Work Features promotes one Plane, one Axis and one Point command; the other construction commands are in
+  the menu under Plane, Axis and Point headings.
+- Assemble follows Inventor's assembly tab: Component (Place, Create), Position, Relationships (joints, with
+  Drive and Motion Link), Pattern, Productivity (motion study, trace, explode, contact sets), Manage
+  (iProperties, links) and Work Features.
+- Inspect has Measure, Interference and Analysis (zebra, draft, surface and curvature analysis, section
+  view, and SolidCraft's dependency and document inspectors).
+- Manage has Update, Parameters, Styles and Standards (materials, appearances, document settings, sheet-metal
+  and plastic rules), Insert, Author (configurations as Inventor's iParts) and Content Center (parts library).
+- Sketch follows Inventor's sketch tab: Create (with Project Geometry and the other reference commands),
+  Modify, Pattern, Constrain, Insert, Format (construction and centreline), Parameters and Exit. The Exit
+  panel stays last and is kept room for at every width.
+- Sheet Metal has Sketch, Create, Modify (unfold, refold, convert), Flat Pattern, Setup (sheet-metal
+  defaults) and Parameters.
+- Constrain is the gallery exception to the four-promoted-button cap: the large Dimension button is followed by
+  a 3 × 2 icon-only constraint gallery. Every command remains in the section list and saved pins still apply.
+- Browser names follow Inventor too: the Origin folder lists the XY, XZ and YZ planes, the X, Y and Z axes and
+  the Center Point; bodies are under Solid Bodies and construction geometry under Work Features.
 
 ## Saved customizations
 
-Legacy toolbar preferences are plain maps keyed by `DESIGN/<tab>/<panel>`. On load, known keys migrate using the same command destinations. Previously promoted buttons absent from a saved list remain removed. Merging panels retains saved order within each source; sources merge in sorted-key order, and duplicates are removed. New promoted defaults are retained unless an old saved removal applies. Unknown keys and unknown command ids are preserved. An existing new destination takes precedence over a legacy destination.
-
-Preferences and shortcut exports now wrap the map as `{"version":2,"panels":{...}}`. The version prevents repeated migration of unchanged SKETCH, SURFACE and SHEET METAL keys. Legacy imports still migrate. Reset restores the new defaults.
-
-Additional old panels used for shared layouts migrate as follows: SELECT on any old tab → VIEW / SELECT; ASSEMBLE → ASSEMBLE / JOINTS; CONSTRUCT → MODEL / CONSTRUCT; INSPECT → INSPECT / CHECK; INSERT → INSERT / FILES; PLASTIC / MODIFY → MODEL / MODIFY; MESH / CREATE or PREPARE → SURFACE / CONVERT; UTILITIES / MAKE, ADD-INS or UTILITY → MANAGE / DESIGN. Command-id destinations override these panel defaults.
+Toolbar preferences are plain maps keyed by `DESIGN/<tab>/<panel>`. On load, keys from SolidCraft's Fusion-style
+layout migrate using the same command destinations (`workspace::legacy_destination`). Previously promoted buttons
+absent from a saved list remain removed. Merging panels retains saved order within each source; sources merge in
+sorted-key order, and duplicates are removed. Unknown keys and unknown command ids are preserved.
 
 ## Automation handles
 
-The tab handle form stays `tab:<UPPERCASE NAME>`. Added: `tab:MODEL`, `tab:ASSEMBLE`, `tab:INSERT`, `tab:INSPECT`, `tab:MANAGE`, `tab:VIEW`. SURFACE and RENDER retain their names; SKETCH is available only in context; SHEET METAL is always available. Legacy aliases remain: `tab:SOLID` and `tab:PLASTIC` → MODEL; `tab:MESH` → SURFACE; `tab:UTILITIES` → MANAGE. The Home and document-tab handles are unchanged.
+The tab handle form stays `tab:<UPPERCASE ID>`: `tab:MODEL`, `tab:ASSEMBLE`, `tab:INSPECT`, `tab:MANAGE`,
+`tab:VIEW`, `tab:SHEET METAL`, contextual `tab:SKETCH`, workspace `tab:RENDER`. Legacy aliases remain:
+`tab:SOLID`, `tab:PLASTIC`, `tab:SURFACE`, `tab:MESH` and `tab:INSERT` → MODEL; `tab:UTILITIES` → MANAGE.
 
-Section labels retain `panel:<tab>:<section>` and collapsed sections retain `collapsed:<tab>:<section>`, with destinations from the tables above. In particular, `panel:SOLID:CREATE` becomes `panel:MODEL:CREATE`, selection-filter panels become `panel:VIEW:SELECT`, and `panel:SKETCH:CONSTRAINTS` becomes `panel:SKETCH:CONSTRAIN`. Command button and menu handles keep their command ids.
+Section labels are `panel:<tab>:<section>` (for example `panel:MODEL:WORK FEATURES`, `panel:SKETCH:EXIT`) and
+collapsed sections `collapsed:<tab>:<section>`. Command button and menu handles keep their command ids.
 
 ## Docked ribbon painting
 
